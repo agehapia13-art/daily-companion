@@ -276,11 +276,15 @@ function buildDailyBriefingText() {
   // 4. タスク (本日期限の未完了タスク)
   const tasks = getTasks('未完了');
   const todayTasks = tasks.filter(t => t.dueDate === todayStr);
-  let taskLine = '・タスク: ';
+  let taskLine = '';
   if (todayTasks.length > 0) {
-    taskLine += todayTasks.map(t => t.title).join(' / ');
+    if (todayTasks.length === 1) {
+      taskLine = `・タスク: ${formatTaskTitleWithBadge(todayTasks[0].title)}`;
+    } else {
+      taskLine = `・タスク (${todayTasks.length}件):\n` + todayTasks.map(t => `  - ${formatTaskTitleWithBadge(t.title)}`).join('\n');
+    }
   } else {
-    taskLine += '本日期限の重要タスクはありません';
+    taskLine = '・タスク: 本日期限の重要タスクはありません';
   }
 
   return `━━━━━━━━━━━━━━\n☀️ 本日のデイリーブリーフィング\n${weatherLine}\n${pressureLine}\n${scheduleLine}\n${taskLine}\n━━━━━━━━━━━━━━`;

@@ -149,6 +149,30 @@ function getTasks(filterStatus) {
 }
 
 /**
+ * タスクタイトルをバッジ風表示 [プレフィックス] タイトル に整形
+ * （コロン重複 ": コスメ：" を防止し、視認性を高める）
+ * 例: "コスメ：ファンデーションの確認" -> "[コスメ] ファンデーションの確認"
+ * @param {string} title
+ * @return {string}
+ */
+function formatTaskTitleWithBadge(title) {
+  if (!title) return '';
+  const trimmed = title.trim();
+  if (/^\[[^\]]+\]/.test(trimmed)) {
+    return trimmed;
+  }
+  const colonMatch = trimmed.match(/^([^：:]+)[：:]\s*(.*)$/);
+  if (colonMatch) {
+    const prefix = colonMatch[1].trim();
+    const taskBody = colonMatch[2].trim();
+    if (taskBody) {
+      return `[${prefix}] ${taskBody}`;
+    }
+  }
+  return trimmed;
+}
+
+/**
  * Geminiレスポンスに基づくタスク操作を適用
  * @param {Array<Object>} actions
  * @return {Array<string>} 適用結果のメッセージリスト
@@ -167,7 +191,8 @@ function applyTaskActions(actions) {
       const taskId = 'T_' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmmss') + '_' + Math.floor(Math.random() * 1000);
       const dueDate = act.due_date || '';
       sheet.appendRow([taskId, act.title, dueDate, '未完了', todayStr, '', '']);
-      results.push(`📝 タスク追加: ${act.title}${dueDate ? ` (期限: ${dueDate})` : ''}`);
+      const formattedTitle = formatTaskTitleWithBadge(act.title);
+      results.push(`📝 タスク追加: ${formattedTitle}${dueDate ? ` (期限: ${dueDate})` : ''}`);
     } else if (act.action === 'complete') {
       const tasks = getTasks();
       for (let j = 0; j < tasks.length; j++) {
@@ -178,7 +203,8 @@ function applyTaskActions(actions) {
           if (matchById || matchByTitle) {
             sheet.getRange(t.rowIndex, 4).setValue('完了');
             sheet.getRange(t.rowIndex, 6).setValue(todayStr);
-            results.push(`✅ タスク完了: ${t.title}`);
+            const formattedTitle = formatTaskTitleWithBadge(t.title);
+            results.push(`✅ タスク完了: ${formattedTitle}`);
             break;
           }
         }
@@ -191,7 +217,8 @@ function applyTaskActions(actions) {
         const matchByTitle = act.title && t.title.includes(act.title);
         if (matchById || matchByTitle) {
           sheet.getRange(t.rowIndex, 4).setValue('破棄');
-          results.push(`🗑️ タスク破棄: ${t.title}`);
+          const formattedTitle = formatTaskTitleWithBadge(t.title);
+          results.push(`🗑️ タスク破棄: ${formattedTitle}`);
           break;
         }
       }

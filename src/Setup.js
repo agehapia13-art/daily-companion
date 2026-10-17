@@ -226,3 +226,15 @@ function setupLineRichMenuFromSetup() {
   setupLineRichMenu();
 }
 
+/**
+ * 手動テスト用: デイリーブリーフィングの生成結果をログ出力して確認
+ * 本日の天気・気圧・予定（カレンダー）・タスクが正しく組み立てられるかをテストします
+ */
+function testDailyBriefingOutput() {
+  Logger.log('=== デイリーブリーフィング生成テスト開始 ===');
+  const briefing = buildDailyBriefingText();
+  Logger.log('\n' + briefing);
+  Logger.log('=== デイリーブリーフィング生成テスト完了 ===');
+}
+
+

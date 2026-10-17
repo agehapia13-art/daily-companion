@@ -1,0 +1,15 @@
+{
+  "name": "resilient-noether",
+  "version": "1.0.0",
+  "description": "サウンドディレクター専属の生活管理秘書兼伴走者として、LINE・Google Apps Script (GAS)・Gemini 3.8 Flash・Googleスプレッドシート・Googleカレンダー・Notion API・Open-Meteoを完全統合したパーソナル自動化システムです。",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@google/clasp": "^3.4.1"
+  }
+}

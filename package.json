@@ -4,7 +4,9 @@
   "description": "サウンドディレクター専属の生活管理秘書兼伴走者として、LINE・Google Apps Script (GAS)・Gemini 3.8 Flash・Googleスプレッドシート・Googleカレンダー・Notion API・Open-Meteoを完全統合したパーソナル自動化システムです。",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "check": "node -e 'const fs=require(\"fs\"), {execSync}=require(\"child_process\"); fs.readdirSync(\"src\").filter(f=>f.endsWith(\".js\")).forEach(f=>execSync(`node -c src/${f}`)); console.log(\"✅ All src/*.js syntax OK\");'",
+    "build:dashboard": "node scripts/build-dashboard.js",
+    "push": "npx clasp push --force"
   },
   "keywords": [],
   "author": "",

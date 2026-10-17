@@ -66,12 +66,9 @@
 ├── .clasp.json           # clasp設定 (rootDir: "src", Git管理対象外)
 ├── appsscript.json       # タイムゾーン (Asia/Tokyo) およびV8ランタイム設定
 ├── docs/
-│   ├── index.html        # GitHub Pages配信用ダッシュボードSPA (scripts/bundle.jsで自動生成)
+│   ├── index.html        # GitHub Pages配信用ダッシュボードSPA (scripts/build-dashboard.jsで自動生成)
 │   └── .nojekyll         # GitHub Pages高速配信用設定
-├── bundle/
-│   ├── Code.js           # 構文チェック＆全機能バックアップ用統合コード (主運用は src/ からの clasp push)
-│   └── appsscript.json   # bundle配下のマニフェストコピー
-├── src/                  # ★GAS本体コード (clasp push でGASプロジェクトへファイル分割のまま直接同期)
+├── src/                  # ★GAS本体コード (全機能のマスター。clasp push でGASへファイル分割同期)
 │   ├── appsscript.json   # GASデプロイ用マニフェスト
 │   ├── Config.js         # 設定・Script Properties検証・定数・家族カレンダー設定
 │   ├── Spreadsheet.js    # 全6タブ操作・マルチターン履歴・タスクID・用語辞書フィルタ・真偽値正規化
@@ -85,7 +82,7 @@
 │   ├── Webhook.js        # doPost (LINE Webhook & ダッシュボードJSON API) & doGet
 │   └── Setup.js          # 手動実行・設定・テスト専用（シート初期化・タイマー登録・リッチメニュー登録・各テスト）
 ├── scripts/
-│   └── bundle.js         # src/*.js から bundle/Code.js と docs/index.html を同時自動生成するスクリプト
+│   └── build-dashboard.js # src/Dashboard.js から docs/index.html を自動生成するスクリプト
 └── README.md
 ```
 
@@ -138,23 +135,27 @@ Google Apps Script プロジェクトの「プロジェクトの設定」>「ス
 
 ## 🛠️ 開発・デプロイ運用ルール
 
-### 1. 開発とコードプッシュ（Antigravity / AI担当）
+### 1. 開発とコード反映フロー（Antigravity / AI担当）
 
-本プロジェクトは `src/` 配下の各ファイル（`Config.js`, `Webhook.js` 等）をGASプロジェクト上へ**ファイル分割のまま直接同期**しています。
+本プロジェクトは **全コードをGit（GitHub）で一元管理** し、GASへは `clasp push` で直接同期します。
+コード修正時は、常に以下のワンストップフローで構文チェック・GAS反映・Git保存を行います：
 
 ```bash
-# 1. 変更をバンドルファイル(bundle/Code.js)およびGitHub Pages(docs/index.html)へビルドし構文チェック
-node scripts/bundle.js && node -c bundle/Code.js
+# 1. src/ 配下の全ファイル構文チェック
+npm run check
 
-# 2. clasp でGASプロジェクトへコードを直接プッシュ (ファイル分割のまま同期)
-npx clasp push --force
+# 2. clasp でGASプロジェクトへコードを直接プッシュ (src/ 配下をファイル分割のまま同期)
+npm run push   # (npx clasp push --force)
 
-# 3. GitHub Pagesへ最新のフロントエンドをプッシュ
-git add . && git commit -m "update code and frontend" && git push origin main
+# 3. (ダッシュボード画面変更時のみ) docs/index.html を再ビルド
+npm run build:dashboard
+
+# 4. GitHubへ最新コードと変更履歴を保存（毎回必ずコミット＆プッシュ）
+git add . && git commit -m "feat/fix: 変更内容の概要" && git push origin main
 ```
 
 > [!IMPORTANT]
-> **権限承認の都合上、AI側は `clasp push`（コード反映）までを実施し、デプロイコマンドは実行しません。**
+> **権限承認の都合上、AI側は `clasp push`（コード反映）および `git push`（リポジトリ保存）までを実施し、GASのデプロイコマンドは実行しません。**
 
 ### 2. GASエディタ側でのデプロイ更新（ユーザー手動担当）
 

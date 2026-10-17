@@ -969,27 +969,36 @@
 
     function normalizeLiffId(raw) {
       if (!raw) return '';
-      return String(raw).trim()
-        .replace(/^https?://liff.line.me//i, '')
-        .replace(/^https?://miniapp.line.me//i, '')
-        .split('?')[0]
-        .replace(//+$/, '');
+      var s = String(raw).trim();
+      var liffPrefix = 'https://liff.line.me/';
+      var miniPrefix = 'https://miniapp.line.me/';
+      if (s.indexOf(liffPrefix) === 0) s = s.substring(liffPrefix.length);
+      if (s.indexOf(miniPrefix) === 0) s = s.substring(miniPrefix.length);
+      s = s.split('?')[0];
+      while (s.charAt(s.length - 1) === '/') s = s.slice(0, -1);
+      return s;
     }
 
     function getEffectiveParams() {
-      const result = {};
-      const parseQuery = (qStr) => {
+      var result = {};
+      var parseQuery = function(qStr) {
         if (!qStr) return;
-        const clean = qStr.startsWith('?') ? qStr.substring(1) : qStr.replace(/^[/#]+/, '');
-        const sp = new URLSearchParams(clean);
-        for (const [k, v] of sp.entries()) {
+        var clean = qStr;
+        while (clean.charAt(0) === '?' || clean.charAt(0) === '/' || clean.charAt(0) === '#') {
+          clean = clean.substring(1);
+        }
+        var sp = new URLSearchParams(clean);
+        var entries = Array.from(sp.entries());
+        for (var i = 0; i < entries.length; i++) {
+          var k = entries[i][0];
+          var v = entries[i][1];
           if (v && !result[k]) {
             result[k] = v;
           }
         }
-        const nested = sp.get('liff.state');
+        var nested = sp.get('liff.state');
         if (nested) {
-          const qIdx = nested.indexOf('?');
+          var qIdx = nested.indexOf('?');
           if (qIdx >= 0) {
             parseQuery(nested.substring(qIdx + 1));
           } else {
@@ -999,7 +1008,7 @@
       };
 
       parseQuery(window.location.search);
-      if (window.location.hash && window.location.hash.includes('=')) {
+      if (window.location.hash && window.location.hash.indexOf('=') >= 0) {
         parseQuery(window.location.hash);
       }
       return result;
@@ -1209,10 +1218,28 @@
       loadData();
     }
 
+    window.addEventListener('error', function(e) {
+      var lv = document.getElementById('loadingView');
+      if (lv) lv.style.display = 'none';
+      console.error('Global error:', e.error || e.message);
+    });
+
     function loadData() {
       document.getElementById('loadingView').style.display = 'block';
+      var finished = false;
+      var timeoutId = setTimeout(function() {
+        if (!finished) {
+          finished = true;
+          document.getElementById('loadingView').style.display = 'none';
+          showAuthForm('タイムアウト: サーバーからの応答がありません。GASのWebアプリURLが最新版でデプロイされているかご確認ください。');
+        }
+      }, 15000);
+
       callServerApi('apiGetDashboardData', state.authKey)
-        .then(res => {
+        .then(function(res) {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timeoutId);
           document.getElementById('loadingView').style.display = 'none';
           if (!res || !res.authorized) {
             showAuthForm((res && res.error) ? res.error : '認証に失敗しました');
@@ -1223,22 +1250,25 @@
             localStorage.setItem('companion_auth_key', res.validKey);
           }
           if (res.liffId) {
-            const cleanId = normalizeLiffId(res.liffId);
+            var cleanId = normalizeLiffId(res.liffId);
             if (cleanId && cleanId !== state.liffId) {
               state.liffId = cleanId;
               localStorage.setItem('companion_liff_id', cleanId);
-              const lp = initLiff();
-              if (lp) lp.catch(() => {});
+              var lp = initLiff();
+              if (lp) lp.catch(function() {});
             } else if (cleanId && !isLiffReady) {
-              const lp = initLiff();
-              if (lp) lp.catch(() => {});
+              var lp = initLiff();
+              if (lp) lp.catch(function() {});
             }
           }
           document.getElementById('authSection').style.display = 'none';
           state.data = res;
           renderAll();
         })
-        .catch(err => {
+        .catch(function(err) {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timeoutId);
           document.getElementById('loadingView').style.display = 'none';
           showAuthForm('通信エラー: ' + (err.message || err));
           showToast('読み込みエラー: ' + (err.message || err));

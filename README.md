@@ -69,9 +69,9 @@
 │   ├── index.html        # GitHub Pages配信用ダッシュボードSPA (scripts/bundle.jsで自動生成)
 │   └── .nojekyll         # GitHub Pages高速配信用設定
 ├── bundle/
-│   ├── Code.js           # GAS Webエディタにコピペ一発で貼れる完全統合コード (全機能・省略ゼロ)
+│   ├── Code.js           # 構文チェック＆全機能バックアップ用統合コード (主運用は src/ からの clasp push)
 │   └── appsscript.json   # bundle配下のマニフェストコピー
-├── src/
+├── src/                  # ★GAS本体コード (clasp push でGASプロジェクトへファイル分割のまま直接同期)
 │   ├── appsscript.json   # GASデプロイ用マニフェスト
 │   ├── Config.js         # 設定・Script Properties検証・定数・家族カレンダー設定
 │   ├── Spreadsheet.js    # 全6タブ操作・マルチターン履歴・タスクID・用語辞書フィルタ・真偽値正規化
@@ -138,26 +138,31 @@ Google Apps Script プロジェクトの「プロジェクトの設定」>「ス
 
 ## 🛠️ 開発・デプロイ運用ルール
 
-### 1. コードの同期とGASへの反映（Antigravity連携）
+### 1. 開発とコードプッシュ（Antigravity / AI担当）
 
-プロジェクトは `src/` 配下の複数ファイル（`Setup.gs`, `Dashboard.gs` など）でGASと1対1で完全同期されます。
+本プロジェクトは `src/` 配下の各ファイル（`Config.js`, `Webhook.js` 等）をGASプロジェクト上へ**ファイル分割のまま直接同期**しています。
 
 ```bash
 # 1. 変更をバンドルファイル(bundle/Code.js)およびGitHub Pages(docs/index.html)へビルドし構文チェック
 node scripts/bundle.js && node -c bundle/Code.js
 
-# 2. clasp でGASプロジェクトへコードを直接プッシュ
+# 2. clasp でGASプロジェクトへコードを直接プッシュ (ファイル分割のまま同期)
 npx clasp push --force
 
 # 3. GitHub Pagesへ最新のフロントエンドをプッシュ
-git add . && git commit -m "update dashboard frontend" && git push origin main
+git add . && git commit -m "update code and frontend" && git push origin main
 ```
 
-### 2. GASエディタ側でのデプロイ更新
+> [!IMPORTANT]
+> **権限承認の都合上、AI側は `clasp push`（コード反映）までを実施し、デプロイコマンドは実行しません。**
 
-GAS側へコードが反映されたら、Webアプリのバージョンを更新します：
+### 2. GASエディタ側でのデプロイ更新（ユーザー手動担当）
+
+Googleアカウントの権限設定・スコープ承認が必要となるため、**コードプッシュ後のWebアプリのデプロイ（新バージョン発行）はユーザー自身がGASエディタ上で行います**：
+
 1. GASエディタ右上の **「デプロイ」＞「デプロイを管理」** を開く。
 2. 鉛筆マーク（編集）を押し、バージョンを **「新バージョン」**、アクセスできるユーザーを **「全員」** にして「デプロイ」を押す。
+3. （必要に応じて初回やスコープ追加時）アクセス権限の承認画面が出た場合は承認を完了する。
 
 ### 3. LINE Developers (LIFF) 設定
 

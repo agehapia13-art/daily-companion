@@ -5560,12 +5560,7 @@ function buildDailyBriefingText() {
   if (todayEvents.length > 0) {
     scheduleLine += todayEvents.join(' / ');
   } else {
-    const rolling = memory.rolling_memory || '';
-    if (rolling.includes('フルリモート') || rolling.includes('在宅')) {
-      scheduleLine += '終日フルリモート作業（カレンダー登録なし）';
-    } else {
-      scheduleLine += 'カレンダーの登録予定なし（終日フリー）';
-    }
+    scheduleLine += 'カレンダーの登録予定なし（終日フリー）';
   }
 
   // 4. タスク (本日期限の未完了タスク)

@@ -44,14 +44,18 @@
    - ルーティンタスクの重複生成防止ガード（同名タスクが未完了の場合はスキップ）。
    - 毎月1日には前月日報を自動集約し、月間ハイライト・思い出ジャーナルをNotion月報DBへ投稿。
 10. **生活伴走Webダッシュボード（GitHub Pages × LIFF × LINEリッチメニュー）**
-    - **スプレッドシートの`logs`以外（全5タブ）をスマホでチェック・操作できる専用Web画面**:
+    - **スプレッドシートの`logs`以外（全5タブ）をスマホで直感操作できる専用SPA**:
       - 🌿 **タスク**: 未完了タスクを全件一覧表示。プレフィックス（プロジェクト）ごとに自動グループ化し、各グループ内は**直近の締め切り順**で優先表示。「📂 グループ別」と「📅 締切順一覧」のワンタップ切り替えや、長期タスクの「🌱 登録から○日」バッジ表示、完了時の「元に戻す」トースト通知。
       - 🛒 **買い物**: カテゴリ別未買リスト、ワンタップ購入済チェック、クイック追加。
       - 💡 **ストック**: 映画・音楽・本・ゲーム等の未消化作品一覧、消化チェック、新規追加。
       - 🔄 **周期・記憶**: 美容院や弦交換などの「あれから○日経過」と「✨ 今日やった」ワンタップ更新、定期ルーティン一覧、およびAIの『用語辞書』『プロフィール』『最近の関心・ログ』『体調・睡眠サマリー』の閲覧と直接編集。
-    - **GitHub Pages × LIFF 連携によるネイティブ体験**:
-      - フロントエンド（`docs/index.html`）を **GitHub Pages** 上でホストし、裏側のデータ読み書きのみGASのJSON APIと通信する構成により、GAS特有の警告バナーや二重iframe制限を完全解消。
-      - ダッシュボード上でタスク完了・買い物購入・インプット消化・周期メンテナンスを実施すると、LIFF（`liff.sendMessages`）を通じて**LINEトーク画面にあなた自身の緑の吹き出しで自動発言**され、AIの返信と当日ログ（`logs`シート）へ自然に記録されます。
+    - **GitHub Pages × LIFF 連携によるネイティブアプリ体験**:
+      - **公開URL**: `https://agehapia13-art.github.io/daily-companion/`
+      - **GitHubリポジトリ**: `https://github.com/agehapia13-art/daily-companion`
+      - フロントエンド（`docs/index.html`）を **GitHub Pages** 上でホストし、裏側のデータ読み書きのみGASのJSON APIと通信する構成。
+      - GAS特有の「このアプリケーションはGoogle Apps Scriptのユーザーによって…」という上部警告バーや二重iframe隔離制限を完全解消。
+      - **LINEトーク画面への自動発言**: ダッシュボード上でタスク完了・買い物購入・インプット消化・周期メンテナンスを実施すると、LIFF（`liff.sendMessages`）を通じて**LINEトーク画面にあなた自身の緑の吹き出しで自動発言**され、AIの返信とともに当日ログ（`logs`シート）へ自然に記録。
+      - **自動パラメータ引き渡し＆フォールバック**: リッチメニューから開くと `tab`, `key`, `liffId`, `api` が自動引き渡しされ `localStorage` に記憶。万が一のGASコールドスタートや通信不調時も、15秒タイムアウト判定とエラー境界により永久スピナー停止を防止。
 
 ---
 
@@ -81,7 +85,7 @@
 │   ├── Webhook.js        # doPost (LINE Webhook & ダッシュボードJSON API) & doGet
 │   └── Setup.js          # 手動実行・設定・テスト専用（シート初期化・タイマー登録・リッチメニュー登録・各テスト）
 ├── scripts/
-│   └── bundle.js         # src/*.js から bundle/Code.js と docs/index.html を自動生成するスクリプト
+│   └── bundle.js         # src/*.js から bundle/Code.js と docs/index.html を同時自動生成するスクリプト
 └── README.md
 ```
 
@@ -106,8 +110,8 @@ Google Apps Script プロジェクトの「プロジェクトの設定」>「ス
 | `WORK_LATITUDE` | - | 職場（渋谷区）の緯度（任意） | `35.6580` |
 | `WORK_LONGITUDE` | - | 職場（渋谷区）の経度（任意） | `139.7016` |
 | `FAMILY_CALENDAR_ID` | - | 家族共用GoogleカレンダーのID（任意） | カレンダー設定の「カレンダーID」（「♪」付き予定を安全に読み取り参照） |
-| `WEBAPP_URL` | - | デプロイしたGASウェブアプリのURL（任意） | `https://script.google.com/macros/s/.../exec`（リッチメニュー登録等に使用） |
-| `LIFF_ID` | - | LINE Front-end Framework の LIFF ID（任意） | `200...-xxxx`（ユーザー名義でのトーク自動発言・ハーフモーダル起動に使用） |
+| `WEBAPP_URL` | - | デプロイしたGASウェブアプリのURL | `https://script.google.com/macros/s/.../exec`（GitHub PagesからのAPI接続やリッチメニュー登録に使用） |
+| `LIFF_ID` | - | LINE Front-end Framework の LIFF ID | `200...-xxxx`（ユーザー名義でのトーク自動発言・リッチメニュー連携に使用） |
 
 ---
 
@@ -139,11 +143,14 @@ Google Apps Script プロジェクトの「プロジェクトの設定」>「ス
 プロジェクトは `src/` 配下の複数ファイル（`Setup.gs`, `Dashboard.gs` など）でGASと1対1で完全同期されます。
 
 ```bash
-# 1. 変更をバンドルファイルに反映し構文チェック
+# 1. 変更をバンドルファイル(bundle/Code.js)およびGitHub Pages(docs/index.html)へビルドし構文チェック
 node scripts/bundle.js && node -c bundle/Code.js
 
 # 2. clasp でGASプロジェクトへコードを直接プッシュ
 npx clasp push --force
+
+# 3. GitHub Pagesへ最新のフロントエンドをプッシュ
+git add . && git commit -m "update dashboard frontend" && git push origin main
 ```
 
 ### 2. GASエディタ側でのデプロイ更新
@@ -152,14 +159,25 @@ GAS側へコードが反映されたら、Webアプリのバージョンを更�
 1. GASエディタ右上の **「デプロイ」＞「デプロイを管理」** を開く。
 2. 鉛筆マーク（編集）を押し、バージョンを **「新バージョン」**、アクセスできるユーザーを **「全員」** にして「デプロイ」を押す。
 
-### 3. 初期設定・手動操作（`Setup.gs`）
+### 3. LINE Developers (LIFF) 設定
+
+1. LINE Developers コンソールの **LINEログインチャネル** ＞ **「LIFF」タブ** を開く。
+2. **エンドポイントURL**:
+   `https://agehapia13-art.github.io/daily-companion/`
+3. **Scopes**:
+   `chat_message.write`, `profile`（または `openid`）にチェック。
+4. **モジュールモード**:
+   オフのままで正常動作します。
+
+### 4. 初期設定・手動操作（`Setup.gs`）
 
 手動で実行したい設定やテストは、すべて **`Setup.gs`** を開けば一番上に揃っています：
 
 - `setupSpreadsheet`: スプレッドシートの全6タブとヘッダーを自動初期化
 - `setupTriggers`: 毎日午前3時の深夜バッチタイマートリガーを自動登録
-- `setupLineRichMenuFromSetup`: LINEトーク画面下部に4分割リッチメニューを自動登録・有効化
+- `setupLineRichMenuFromSetup`: LINEトーク画面下部に4分割リッチメニューを自動登録・有効化（GitHub PagesおよびLIFF URLを自動構成）
 - `testWebhookSimulation`: LINE受信テスト
 - `testWebSearchSimulation`: Web検索テスト
 - `testMidnightBatchSimulation`: 深夜バッチ手動実行テスト
 - `testMemoryLifecycleSimulation`: 記憶代謝テスト
+

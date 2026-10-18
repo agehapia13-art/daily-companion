@@ -78,7 +78,19 @@ function getCondensedTodayLogs() {
     const prefix = timeStr ? `${timeStr} ` : '';
     lines.push(`${prefix}User: ${log.message.trim()}`);
     if (log.aiReply && log.aiReply.trim()) {
-      lines.push(`AI: ${log.aiReply.trim()}`);
+      // 朝ブリーフィング枠および末尾の機械的DB操作通知行を除去して純粋な会話応答のみを保持（トークン節約＆模倣誤爆防止）
+      let cleanedReply = log.aiReply
+        .replace(/━━━━━━━━━━━━━━\s*☀️\s*本日のデイリーブリーフィング[\s\S]*$/, '')
+        .split('\n')
+        .filter(line => {
+          const trimmed = line.trim();
+          return trimmed !== '' && !/^(📝\s*タスク追加|📝\s*タスク更新|✅\s*タスク完了|🗑️\s*タスク破棄|📅\s*カレンダー|🛒\s*買物|🎬\s*インプット|🔄\s*ルーティン)/.test(trimmed);
+        })
+        .join(' ')
+        .trim();
+      if (cleanedReply) {
+        lines.push(`AI: ${cleanedReply}`);
+      }
     }
   }
 
@@ -652,10 +664,11 @@ function filterRelevantDictionaryEntries(dictionaryText, queryText) {
 
 /**
  * Geminiへ送信用にスプレッドシートの現在状態を高密度テキスト（トークン最小化）として抽出
- * @param {string=} queryText ユーザー発言等の判定対象テキスト（渡された場合は関連辞書のみオンデマンド抽出）
+ * @param {string=} queryText ユーザー発言等の判定対象テキスト
+ * @param {string=} todayLogsText 本日の会話履歴テキスト（辞書抽出の対象に含める）
  * @return {string}
  */
-function getSpreadsheetContext(queryText) {
+function getSpreadsheetContext(queryText, todayLogsText) {
   const now = new Date();
   const nowStr = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd(E) HH:mm');
   const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -675,17 +688,15 @@ function getSpreadsheetContext(queryText) {
   context += `【天気・気温】: ${weatherDisplay}\n`;
   context += `【気圧急降下】: ${memory.pressure_alert === 'TRUE' ? '急降下中(注意)' : '安定'}\n`;
 
-  // 用語辞書: ユーザー発言だけでなく、プロファイルや直近バッファ（rolling_memory）内の独自用語・作品名を
-  // AIが一般的な一般名詞と誤認・混同しないよう、客観的前提知識として常時コンテキストに注入
+  // 用語辞書: 今回の発言・当日ログ・プロファイル・直近バッファ・未完了タスク・未消化ストックに含まれる用語のみを
+  // オンデマンド抽出して注入（無関係な辞書項目のトークン消費をカットしつつ誤認を防止）
   if (memory.dictionary && memory.dictionary.trim() !== '') {
-    if (memory.dictionary.length < 1500) {
-      context += `【用語辞書（客観的前提知識・誤認防止）】:\n${memory.dictionary.trim()}\n`;
-    } else {
-      const searchTarget = `${queryText || ''}\n${memory.profile || ''}\n${memory.rolling_memory || ''}`;
-      const relevantDict = filterRelevantDictionaryEntries(memory.dictionary, searchTarget);
-      if (relevantDict) {
-        context += `【用語辞書（客観的前提知識・誤認防止）】:\n${relevantDict}\n`;
-      }
+    const taskTitlesText = uncompletedTasks.map(t => t.title).join(' ');
+    const inputTitlesText = pendingInput.map(inp => inp.title).join(' ');
+    const searchTarget = `${queryText || ''}\n${todayLogsText || ''}\n${memory.profile || ''}\n${memory.rolling_memory || ''}\n${taskTitlesText}\n${inputTitlesText}`;
+    const relevantDict = filterRelevantDictionaryEntries(memory.dictionary, searchTarget);
+    if (relevantDict) {
+      context += `【用語辞書（客観的前提知識・誤認防止）】:\n${relevantDict}\n`;
     }
   }
   if (memory.rolling_memory) {

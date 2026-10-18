@@ -368,10 +368,26 @@ function queryMonthlyReports(startDateStr, endDateStr) {
             if (imgUrl) {
               aggregatedText += `![${caption}](${imgUrl})\n`;
             }
+          } else if (type === 'divider') {
+            aggregatedText += `---\n`;
           } else if (b[type] && b[type].rich_text) {
             const blockText = b[type].rich_text.map(rt => rt.plain_text).join('');
             if (blockText) {
-              aggregatedText += `${blockText}\n`;
+              if (type === 'heading_1') {
+                aggregatedText += `# ${blockText}\n`;
+              } else if (type === 'heading_2') {
+                aggregatedText += `## ${blockText}\n`;
+              } else if (type === 'heading_3') {
+                aggregatedText += `### ${blockText}\n`;
+              } else if (type === 'bulleted_list_item') {
+                aggregatedText += `- ${blockText}\n`;
+              } else if (type === 'numbered_list_item') {
+                aggregatedText += `1. ${blockText}\n`;
+              } else if (type === 'quote') {
+                aggregatedText += `> ${blockText}\n`;
+              } else {
+                aggregatedText += `${blockText}\n`;
+              }
             }
           }
         });

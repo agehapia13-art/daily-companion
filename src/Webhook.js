@@ -78,19 +78,17 @@ function doPost(e) {
         const imageBlobs = bufferedImages.blobs;
         const imageUrls = bufferedImages.urls;
 
-        // C. コンテキスト情報の取得 (スプレッドシート & 動的カレンダー)
-        const sheetContext = getSpreadsheetContext(userText);
+        // C. 本日の全会話ログ（極小高密度フォーマット: HH:mm User: ... / AI: ...）およびコンテキスト情報の取得
+        const todayLogsCondensed = getCondensedTodayLogs();
+        const sheetContext = getSpreadsheetContext(userText, todayLogsCondensed);
         const calendarContext = getCalendarAndHolidayContext();
         const combinedContext = `${sheetContext}\n\n${calendarContext}`;
 
-        // D. 本日の全会話ログ（極小高密度フォーマット: HH:mm User: ... / AI: ...）の取得
-        const todayLogsCondensed = getCondensedTodayLogs();
-
-        // E. Gemini 3.8 Flash 呼び出し（JSON取得）
+        // D. Gemini 3.8 Flash 呼び出し（JSON取得）
         let aiResult;
         let isGeminiSuccess = false;
         try {
-          aiResult = callGeminiFlash(userText, imageBlobs, combinedContext, todayLogsCondensed, isFirstHello);
+          aiResult = callGeminiFlash(userText, imageBlobs, combinedContext, todayLogsCondensed);
           isGeminiSuccess = true;
         } catch (geminiErr) {
           const errStr = String(geminiErr.message || '');

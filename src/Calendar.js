@@ -87,25 +87,21 @@ function getCalendarAndHolidayContext() {
     }
   }
 
-  // 3. 日本の祝日カレンダーのイベント取得
-  calendarText += `\n=== 日本の祝日情報（期間内） ===\n`;
+  // 3. 日本の祝日カレンダーのイベント取得（期間内に祝日が存在する場合のみ出力してトークン節約）
   try {
     const holidayCal = CalendarApp.getCalendarById(SYSTEM_CONSTANTS.JAPAN_HOLIDAY_CALENDAR_ID);
     if (holidayCal) {
       const holidays = holidayCal.getEvents(startTime, endTime);
-      if (holidays.length === 0) {
-        calendarText += '・期間中に祝日はありません。\n';
-      } else {
+      if (holidays.length > 0) {
+        calendarText += `\n=== 日本の祝日情報（期間内） ===\n`;
         holidays.forEach(h => {
           const dateStr = Utilities.formatDate(h.getStartTime(), 'Asia/Tokyo', 'yyyy-MM-dd(E)');
           calendarText += `・${dateStr}: ${h.getTitle()}\n`;
         });
       }
-    } else {
-      calendarText += '・祝日カレンダーが見つかりませんでした。\n';
     }
   } catch (e) {
-    calendarText += `・祝日カレンダー取得エラー: ${e.message}\n`;
+    Logger.log(`祝日カレンダー取得エラー: ${e.message}`);
   }
 
   return calendarText;

@@ -194,7 +194,7 @@ function dailyMidnightBatch() {
       const endDateStr = `${prevMonthStr}-${('0' + lastDayOfPrevMonth).slice(-2)}`;
 
       const monthlyDataText = queryMonthlyReports(startDateStr, endDateStr);
-      const monthlyJournal = generateMonthlyJournalMarkdown(monthlyDataText, prevMonthStr);
+      const monthlyJournal = generateMonthlyJournalMarkdown(monthlyDataText, prevMonthStr, memory.dictionary);
       createMonthlyReport(monthlyJournal, prevMonthStr);
 
       setMemoryValue('monthly_report_ready', 'TRUE');

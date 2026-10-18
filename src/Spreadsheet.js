@@ -650,6 +650,9 @@ function getSpreadsheetContext(queryText) {
   if (memory.monthly_report_ready === 'TRUE') {
     context += `【月報通知フラグ】: TRUE\n`;
   }
+  if (memory.cycle_stamps && memory.cycle_stamps.trim() !== '') {
+    context += `【周期・スキルアップ履歴（cycle_stamps）】:\n${memory.cycle_stamps.trim()}\n`;
+  }
 
   // 1. 未完了タスクのみを超圧縮 (完了・破棄は完全除外)
   if (uncompletedTasks.length > 0) {
@@ -678,9 +681,12 @@ function getSpreadsheetContext(queryText) {
     context += `買物(未買): ${shopItems.join(', ')}\n`;
   }
 
-  // 3. インプットストックを1行に圧縮
+  // 3. インプットストックを1行に圧縮（未発売等のメモがあれば含める）
   if (pendingInput.length > 0) {
-    const inputItems = pendingInput.map(inp => `[${inp.type}]${inp.title}`);
+    const inputItems = pendingInput.map(inp => {
+      const memoPart = inp.memo && inp.memo.trim() ? `(${inp.memo.trim()})` : '';
+      return `[${inp.type}]${inp.title}${memoPart}`;
+    });
     context += `インプット未消化: ${inputItems.join(', ')}\n`;
   }
 

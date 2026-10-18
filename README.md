@@ -127,7 +127,7 @@ Google Apps Script プロジェクトの「プロジェクトの設定」>「ス
    - `dictionary`: 用語辞書（客観的前提知識）
    - `rolling_memory`: 最近の関心・ログ（直近7〜10日分の活動・関心バッファ）
    - `weekly_summary`: 直近数日間の疲労・睡眠サマリー
-   - `cycle_stamps`: 周期メンテナンス記録（美容院、弦交換、シーツ洗濯等）
+   - `cycle_stamps`: 周期メンテナンス ＆ 能動的音楽スキルアップ最終実施記録（美容院、弦交換、シーツ洗濯、ピアノ/ギター/トロンボーン演奏、楽曲制作、打ち込み再現、スケッチ等）
    - `weather_info`: 今日の天気・最高気温・降水確率
    - `pressure_alert`: 6時間以内5hPa気圧急降下アラート（TRUE/FALSE）
    - `briefing_delivered_date`: 本日ブリーフィング配信済み日付（YYYY-MM-DD）

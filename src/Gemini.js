@@ -5,10 +5,9 @@
 
 /**
  * 生活秘書システムの基本システムプロンプトを取得
- * @param {boolean} isFirstHello 本日最初の発言（ブリーフィング合流が必要）か
  * @return {string}
  */
-function getSystemPrompt(isFirstHello) {
+function getSystemPrompt() {
   const memory = getMemory();
   const basePrompt = `あなたは、ユーザー（サウンドディレクター）のために構築された完全個人専用の『生活伴走システム』の対話エージェント（生活管理秘書兼伴走者）です。
 ユーザーの日々の生活・健康・仕事・インプット活動を誰よりも親身かつ客観的にサポートします。
@@ -186,7 +185,8 @@ function getSystemPrompt(isFirstHello) {
   "reply_text": "【必須】ユーザーへの返信文（親身な労い・回答など2〜3文 ＋ 直近の状況に応じたアクション提案や気遣い1行。※ブリーフィング枠は出力厳禁）",
   "image_summary": "（※画像添付時のみ出力）画像の客観的な内容要約",
   "task_actions": [
-    { "action": "add", "title": "対象/プロジェクト：具体的なタスク内容", "due_date": "YYYY-MM-DD" },
+    { "action": "add", "title": "対象/プロジェクト：具体的なタスク内容", "due_date": "YYYY-MM-DD", "memo": "補足メモ(任意)" },
+    { "action": "update", "task_id": "T_...", "target_title": "対象タスク名", "new_title": "変更後タイトル", "due_date": "YYYY-MM-DD", "memo": "補足メモ" },
     { "action": "complete", "task_id": "T_...", "title": "完了する既存タスク名" },
     { "action": "delete", "task_id": "T_...", "title": "破棄するタスク名" }
   ],
@@ -196,11 +196,13 @@ function getSystemPrompt(isFirstHello) {
   ],
   "shopping_actions": [
     { "action": "add", "item": "品名", "category": "カテゴリ" },
-    { "action": "complete", "item": "品名" }
+    { "action": "complete", "item": "品名" },
+    { "action": "delete", "item": "品名" }
   ],
   "input_stock_actions": [
-    { "action": "add", "type": "映画/音楽/本", "title": "タイトル", "memo": "メモ" },
-    { "action": "complete", "title": "タイトル" }
+    { "action": "add", "type": "映画/音楽/本/ゲーム/その他", "title": "タイトル", "memo": "メモ" },
+    { "action": "complete", "title": "タイトル" },
+    { "action": "delete", "title": "タイトル" }
   ],
   "routine_actions": [
     { "action": "add", "title": "ルール名", "type": "day_of_week/day_of_month/interval_days", "value": "設定値" }
@@ -215,27 +217,80 @@ function getSystemPrompt(isFirstHello) {
 }
 
 /**
- * Gemini 3.8 Flash APIへ低レイテンシ・グラウンディング呼び出しを実行（マルチターン対応）
- * @param {string} userText ユーザーの入力テキスト
- * @param {Array<GoogleAppsScript.Base.Blob>} imageBlobs 添付画像Blob一覧
- * @param {string} contextText スプレッドシートやカレンダー等のコンテキスト情報
- * @param {Array<Object>} recentTurns 直近の会話ログターン配列
- * @param {boolean} isFirstHello 本日初回の発言か
- * @return {Object} 解析されたJSONオブジェクト
+ * Gemini API への共通リクエスト＆自動リトライ関数（503/429対策・思考パート除外）
+ * @param {Object} requestPayload
+ * @return {string} 抽出されたレスポンステキスト
  */
-function callGeminiFlash(userText, imageBlobs, contextText, recentTurns, isFirstHello) {
+function fetchGeminiTextWithRetry(requestPayload) {
   const config = getConfig();
   const url = `${SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE}?key=${config.geminiApiKey}`;
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(requestPayload),
+    muteHttpExceptions: true
+  };
 
-  // 1. マルチターン履歴の構築
-  const contents = [];
-  if (recentTurns && Array.isArray(recentTurns) && recentTurns.length > 0) {
-    for (let i = 0; i < recentTurns.length; i++) {
-      contents.push(recentTurns[i]);
+  let response;
+  let statusCode = 0;
+  let responseText = '';
+  const maxRetries = 2;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      response = UrlFetchApp.fetch(url, options);
+      statusCode = response.getResponseCode();
+      responseText = response.getContentText();
+
+      if (statusCode >= 200 && statusCode < 300) {
+        break;
+      }
+
+      if ((statusCode === 503 || statusCode === 429 || statusCode >= 500) && attempt < maxRetries) {
+        const delayMs = (attempt + 1) * 1200;
+        Logger.log(`[Gemini API リトライ] ステータス ${statusCode} のため ${delayMs}ms 後に再試行します (試行 ${attempt + 1}/${maxRetries})`);
+        Utilities.sleep(delayMs);
+        continue;
+      }
+
+      throw new Error(`Gemini APIエラー [${statusCode}]: ${responseText}`);
+    } catch (err) {
+      if (attempt >= maxRetries) {
+        throw err;
+      }
+      const delayMs = (attempt + 1) * 1200;
+      Logger.log(`[Gemini API ネットワークエラー] ${err.message} のため ${delayMs}ms 後に再試行します`);
+      Utilities.sleep(delayMs);
     }
   }
 
-  // 2. 最新のユーザー発言ターンの構築 (画像 parts + コンテキスト/プロンプト parts)
+  const jsonResponse = JSON.parse(responseText);
+  let contentText = '';
+  if (jsonResponse.candidates && jsonResponse.candidates.length > 0 && jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts) {
+    const parts = jsonResponse.candidates[0].content.parts;
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i].text && !parts[i].thought) {
+        contentText += parts[i].text;
+      }
+    }
+  }
+
+  if (!contentText) {
+    throw new Error('Gemini APIからテキスト返答が得られませんでした。');
+  }
+
+  return contentText.trim();
+}
+
+/**
+ * Gemini 3.8 Flash APIへ低レイテンシ・グラウンディング呼び出しを実行
+ * @param {string} userText ユーザーの入力テキスト
+ * @param {Array<GoogleAppsScript.Base.Blob>} imageBlobs 添付画像Blob一覧
+ * @param {string} contextText スプレッドシートやカレンダー等のコンテキスト情報
+ * @param {string} todayLogsText 本日の会話ログ圧縮テキスト
+ * @return {Object} 解析されたJSONオブジェクト
+ */
+function callGeminiFlash(userText, imageBlobs, contextText, todayLogsText) {
   const currentTurnParts = [];
 
   // 画像入力の追加
@@ -257,22 +312,22 @@ function callGeminiFlash(userText, imageBlobs, contextText, recentTurns, isFirst
 
   // 最新のテキスト
   let promptBody = `${contextText}\n\n`;
-  if (recentTurns && typeof recentTurns === 'string' && recentTurns.trim() !== '') {
-    promptBody += `=== 本日の会話履歴 (時系列) ===\n${recentTurns}\n\n`;
+  if (todayLogsText && typeof todayLogsText === 'string' && todayLogsText.trim() !== '') {
+    promptBody += `=== 本日の会話履歴 (時系列) ===\n${todayLogsText}\n\n`;
   }
   promptBody += `=== ユーザーの最新発言 ===\n${userText || '（画像を受信しました。内容を確認してください）'}`;
   currentTurnParts.push({ text: promptBody });
 
-  contents.push({
-    role: 'user',
-    parts: currentTurnParts
-  });
-
   const requestPayload = {
     systemInstruction: {
-      parts: [{ text: getSystemPrompt(isFirstHello) }]
+      parts: [{ text: getSystemPrompt() }]
     },
-    contents: contents,
+    contents: [
+      {
+        role: 'user',
+        parts: currentTurnParts
+      }
+    ],
     generationConfig: {
       temperature: 0.7,
       thinkingConfig: {
@@ -286,66 +341,7 @@ function callGeminiFlash(userText, imageBlobs, contextText, recentTurns, isFirst
     ]
   };
 
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(requestPayload),
-    muteHttpExceptions: true
-  };
-
-  let response;
-  let statusCode = 0;
-  let responseText = '';
-  const maxRetries = 2;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      response = UrlFetchApp.fetch(url, options);
-      statusCode = response.getResponseCode();
-      responseText = response.getContentText();
-
-      if (statusCode >= 200 && statusCode < 300) {
-        break; // 成功
-      }
-
-      // 503 (一時混雑) や 429 等のリトライ可能な一時エラー
-      if ((statusCode === 503 || statusCode === 429 || statusCode >= 500) && attempt < maxRetries) {
-        const delayMs = (attempt + 1) * 1200; // 1.2秒, 2.4秒 待機
-        Logger.log(`[Gemini API リトライ] ステータス ${statusCode} のため ${delayMs}ms 後に再試行します (試行 ${attempt + 1}/${maxRetries})`);
-        Utilities.sleep(delayMs);
-        continue;
-      }
-
-      throw new Error(`Gemini APIエラー [${statusCode}]: ${responseText}`);
-    } catch (err) {
-      if (attempt >= maxRetries) {
-        throw err;
-      }
-      const delayMs = (attempt + 1) * 1200;
-      Logger.log(`[Gemini API ネットワークエラー] ${err.message} のため ${delayMs}ms 後に再試行します`);
-      Utilities.sleep(delayMs);
-    }
-  }
-
-  const jsonResponse = JSON.parse(responseText);
-
-  // 全パートからテキストを安全に連結抽出（思考パートの混入を防ぐ）
-  let contentText = '';
-  if (jsonResponse.candidates && jsonResponse.candidates.length > 0 && jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts) {
-    const parts = jsonResponse.candidates[0].content.parts;
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i].text && !parts[i].thought) {
-        contentText += parts[i].text;
-      }
-    }
-  }
-
-  if (!contentText) {
-    throw new Error('Gemini APIからテキスト返答が得られませんでした。');
-  }
-
-  // Markdownコードフェンス (```json ... ```) を除去してパース
-  let cleaned = contentText.trim();
+  let cleaned = fetchGeminiTextWithRetry(requestPayload);
   if (cleaned.startsWith('```json')) {
     cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
   } else if (cleaned.startsWith('```')) {
@@ -358,7 +354,6 @@ function callGeminiFlash(userText, imageBlobs, contextText, recentTurns, isFirst
     Logger.log('JSONパース失敗: ' + cleaned);
     return {
       reply_text: cleaned,
-      system_notification: '',
       task_actions: [],
       calendar_actions: [],
       shopping_actions: [],
@@ -369,17 +364,15 @@ function callGeminiFlash(userText, imageBlobs, contextText, recentTurns, isFirst
 }
 
 /**
- * 深夜バッチ用: 1日のログと完了タスクからNotion投稿用Markdown日報を生成
+ * 深夜バッチ用: 1日のログと完了タスク・消化ストックからNotion投稿用Markdown日報を生成
  * @param {Array<Object>} logs
  * @param {Array<Object>} completedTasks
  * @param {Object} memory
  * @param {string} dateStr
+ * @param {Array<Object>=} consumedInputs
  * @return {string} Markdown日報
  */
-function generateDailyReportMarkdown(logs, completedTasks, memory, dateStr) {
-  const config = getConfig();
-  const url = `${SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE}?key=${config.geminiApiKey}`;
-
+function generateDailyReportMarkdown(logs, completedTasks, memory, dateStr, consumedInputs) {
   let logsSummary = logs
     .filter(l => l.sender === 'user' || !l.sender)
     .map(l => {
@@ -389,6 +382,9 @@ function generateDailyReportMarkdown(logs, completedTasks, memory, dateStr) {
       return `[${l.timestamp}] ${l.message}${imgInfo}`;
     }).join('\n');
   let tasksSummary = completedTasks.map(t => `- [ID:${t.id}] ${t.title} (${t.memo || ''})`).join('\n');
+  let inputsSummary = (consumedInputs && consumedInputs.length > 0)
+    ? consumedInputs.map(inp => `- [${inp.type}] ${inp.title}${inp.memo ? ' (' + inp.memo + ')' : ''}`).join('\n')
+    : '';
 
   const prompt = `あなたは生活秘書です。本日（${dateStr}）のユーザー発言ログおよび完了タスクに基づき、ユーザーが後から自分の1日を手応えも反省も含めて客観的・具体的に振り返るためのNotion日報（Markdown形式）を作成してください。
 
@@ -397,7 +393,7 @@ ${logsSummary || 'ログなし'}
 
 【本日完了したタスク】
 ${tasksSummary || '完了タスクなし'}
-
+${inputsSummary ? `\n【本日消化したインプットストック】\n${inputsSummary}\n` : ''}
 【現在の体調・環境コンテキスト】
 - 天気・気温: ${memory.weather_info}
 - 気圧アラート: ${memory.pressure_alert}
@@ -451,29 +447,7 @@ ${tasksSummary || '完了タスクなし'}
     }
   };
 
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(requestPayload),
-    muteHttpExceptions: true
-  };
-
-  const response = UrlFetchApp.fetch(url, options);
-  const statusCode = response.getResponseCode();
-  const responseText = response.getContentText();
-
-  if (statusCode < 200 || statusCode >= 300) {
-    throw new Error(`日報生成用Gemini APIエラー [${statusCode}]: ${responseText}`);
-  }
-
-  const resJson = JSON.parse(responseText);
-  if (resJson.candidates && resJson.candidates.length > 0 && resJson.candidates[0].content && resJson.candidates[0].content.parts) {
-    const text = resJson.candidates[0].content.parts.map(p => p.text || '').join('').trim();
-    if (text) {
-      return text;
-    }
-  }
-  throw new Error('日報生成用Gemini APIから本文が取得できませんでした。');
+  return fetchGeminiTextWithRetry(requestPayload);
 }
 
 /**
@@ -488,9 +462,6 @@ ${tasksSummary || '完了タスクなし'}
  * @return {Object} { cycle_stamps: string, weekly_summary: string, rolling_memory: string, profile: string, dictionary: string }
  */
 function analyzeMemoryUpdates(logs, currentCycleStamps, currentWeeklySummary, currentRollingMemory, currentProfile, currentDictionary, targetDateStr) {
-  const config = getConfig();
-  const url = `${SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE}?key=${config.geminiApiKey}`;
-
   let logsSummary = logs.map(l => `${l.sender}: ${l.message}`).join('\n');
 
   const prompt = `あなたは生活秘書です。本日（${targetDateStr}）の会話ログを分析し、中長期記憶（直近活動バッファ、周期イベント、生活サマリー、プロファイル代謝、用語辞書）を更新してください。
@@ -570,25 +541,13 @@ ${logsSummary || 'ログなし'}
     }
   };
 
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(requestPayload),
-    muteHttpExceptions: true
-  };
-
   try {
-    const response = UrlFetchApp.fetch(url, options);
-    const statusCode = response.getResponseCode();
-    if (statusCode < 200 || statusCode >= 300) {
-      throw new Error(`Gemini API HTTP ${statusCode}: ${response.getContentText()}`);
+    let cleaned = fetchGeminiTextWithRetry(requestPayload);
+    if (cleaned.startsWith('```json')) {
+      cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
     }
-    const resJson = JSON.parse(response.getContentText());
-    if (!resJson.candidates || resJson.candidates.length === 0 || !resJson.candidates[0].content || !resJson.candidates[0].content.parts) {
-      throw new Error('Gemini APIから有効な候補が返されませんでした');
-    }
-    const text = resJson.candidates[0].content.parts.map(p => p.text || '').join('').trim();
-    let cleaned = text.replace(/^```json\s*/, '').replace(/\s*```$/, '');
     return JSON.parse(cleaned);
   } catch (e) {
     Logger.log('メモリー更新解析失敗: ' + e.message);
@@ -609,9 +568,6 @@ ${logsSummary || 'ログなし'}
  * @return {string} Markdown月報
  */
 function generateMonthlyJournalMarkdown(monthlyDataText, monthStr) {
-  const config = getConfig();
-  const url = `${SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE}?key=${config.geminiApiKey}`;
-
   const prompt = `あなたはサウンドディレクター専属の生活秘書です。前月（${monthStr}）の日報記録をもとに、Notionに保存する「月間ハイライト＆思い出ジャーナル」を作成してください。
 
 【前月の日報集約データ】
@@ -642,19 +598,7 @@ ${monthlyDataText}
     }
   };
 
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(requestPayload),
-    muteHttpExceptions: true
-  };
-
-  const response = UrlFetchApp.fetch(url, options);
-  const resJson = JSON.parse(response.getContentText());
-  if (resJson.candidates && resJson.candidates[0].content && resJson.candidates[0].content.parts) {
-    return resJson.candidates[0].content.parts[0].text;
-  }
-  return `# ${monthStr} 月間ハイライト\n今月もお疲れ様でした。`;
+  return fetchGeminiTextWithRetry(requestPayload);
 }
 
 /**
@@ -666,7 +610,7 @@ function testGeminiConnection() {
   Logger.log('Gemini API Key 確認: ' + (config.geminiApiKey ? config.geminiApiKey.substring(0, 6) + '...' : '未設定'));
   
   try {
-    const res = callGeminiFlash('こんにちは！テストです。', [], '【コンテキスト】\nテスト実行中', [], false);
+    const res = callGeminiFlash('こんにちは！テストです。', [], '【コンテキスト】\nテスト実行中', '');
     Logger.log('Gemini API 呼び出し成功！');
     Logger.log('AI返答: ' + JSON.stringify(res, null, 2));
   } catch (e) {

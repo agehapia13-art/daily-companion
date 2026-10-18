@@ -325,6 +325,12 @@ function queryMonthlyReports(startDateStr, endDateStr) {
         }
       ]
     };
+    queryPayload.sorts = [
+      {
+        property: schema.dateKey,
+        direction: 'ascending'
+      }
+    ];
   }
 
   let aggregatedText = '';
@@ -348,7 +354,7 @@ function queryMonthlyReports(startDateStr, endDateStr) {
       aggregatedText += `\n=== [${pageTitle}] ===\n`;
 
       try {
-        const blocksData = callNotionApi(`/blocks/${page.id}/children?page_size=50`, 'get');
+        const blocksData = callNotionApi(`/blocks/${page.id}/children?page_size=100`, 'get');
         const childBlocks = blocksData.results || [];
         childBlocks.forEach(b => {
           const type = b.type;

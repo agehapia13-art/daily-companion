@@ -170,6 +170,15 @@ function getTodayEventsList() {
 }
 
 /**
+ * 本日のカレンダー予定（メイン＋家族共用♪）に「出社」が含まれているか判定
+ * @return {boolean}
+ */
+function hasOfficeEventToday() {
+  const todayEvents = getTodayEventsList();
+  return todayEvents.some(evStr => evStr.includes('出社'));
+}
+
+/**
  * カレンダー操作アクションを適用（メインカレンダーのみ対象。家族カレンダーは絶対に変更しない）
  * 単発予定（createEvent）および毎週の曜日指定定期予定（createEventSeries）に対応
  * @param {Array<Object>} actions

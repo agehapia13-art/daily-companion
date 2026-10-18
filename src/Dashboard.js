@@ -1484,6 +1484,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
 
       <div id="inputTypePillBar" class="pill-bar"></div>
       <div id="inputListContainer"></div>
+      <div id="consumedTodayContainer" style="margin-top:24px;"></div>
     </section>
 
     <!-- 4. 周期・記憶タブ -->
@@ -1491,6 +1492,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       <!-- 周期メンテナンススタンプ -->
       <div class="toolbar">
         <div class="section-summary">🔄 周期メンテナンス</div>
+        <button class="icon-btn" onclick="openMemoryEditModal('cycle_stamps_raw', '周期メンテナンス記録')">✎ 編集</button>
       </div>
       <div id="stampGridContainer" class="stamp-grid"></div>
 
@@ -1541,6 +1543,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       <div class="memory-card">
         <div class="memory-header">
           <div class="memory-title">🍵 体調・睡眠サマリー</div>
+          <button class="icon-btn" onclick="openMemoryEditModal('weekly_summary', '体調・睡眠サマリー')">✎ 編集</button>
         </div>
         <div id="memWeekly" class="memory-content"></div>
       </div>
@@ -1576,11 +1579,11 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
     <button id="toastUndoBtn" class="toast-undo" style="display:none;">元に戻す</button>
   </div>
 
-  <!-- タスク追加モーダル -->
+  <!-- タスク追加・編集モーダル -->
   <div id="taskModal" class="modal-backdrop" onclick="if(event.target===this) closeTaskModal()">
     <div class="modal-sheet">
       <div class="modal-header">
-        <div class="modal-title">🌿 新しいタスクを追加</div>
+        <div class="modal-title" id="taskModalTitle">🌿 新しいタスクを追加</div>
         <button class="icon-btn" onclick="closeTaskModal()">✕ 閉じる</button>
       </div>
       <div class="form-group">
@@ -1600,7 +1603,8 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
         <label class="form-label">メモ（任意）</label>
         <input type="text" id="newTaskMemo" class="organic-input" style="width:100%;" placeholder="補足メモ...">
       </div>
-      <button class="btn-primary" style="width:100%; padding:12px; font-size:0.95rem;" onclick="submitNewTask()">タスクを登録する</button>
+      <button id="taskModalSubmitBtn" class="btn-primary" style="width:100%; padding:12px; font-size:0.95rem;" onclick="submitNewTask()">タスクを登録する</button>
+      <button id="taskModalDeleteBtn" class="btn-secondary" style="width:100%; margin-top:8px; padding:10px; color:var(--terracotta); border-color:var(--terracotta-light); background:var(--terracotta-light); display:none;" onclick="discardEditingTask()">🗑️ このタスクを破棄する</button>
     </div>
   </div>
 
@@ -1681,6 +1685,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       selectedPrefix: 'ALL',
       selectedInputType: 'ALL',
       data: null,
+      editingTaskId: null,
       editingMemoryKey: null,
       toastTimer: null
     };
@@ -2150,10 +2155,11 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
         : '';
 
       const nextStatus = isCompleted ? '未完了' : '完了';
+      const safeIdAttr = JSON.stringify(t.id).replace(/"/g, '&quot;');
 
       return '<div class="' + cardClass + '" id="task-card-' + escapeHtml(t.id) + '">' +
-        '<button class="circle-check ' + (isCompleted ? 'checked' : '') + '" onclick="toggleTaskStatus(' + JSON.stringify(t.id).replace(/"/g, '&quot;') + ', ' + JSON.stringify(nextStatus).replace(/"/g, '&quot;') + ')" title="完了切替">✓</button>' +
-        '<div class="card-body">' +
+        '<button class="circle-check ' + (isCompleted ? 'checked' : '') + '" onclick="toggleTaskStatus(' + safeIdAttr + ', ' + JSON.stringify(nextStatus).replace(/"/g, '&quot;') + ')" title="完了切替">✓</button>' +
+        '<div class="card-body" style="cursor:pointer;" onclick="openTaskModal(' + safeIdAttr + ')" title="タップして編集">' +
           '<div class="card-title-row">' +
             '<div class="card-title">' + escapeHtml(t.cleanTitle || t.fullTitle) + '</div>' +
           '</div>' +
@@ -2167,10 +2173,10 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
 
     function toggleTaskStatus(taskId, newStatus) {
       const cardEl = document.getElementById('task-card-' + taskId);
-      if (cardEl && newStatus === '完了') {
+      if (cardEl && (newStatus === '完了' || newStatus === '破棄')) {
         cardEl.classList.add('completing');
         const btn = cardEl.querySelector('.circle-check');
-        if (btn) btn.classList.add('checked');
+        if (btn && newStatus === '完了') btn.classList.add('checked');
       }
 
       setTimeout(() => {
@@ -2189,6 +2195,10 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
           if (target) {
             sendLiffMessage('✅ 「' + (target.cleanTitle || target.fullTitle) + '」を完了したよ');
           }
+        } else if (newStatus === '破棄') {
+          showToast('🗑️ タスクを破棄しました', () => {
+            toggleTaskStatus(taskId, '未完了');
+          });
         } else {
           showToast('タスクを未完了に戻しました');
         }
@@ -2198,10 +2208,11 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
             showToast('更新失敗: ' + (err.message || err));
             loadData();
           });
-      }, newStatus === '完了' ? 260 : 50);
+      }, (newStatus === '完了' || newStatus === '破棄') ? 260 : 50);
     }
 
-    function openTaskModal() {
+    function openTaskModal(taskId) {
+      state.editingTaskId = taskId || null;
       const activeTasks = (state.data && state.data.tasks) ? state.data.tasks.filter(t => t.status === '未完了') : [];
       const prefixes = Array.from(new Set(activeTasks.map(t => t.prefix).filter(Boolean)));
       const defaultPrefixes = ['生活伴走システム', '音楽制作', 'プライベート', '家事・生活'];
@@ -2214,14 +2225,44 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
         '<button type="button" class="filter-pill" onclick="document.getElementById(\\'newTaskPrefix\\').value=' + JSON.stringify(p).replace(/"/g, '&quot;') + '">' + escapeHtml(p) + '</button>'
       ).join('');
 
-      if (state.selectedPrefix && state.selectedPrefix !== 'ALL') {
-        document.getElementById('newTaskPrefix').value = state.selectedPrefix;
+      const titleEl = document.getElementById('taskModalTitle');
+      const submitBtn = document.getElementById('taskModalSubmitBtn');
+      const deleteBtn = document.getElementById('taskModalDeleteBtn');
+
+      if (state.editingTaskId) {
+        const target = (state.data && state.data.tasks) ? state.data.tasks.find(t => t.id === state.editingTaskId) : null;
+        titleEl.textContent = '✎ タスクを編集';
+        submitBtn.textContent = '変更を保存する';
+        deleteBtn.style.display = 'block';
+
+        document.getElementById('newTaskPrefix').value = (target && target.prefix && target.prefix !== 'その他') ? target.prefix : '';
+        document.getElementById('newTaskTitle').value = target ? ((target.cleanTitle || target.fullTitle) + (target.timeHint ? '（' + target.timeHint + '）' : '')) : '';
+        document.getElementById('newTaskDueDate').value = (target && target.dueDate) ? target.dueDate : '';
+        document.getElementById('newTaskMemo').value = (target && target.memo) ? target.memo : '';
+      } else {
+        titleEl.textContent = '🌿 新しいタスクを追加';
+        submitBtn.textContent = 'タスクを登録する';
+        deleteBtn.style.display = 'none';
+
+        document.getElementById('newTaskPrefix').value = (state.selectedPrefix && state.selectedPrefix !== 'ALL') ? state.selectedPrefix : '';
+        document.getElementById('newTaskTitle').value = '';
+        document.getElementById('newTaskDueDate').value = '';
+        document.getElementById('newTaskMemo').value = '';
       }
+
       document.getElementById('taskModal').classList.add('open');
     }
 
     function closeTaskModal() {
+      state.editingTaskId = null;
       document.getElementById('taskModal').classList.remove('open');
+    }
+
+    function discardEditingTask() {
+      if (!state.editingTaskId) return;
+      const targetId = state.editingTaskId;
+      closeTaskModal();
+      toggleTaskStatus(targetId, '破棄');
     }
 
     function submitNewTask() {
@@ -2229,6 +2270,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       const title = document.getElementById('newTaskTitle').value.trim();
       const dueDate = document.getElementById('newTaskDueDate').value.trim();
       const memo = document.getElementById('newTaskMemo').value.trim();
+      const editingId = state.editingTaskId;
 
       if (!title) {
         showToast('タスク内容を入力してください');
@@ -2236,19 +2278,35 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       }
 
       closeTaskModal();
-      showToast('🌱 タスクを追加しています...');
 
-      callServerApi('apiAddTask', state.authKey, { prefix, title, dueDate, memo })
-        .then(() => {
-          document.getElementById('newTaskTitle').value = '';
-          document.getElementById('newTaskDueDate').value = '';
-          document.getElementById('newTaskMemo').value = '';
-          showToast('🌿 タスクを追加しました');
-          loadData();
-        })
-        .catch(err => {
-          showToast('追加エラー: ' + (err.message || err));
-        });
+      if (editingId) {
+        let fullTitle = title;
+        if (prefix && !fullTitle.includes('：') && !fullTitle.includes(':')) {
+          fullTitle = prefix + '：' + fullTitle;
+        }
+        showToast('💾 タスクを更新しています...');
+        callServerApi('apiEditTask', state.authKey, { taskId: editingId, fullTitle, dueDate, memo })
+          .then(() => {
+            showToast('🌿 タスクを更新しました');
+            loadData();
+          })
+          .catch(err => {
+            showToast('更新エラー: ' + (err.message || err));
+          });
+      } else {
+        showToast('🌱 タスクを追加しています...');
+        callServerApi('apiAddTask', state.authKey, { prefix, title, dueDate, memo })
+          .then(() => {
+            document.getElementById('newTaskTitle').value = '';
+            document.getElementById('newTaskDueDate').value = '';
+            document.getElementById('newTaskMemo').value = '';
+            showToast('🌿 タスクを追加しました');
+            loadData();
+          })
+          .catch(err => {
+            showToast('追加エラー: ' + (err.message || err));
+          });
+      }
     }
 
     // ==========================================
@@ -2342,7 +2400,9 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
     }
 
     function renderInputStock() {
-      const all = (state.data.inputStock || []).filter(i => i.status === '未');
+      const rawList = state.data.inputStock || [];
+      const all = rawList.filter(i => i.status === '未');
+      const consumedToday = rawList.filter(i => i.status === '完');
       const typeCounts = {};
       all.forEach(i => {
         const t = i.type || 'その他';
@@ -2364,21 +2424,39 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       const container = document.getElementById('inputListContainer');
       if (filtered.length === 0) {
         container.innerHTML = '<div class="empty-state">💡 ストックされている作品はありません。</div>';
-        return;
+      } else {
+        container.innerHTML = '<div class="card-list">' + filtered.map(item =>
+          '<div class="item-card" id="input-card-' + item.rowIndex + '">' +
+            '<button class="circle-check" onclick="completeInputStock(' + item.rowIndex + ')">✓</button>' +
+            '<div class="card-body">' +
+              '<div class="card-title">' + escapeHtml(item.title) + '</div>' +
+              '<div class="card-meta">' +
+                '<span class="badge badge-prefix">' + escapeHtml(item.type || '作品') + '</span>' +
+              '</div>' +
+              (item.memo ? '<div class="card-memo">' + escapeHtml(item.memo) + '</div>' : '') +
+            '</div>' +
+          '</div>'
+        ).join('') + '</div>';
       }
 
-      container.innerHTML = '<div class="card-list">' + filtered.map(item =>
-        '<div class="item-card" id="input-card-' + item.rowIndex + '">' +
-          '<button class="circle-check" onclick="completeInputStock(' + item.rowIndex + ')">✓</button>' +
-          '<div class="card-body">' +
-            '<div class="card-title">' + escapeHtml(item.title) + '</div>' +
-            '<div class="card-meta">' +
-              '<span class="badge badge-prefix">' + escapeHtml(item.type || '作品') + '</span>' +
-            '</div>' +
-            (item.memo ? '<div class="card-memo">' + escapeHtml(item.memo) + '</div>' : '') +
-          '</div>' +
-        '</div>'
-      ).join('') + '</div>';
+      const consumedContainer = document.getElementById('consumedTodayContainer');
+      if (consumedContainer) {
+        if (consumedToday.length > 0) {
+          consumedContainer.innerHTML =
+            '<div class="group-header"><div class="group-title" style="color:var(--text-sub); font-size:0.86rem;">✨ 本日消化したストック (' + consumedToday.length + '件)</div></div>' +
+            '<div class="card-list">' + consumedToday.map(item =>
+              '<div class="item-card completed-card" id="input-card-' + item.rowIndex + '">' +
+                '<button class="circle-check checked" onclick="uncompleteInputStock(' + item.rowIndex + ')" title="未消化に戻す">✓</button>' +
+                '<div class="card-body">' +
+                  '<div class="card-title">' + escapeHtml(item.title) + '</div>' +
+                  '<div class="card-meta"><span class="badge badge-prefix">' + escapeHtml(item.type || '作品') + '</span></div>' +
+                '</div>' +
+              '</div>'
+            ).join('') + '</div>';
+        } else {
+          consumedContainer.innerHTML = '';
+        }
+      }
     }
 
     function completeInputStock(rowIndex) {
@@ -2397,11 +2475,22 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
           sendLiffMessage('💡 「' + target.title + '」(' + (target.type || '作品') + ')を消化・鑑賞したよ');
         }
         showToast('✨ 鑑賞・消化済みにしました', () => {
-          callServerApi('apiUpdateInputStatus', state.authKey, rowIndex, '未').then(() => loadData());
+          uncompleteInputStock(rowIndex);
         });
         callServerApi('apiUpdateInputStatus', state.authKey, rowIndex, '完')
           .catch(() => loadData());
       }, 240);
+    }
+
+    function uncompleteInputStock(rowIndex) {
+      const target = (state.data.inputStock || []).find(i => i.rowIndex === rowIndex);
+      if (target) {
+        target.status = '未';
+        renderAll();
+      }
+      showToast('ストックを未消化に戻しました');
+      callServerApi('apiUpdateInputStatus', state.authKey, rowIndex, '未')
+        .catch(() => loadData());
     }
 
     function addInputItem() {
@@ -2505,9 +2594,10 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
     function saveMemoryField() {
       if (!state.editingMemoryKey) return;
       const val = document.getElementById('memoryModalTextarea').value;
+      const targetKey = state.editingMemoryKey === 'cycle_stamps_raw' ? 'cycle_stamps' : state.editingMemoryKey;
       closeMemoryEditModal();
       showToast('💾 保存しています...');
-      callServerApi('apiUpdateMemoryField', state.authKey, state.editingMemoryKey, val)
+      callServerApi('apiUpdateMemoryField', state.authKey, targetKey, val)
         .then(() => {
           showToast('🌿 記憶データを更新しました');
           loadData();

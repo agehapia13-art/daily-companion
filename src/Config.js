@@ -30,7 +30,6 @@ const SYSTEM_CONSTANTS = {
   OPEN_METEO_BASE: 'https://api.open-meteo.com/v1/forecast',
   IMAGE_BUFFER_PROP_KEY: 'BUFFERED_IMAGE_METAS',
   IMAGE_BUFFER_TTL_MS: 30 * 60 * 1000, // 30分
-  RECENT_LOGS_TURNS_LIMIT: 4, // マルチターンに含める直近会話往復数 (最大8メッセージ)
   SHEET_NAMES: {
     LOGS: 'logs',
     TASKS: 'tasks',

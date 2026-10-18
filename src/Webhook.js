@@ -111,7 +111,6 @@ function doPost(e) {
 
           aiResult = {
             reply_text: errorReply,
-            system_notification: '',
             task_actions: [],
             calendar_actions: [],
             shopping_actions: [],
@@ -155,7 +154,7 @@ function doPost(e) {
           // AIが返信文内に手動で書いた可能性がある絵文字プレフィックス付き通知行を除去して一本化
           const cleanedReplyLines = replyText.split('\n').filter(line => {
             const trimmed = line.trim();
-            return !/^(📝\s*タスク追加|✅\s*タスク完了|🗑️\s*タスク破棄|📅\s*カレンダー|🛒\s*買物|🔄\s*ルーティン)/.test(trimmed);
+            return !/^(📝\s*タスク追加|📝\s*タスク更新|✅\s*タスク完了|🗑️\s*タスク破棄|📅\s*カレンダー|🛒\s*買物|🎬\s*インプット|🔄\s*ルーティン)/.test(trimmed);
           });
           replyText = cleanedReplyLines.join('\n').trim();
           replyText += '\n\n' + executedNotices.join('\n');
@@ -239,33 +238,44 @@ function buildDailyBriefingText() {
   const memory = getMemory();
   const todayStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
 
-  // 1. 天気
+  // 1. 予定 (メインカレンダー + 家族共用カレンダーの「♪」付き)
+  const todayEvents = getTodayEventsList();
+  const hasOffice = todayEvents.some(evStr => evStr.includes('出社'));
+
+  // 2. 天気（「出社」予定の有無に応じて渋谷の天気を出し分け）
   let weatherLine = '・天気: ';
   let weatherText = (memory.weather_info || '').trim();
-  if (!weatherText || weatherText.includes('エラー')) {
+  let pressureAlertVal = memory.pressure_alert;
+
+  if (!weatherText || weatherText.includes('エラー') || (hasOffice && !weatherText.includes('｜'))) {
     try {
       const freshWeather = fetchWeatherAndPressure();
       if (freshWeather && freshWeather.weatherInfo && !freshWeather.weatherInfo.includes('エラー')) {
         weatherText = freshWeather.weatherInfo;
+        pressureAlertVal = freshWeather.pressureAlert;
         setMemoryValue('weather_info', weatherText);
-        setMemoryValue('pressure_alert', freshWeather.pressureAlert);
+        setMemoryValue('pressure_alert', pressureAlertVal);
       }
     } catch (wErr) {}
   }
+
+  if (!hasOffice && weatherText.includes('｜')) {
+    weatherText = weatherText.split('｜')[0].trim();
+  }
+
   if (weatherText && !weatherText.includes('エラー')) {
     weatherLine += weatherText;
   } else {
     weatherLine += '室内を過ごしやすい温度・湿度に整えてお過ごしください';
   }
 
-  // 2. 気圧
-  const isPressureDrop = memory.pressure_alert === 'TRUE';
+  // 3. 気圧
+  const isPressureDrop = pressureAlertVal === 'TRUE';
   const pressureLine = isPressureDrop
     ? '・気圧: ⚠️ 急降下アラート発令中（頭痛・体調の変化にご注意ください）'
     : '・気圧: 安定（急降下アラートなし）';
 
-  // 3. 予定 (メインカレンダー + 家族共用カレンダーの「♪」付き)
-  const todayEvents = getTodayEventsList();
+  // 4. 予定フォーマット
   let scheduleLine = '・予定: ';
   if (todayEvents.length > 0) {
     scheduleLine += todayEvents.join(' / ');
@@ -273,15 +283,22 @@ function buildDailyBriefingText() {
     scheduleLine += 'カレンダーの登録予定なし（終日フリー）';
   }
 
-  // 4. タスク (本日期限の未完了タスク)
+  // 5. タスク (本日期限および期限超過の未完了タスク)
   const tasks = getTasks('未完了');
-  const todayTasks = tasks.filter(t => t.dueDate === todayStr);
+  const urgentTasks = tasks
+    .filter(t => t.dueDate && t.dueDate <= todayStr)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
   let taskLine = '';
-  if (todayTasks.length > 0) {
-    if (todayTasks.length === 1) {
-      taskLine = `・タスク: ${formatTaskTitleWithBadge(todayTasks[0].title)}`;
+  if (urgentTasks.length > 0) {
+    const formatUrgentTask = (t) => {
+      const base = formatTaskTitleWithBadge(t.title);
+      return t.dueDate < todayStr ? `⚠️[期限超過:${t.dueDate}] ${base}` : base;
+    };
+    if (urgentTasks.length === 1) {
+      taskLine = `・タスク: ${formatUrgentTask(urgentTasks[0])}`;
     } else {
-      taskLine = `・タスク (${todayTasks.length}件):\n` + todayTasks.map(t => `  - ${formatTaskTitleWithBadge(t.title)}`).join('\n');
+      taskLine = `・タスク (${urgentTasks.length}件):\n` + urgentTasks.map(t => `  - ${formatUrgentTask(t)}`).join('\n');
     }
   } else {
     taskLine = '・タスク: 本日期限の重要タスクはありません';

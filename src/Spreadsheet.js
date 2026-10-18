@@ -190,9 +190,31 @@ function applyTaskActions(actions) {
     if (act.action === 'add' && act.title) {
       const taskId = 'T_' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmmss') + '_' + Math.floor(Math.random() * 1000);
       const dueDate = act.due_date || '';
-      sheet.appendRow([taskId, act.title, dueDate, '未完了', todayStr, '', '']);
+      const memo = act.memo ? String(act.memo).trim() : '';
+      sheet.appendRow([taskId, act.title, dueDate, '未完了', todayStr, '', memo]);
       const formattedTitle = formatTaskTitleWithBadge(act.title);
       results.push(`📝 タスク追加: ${formattedTitle}${dueDate ? ` (期限: ${dueDate})` : ''}`);
+    } else if (act.action === 'update') {
+      const tasks = getTasks();
+      const searchTitle = act.target_title || act.title || '';
+      for (let j = 0; j < tasks.length; j++) {
+        const t = tasks[j];
+        if (t.status === '未完了') {
+          const matchById = act.task_id && t.id === act.task_id;
+          const matchByTitle = searchTitle && (t.title.includes(searchTitle) || searchTitle.includes(t.title));
+          if (matchById || matchByTitle) {
+            const newTitle = (act.new_title || act.title || t.title).trim();
+            const newDue = act.due_date !== undefined ? String(act.due_date || '').trim() : t.dueDate;
+            const newMemo = act.memo !== undefined ? String(act.memo || '').trim() : t.memo;
+            sheet.getRange(t.rowIndex, 2).setValue(newTitle);
+            sheet.getRange(t.rowIndex, 3).setValue(newDue);
+            sheet.getRange(t.rowIndex, 7).setValue(newMemo);
+            const formattedTitle = formatTaskTitleWithBadge(newTitle);
+            results.push(`📝 タスク更新: ${formattedTitle}${newDue ? ` (期限: ${newDue})` : ''}`);
+            break;
+          }
+        }
+      }
     } else if (act.action === 'complete') {
       const tasks = getTasks();
       for (let j = 0; j < tasks.length; j++) {
@@ -267,7 +289,7 @@ function applyRoutineActions(actions) {
     if (act.action === 'add' && act.title) {
       const type = act.type || 'day_of_week';
       const value = act.value || 'MON';
-      sheet.appendRow([act.title, type, value, '', '']);
+      sheet.appendRow([act.title, type, value, '', act.memo || '']);
       results.push(`🔄 ルーティン追加: ${act.title} (${value})`);
     }
   }
@@ -342,6 +364,16 @@ function applyShoppingActions(actions) {
           break;
         }
       }
+    } else if (act.action === 'delete' && act.item) {
+      const items = getShoppingList();
+      for (let j = 0; j < items.length; j++) {
+        const it = items[j];
+        if (it.status === '未買' && it.item.includes(act.item)) {
+          sheet.getRange(it.rowIndex, 3).setValue('破棄');
+          results.push(`🛒 買物削除: ${it.item}`);
+          break;
+        }
+      }
     }
   }
   return results;
@@ -404,6 +436,16 @@ function applyInputStockActions(actions) {
           sheet.getRange(item.rowIndex, 4).setValue('完');
           sheet.getRange(item.rowIndex, 5).setValue(todayStr);
           results.push(`🎬 インプット完了: ${item.title}`);
+          break;
+        }
+      }
+    } else if (act.action === 'delete' && act.title) {
+      const list = getInputStockList();
+      for (let j = 0; j < list.length; j++) {
+        const item = list[j];
+        if (item.status === '未' && item.title.includes(act.title)) {
+          sheet.getRange(item.rowIndex, 4).setValue('破棄');
+          results.push(`🎬 インプット削除: ${item.title}`);
           break;
         }
       }
@@ -623,9 +665,14 @@ function getSpreadsheetContext(queryText) {
   const unboughtShopping = getShoppingList('未買');
   const pendingInput = getInputStockList('未');
 
+  let weatherDisplay = memory.weather_info || '情報なし';
+  if (typeof hasOfficeEventToday === 'function' && !hasOfficeEventToday() && weatherDisplay.includes('｜')) {
+    weatherDisplay = weatherDisplay.split('｜')[0].trim();
+  }
+
   let context = `【現在日時】: ${nowStr}\n`;
   context += `【プロファイル】: ${memory.profile || '未設定'}\n`;
-  context += `【天気・気温】: ${memory.weather_info || '情報なし'}\n`;
+  context += `【天気・気温】: ${weatherDisplay}\n`;
   context += `【気圧急降下】: ${memory.pressure_alert === 'TRUE' ? '急降下中(注意)' : '安定'}\n`;
 
   // 用語辞書: ユーザー発言だけでなく、プロファイルや直近バッファ（rolling_memory）内の独自用語・作品名を
@@ -668,7 +715,8 @@ function getSpreadsheetContext(queryText) {
           }
         }
       }
-      return `[${t.id}] ${t.title}${t.dueDate ? ' (期限:' + t.dueDate + ')' : ''}${warningTag}`;
+      const memoPart = (t.memo && t.memo.trim()) ? ` (メモ:${t.memo.trim()})` : '';
+      return `[${t.id}] ${t.title}${t.dueDate ? ' (期限:' + t.dueDate + ')' : ''}${memoPart}${warningTag}`;
     });
     context += `未完了タスク: ${taskLines.join(' / ')}\n`;
   } else {
@@ -690,7 +738,14 @@ function getSpreadsheetContext(queryText) {
     context += `インプット未消化: ${inputItems.join(', ')}\n`;
   }
 
-  // ※ routines（ルーティン設定マスタ）は日中会話では不要なため完全除外
+  // 4. ルーティン設定マスタは「ルーティン」「定期」「習慣」が話題に出た時のみオンデマンド注入
+  if (queryText && /(ルーティン|定期|習慣)/.test(queryText)) {
+    const routines = getRoutines();
+    if (routines.length > 0) {
+      const routineItems = routines.map(r => `${r.ruleName}(${r.type}:${r.value})`);
+      context += `登録済み定期ルーティン: ${routineItems.join(', ')}\n`;
+    }
+  }
 
   return context.trim();
 }

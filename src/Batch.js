@@ -18,6 +18,7 @@ function dailyMidnightBatch() {
 
   const logs = getLogs();
   const tasks = getTasks();
+  const inputStock = getInputStockList();
   const memory = getMemory();
 
   let isDailyReportSuccess = false;
@@ -27,18 +28,19 @@ function dailyMidnightBatch() {
   // ----------------------------------------------------
   try {
     Logger.log('1. 日報生成 & Notion投稿処理開始');
-    // 前日および日付変更後〜午前3時までに完了したタスクを抽出
+    // 前日および日付変更後〜午前3時までに完了したタスク・消化したインプットを抽出
     const completedTasks = tasks.filter(t => t.status === '完了' && (t.completedDate === targetDateStr || t.completedDate === todayStr));
+    const consumedInputs = inputStock.filter(inp => inp.status === '完' && (inp.consumedDate === targetDateStr || inp.consumedDate === todayStr));
 
-    if (logs.length > 0 || completedTasks.length > 0) {
-      const dailyMarkdown = generateDailyReportMarkdown(logs, completedTasks, memory, targetDateStr);
+    if (logs.length > 0 || completedTasks.length > 0 || consumedInputs.length > 0) {
+      const dailyMarkdown = generateDailyReportMarkdown(logs, completedTasks, memory, targetDateStr, consumedInputs);
       const reportResult = createDailyReport(dailyMarkdown, targetDateStr);
       if (reportResult && reportResult.id) {
         isDailyReportSuccess = true;
         Logger.log('Notion日報投稿成功: ' + targetDateStr);
       }
     } else {
-      Logger.log('当日ログおよび完了タスクがないため、日報作成をスキップしました');
+      Logger.log('当日ログ・完了タスク・消化ストックがないため、日報作成をスキップしました');
       isDailyReportSuccess = true; // ログがないのでクリアしても問題なし
     }
   } catch (notionErr) {

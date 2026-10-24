@@ -495,7 +495,7 @@ function apiAddRoutine(authKey, payload) {
  */
 function apiUpdateMemoryField(authKey, key, value) {
   if (!verifyDashboardAccess(authKey)) throw new Error('Unauthorized');
-  const allowedKeys = ['profile', 'dictionary', 'rolling_memory', 'weekly_summary', 'cycle_stamps', 'custom_system_prompt'];
+  const allowedKeys = ['profile', 'dictionary', 'rolling_memory', 'weekly_summary', 'cycle_stamps', 'custom_system_prompt', 'system_prompt'];
   if (!allowedKeys.includes(key)) {
     throw new Error('変更が許可されていないキーです');
   }

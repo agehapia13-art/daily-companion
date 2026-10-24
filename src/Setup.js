@@ -68,6 +68,7 @@ function setupSpreadsheet() {
     memorySheet.appendRow(['weekly_summary', '睡眠時間は安定。中盤に肩こり・集中力低下の兆候あり。']);
     memorySheet.appendRow(['briefing_delivered_date', '']);
     memorySheet.appendRow(['monthly_report_ready', 'FALSE']);
+    memorySheet.appendRow(['system_prompt', '']);
     memorySheet.appendRow(['dictionary', '・ぽこあポケモン（ぽこあ）: Nintendo Switch 2用ゲーム（2026年3月5日発売予定）。スローライフ・サンドボックス作品。※スマホの「ポケポケ」とは全くの別物。\n・ぱずぎり: パズルアクションゲーム。\n・残響フラクタル: ユーザーが執筆・制作しているオリジナルの創作作品。']);
   }
 
@@ -235,6 +236,16 @@ function testDailyBriefingOutput() {
   const briefing = buildDailyBriefingText();
   Logger.log('\n' + briefing);
   Logger.log('=== デイリーブリーフィング生成テスト完了 ===');
+}
+
+/**
+ * 手動実行用: デフォルトの最新システムプロンプトをスプレッドシートの memory シート (system_prompt) に同期保存
+ * ※GASエディタから実行すると、現在のコード上の最新プロンプトがスプレッドシートへ書き込まれます。
+ */
+function syncSystemPromptToSpreadsheet() {
+  const promptText = getDefaultSystemPrompt();
+  setMemoryValue('system_prompt', promptText);
+  Logger.log('✅ スプレッドシートの memory シートに最新の system_prompt を保存しました！');
 }
 
 

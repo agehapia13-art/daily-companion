@@ -101,13 +101,18 @@ async function main() {
     }
     case 'set-prompt': {
       let promptContent = '';
-      if (arg1 && fs.existsSync(arg1)) {
+      if (!arg1) {
+        // 引数なしの場合: src/Gemini.js の getDefaultSystemPrompt() を自動抽出して反映
+        const vm = require('vm');
+        const code = fs.readFileSync(path.resolve(__dirname, '../src/Gemini.js'), 'utf8');
+        const ctx = {};
+        vm.runInNewContext(code, ctx);
+        promptContent = ctx.getDefaultSystemPrompt();
+        console.log('📄 src/Gemini.js から最新の getDefaultSystemPrompt() を抽出しました');
+      } else if (fs.existsSync(arg1)) {
         promptContent = fs.readFileSync(arg1, 'utf8');
-      } else if (arg1) {
-        promptContent = [arg1, ...rest].join(' ');
       } else {
-        console.error('使用法: node scripts/sheet-cli.js set-prompt <ファイルパスまたは文字列>');
-        process.exit(1);
+        promptContent = [arg1, ...rest].join(' ');
       }
       await setMemory('system_prompt', promptContent);
       break;

@@ -6,4 +6,6 @@ node_modules/
 *service_account*.json
 *.key.json
 service-account.json
+.env
+.env.*
 

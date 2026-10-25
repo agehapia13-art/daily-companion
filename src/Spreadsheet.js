@@ -53,13 +53,23 @@ function getLogs() {
 /**
   * 当日の会話ログを全件取得し、極小高密度の会話テキスト（HH:mm User: ... / AI: ...）に圧縮変換
   * 日時・秒・空列・重複を除去し、朝から夜までの全伏線を最小トークンで保持
+  * @param {string=} beforeTimestamp オプション: 指定日時（例: "2026-10-25 20:46:00"）より前のログのみを抽出（過去時点シミュレーション用）
   * @return {string}
   */
-function getCondensedTodayLogs() {
+function getCondensedTodayLogs(beforeTimestamp) {
   const allLogs = getLogs();
   if (allLogs.length === 0) return '';
 
-  const validPairs = allLogs.filter(log => log.message && log.message.trim() !== '');
+  const validPairs = allLogs.filter(log => {
+    if (!log.message || log.message.trim() === '') return false;
+    if (beforeTimestamp) {
+      const tStr = (log.timestamp instanceof Date)
+        ? Utilities.formatDate(log.timestamp, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss')
+        : String(log.timestamp);
+      if (tStr >= beforeTimestamp) return false;
+    }
+    return true;
+  });
   if (validPairs.length === 0) return '';
 
   const lines = [];
@@ -667,10 +677,11 @@ function filterRelevantDictionaryEntries(dictionaryText, queryText) {
  * Geminiへ送信用にスプレッドシートの現在状態を高密度テキスト（トークン最小化）として抽出
  * @param {string=} queryText ユーザー発言等の判定対象テキスト
  * @param {string=} todayLogsText 本日の会話履歴テキスト（辞書抽出の対象に含める）
+ * @param {Date=} simulatedNowDate シミュレーション用の現在日時（過去時点テスト用。省略時はnew Date()）
  * @return {string}
  */
-function getSpreadsheetContext(queryText, todayLogsText) {
-  const now = new Date();
+function getSpreadsheetContext(queryText, todayLogsText, simulatedNowDate) {
+  const now = simulatedNowDate || new Date();
   const nowStr = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd(E) HH:mm');
   const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 

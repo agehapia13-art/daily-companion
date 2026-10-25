@@ -248,4 +248,138 @@ function syncSystemPromptToSpreadsheet() {
   Logger.log('✅ スプレッドシートの memory シートに最新の system_prompt を保存しました！');
 }
 
+/**
+ * 共通ヘルパー: シーン別の新旧プロンプト比較実行
+ */
+function runPromptComparisonCase(sceneName, simulatedDateStr, simulatedLogsText, userMessage) {
+  const simulatedDate = new Date(simulatedDateStr.replace(' ', 'T') + '+09:00');
+  const sheetContext = getSpreadsheetContext(userMessage, simulatedLogsText, simulatedDate);
+  const calendarContext = getCalendarAndHolidayContext();
+  const combinedContext = `${sheetContext}\n\n${calendarContext}`;
+
+  const memory = getMemory();
+  const customSuffix = (memory.custom_system_prompt && memory.custom_system_prompt.trim() !== '')
+    ? `\n\n【追加カスタム指示（最優先フォーマット・ルール）】\n${memory.custom_system_prompt.trim()}`
+    : '';
+
+  const oldPrompt = (memory.system_prompt || '').trim() + customSuffix;
+  const newPrompt = getDefaultSystemPrompt().trim() + customSuffix;
+
+  Logger.log('============================================================');
+  Logger.log(`🧪 【${sceneName}】`);
+  Logger.log('⏰ シミュレーション日時: ' + Utilities.formatDate(simulatedDate, 'Asia/Tokyo', 'yyyy-MM-dd(E) HH:mm'));
+  Logger.log('💬 ユーザー発言: ' + userMessage);
+  Logger.log('============================================================');
+
+  const oldResult = callGeminiFlash(userMessage, [], combinedContext, simulatedLogsText, oldPrompt);
+  const newResult = callGeminiFlash(userMessage, [], combinedContext, simulatedLogsText, newPrompt);
+
+  Logger.log('\n--- 1. 旧プロンプト（当時スプシ版） ---\n' + (oldResult.reply_text || ''));
+  Logger.log('\n--- 2. 新プロンプト（今回再構築版） ---\n' + (newResult.reply_text || ''));
+  Logger.log('============================================================\n');
+}
+
+/**
+ * 手動テスト用: 主要シーンを一括比較テスト（Scene 1 〜 3）
+ */
+function testPromptComparisonSimulation() {
+  testScene1_EveningSnackWaiting();
+  testScene2_AfternoonPostGaming();
+  testScene3_NightWindDown();
+}
+
+/**
+ * シーン1: 日曜 20:46（食後・お菓子待ちの隙間時間 ※昼に『漱石』『音楽』提案済みの状態）
+ * 検証点: 重複の回避、放置タスク（ヘアブラシ掃除等）や手軽な手入れが拾えるか
+ */
+function testScene1_EveningSnackWaiting() {
+  const logs = getCondensedTodayLogs('2026-10-25 20:46:00');
+  runPromptComparisonCase(
+    'シーン1: 日曜夜20:46 お菓子待ち（昼に漱石・音楽提案済み）',
+    '2026-10-25 20:46:00',
+    logs,
+    'ご飯食べ終えてだいぶ経ったけど、今何して過ごすかちょっと悩んでる　家族が一緒に食べたいお菓子あるみたいだからすぐには寝ない'
+  );
+}
+
+/**
+ * シーン2: 日曜 14:30（午前中にぽこポケを満喫済・昼食後の1時間半の余白）
+ * 検証点: ゲーム充足後のクイックなスキルアップ（30分スケッチ・運指等）や前倒しタスクの自然な提案
+ */
+function testScene2_AfternoonPostGaming() {
+  const logs = '09:00 User: おはよう、朝ごはん食べた！\nAI: おはようございます！\n09:30 User: ぽこポケやってくるね\nAI: ぽこポケ、いってらっしゃい！\n12:00 User: ぽこポケ楽しかった〜！お昼ごはん食べる\nAI: たっぷり楽しめて良かったです！お昼ごはんいってらっしゃい！\n13:30 User: ごちそうさま！少しゴロゴロしたよ\nAI: お疲れさまでした！';
+  runPromptComparisonCase(
+    'シーン2: 休日午後14:30 ゲーム充足後の余白（16時風呂沸かしまで）',
+    '2026-10-25 14:30:00',
+    logs,
+    '16時にお風呂沸かすまで1時間半くらいあるんだけど、何して過ごそうかな'
+  );
+}
+
+/**
+ * シーン3: 平日 21:45（入浴・ドライヤー後の就寝前クールダウン時間）
+ * 検証点: 21:30以降のルール遵守（高覚醒タスク・ゲーム周回の除外、静かなクールダウン）
+ */
+function testScene3_NightWindDown() {
+  const logs = '19:30 User: 退勤したよ\nAI: 今日もお疲れさまでした！\n20:30 User: ご飯食べ終わった！\nAI: 夕食お疲れさまでした！\n21:15 User: お風呂入ってくる\nAI: ゆっくり温まってきてくださいね！';
+  runPromptComparisonCase(
+    'シーン3: 平日夜21:45 入浴後の就寝前クールダウン',
+    '2026-10-29 21:45:00',
+    logs,
+    'お風呂から上がって髪も乾かした！23時には寝たいけど、それまで何して過ごそうかな'
+  );
+}
+
+/**
+ * シーン4: 平日 08:00（朝食後の始業前ゆとり時間）
+ * 検証点: 「ごちそうさまでした」等の視点混同禁止、惰性の助長禁止、爽やかな朝時間活用の後押し
+ */
+function testScene4_MorningBuffer() {
+  const logs = '07:00 User: おはよう、起きた！\nAI: おはようございます！朝日を浴びて白湯を飲んでいきましょう。';
+  runPromptComparisonCase(
+    'シーン4: 平日朝08:00 始業前のゆとり時間（10時リモート始業まで）',
+    '2026-10-30 08:00:00',
+    logs,
+    '朝ごはん食べ終わった！10時のリモート始業までまだ2時間弱あるな'
+  );
+}
+
+/**
+ * シーン5: 準備行動の宣言（風呂掃除・お湯張り）
+ * 検証点: 「準備ができたら温まって〜」等の条件付き先回りの完全排除、1文での軽快な送り出し
+ */
+function testScene5_ActionSendOff() {
+  runPromptComparisonCase(
+    'シーン5: 準備行動の宣言（風呂掃除とお湯張り）',
+    '2026-10-25 17:00:00',
+    '',
+    'そろそろお風呂洗ってお湯張ってくるね'
+  );
+}
+
+/**
+ * シーン6: 体調不良・安静中だが暇を持て余している場面（日曜 11:20）
+ * 検証点: 立ち作業を除外しつつ、「寝てください」一辺倒や『漱石＋音楽』の固定化に陥らず、
+ *         横になったままできる複数チャンネル（スマホ手元タスク・映像/本・感覚休息等）を提案できるか
+ */
+function testScene6_SickAndBored() {
+  const logs = '09:00 User: おはよう、朝ごはん食べたよ\nAI: おはようございます！しっかり朝食が摂れて良かったです。';
+  runPromptComparisonCase(
+    'シーン6: 体調不良×暇（お腹が重く横になっているが眠くはなく手持ち無沙汰）',
+    '2026-10-25 11:20:00',
+    logs,
+    'お腹が重たくて横になってるんだけど、全然眠くはなくて暇なんだよね。13時のお昼まで何して過ごそう'
+  );
+}
+
+/**
+ * 手動テスト用: シーン4・5・6を一括比較テスト
+ */
+function testScene4to6() {
+  testScene4_MorningBuffer();
+  testScene5_ActionSendOff();
+  testScene6_SickAndBored();
+}
+
+
 

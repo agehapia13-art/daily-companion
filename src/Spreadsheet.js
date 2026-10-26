@@ -26,6 +26,82 @@ function getOrCreateSheet(sheetName) {
   return sheet;
 }
 
+/**
+ * フィルター（BasicFilter）の有無や非表示行に左右されず、安全かつ確実にシート末尾へ行データを追記
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {Array<any>} rowData 追記する1行のデータ配列
+ */
+function appendRowSafely_(sheet, rowData) {
+  if (!sheet || !rowData || !Array.isArray(rowData)) return;
+
+  // 1. A列を走査して空文字ではない真の最終行（realLastRow）を特定
+  const lastRow = sheet.getLastRow();
+  let realLastRow = 0;
+  if (lastRow > 0) {
+    const aValues = sheet.getRange(1, 1, lastRow, 1).getValues();
+    for (let i = aValues.length - 1; i >= 0; i--) {
+      if (aValues[i][0] !== '' && aValues[i][0] !== null && aValues[i][0] !== undefined) {
+        realLastRow = i + 1;
+        break;
+      }
+    }
+  }
+  const targetRow = realLastRow + 1;
+  const maxRows = sheet.getMaxRows();
+  if (targetRow > maxRows) {
+    sheet.insertRowsAfter(maxRows, Math.max(20, targetRow - maxRows));
+  }
+
+  // 2. 基本フィルター（BasicFilter）が存在する場合、一時的に解除して書き込み後に再適用
+  const filter = sheet.getFilter();
+  let filterCriteriaMap = null;
+  let filterRange = null;
+
+  if (filter) {
+    try {
+      filterRange = filter.getRange();
+      filterCriteriaMap = {};
+      const numCols = filterRange.getNumColumns();
+      const startCol = filterRange.getColumn();
+      for (let c = 0; c < numCols; c++) {
+        const colIndex = startCol + c;
+        const criteria = filter.getColumnFilterCriteria(colIndex);
+        if (criteria) {
+          filterCriteriaMap[colIndex] = criteria;
+        }
+      }
+      filter.remove();
+    } catch (e) {
+      Logger.log('フィルター情報取得/解除中の軽微な警告: ' + e.message);
+    }
+  }
+
+  // 3. 明示的な行座標指定（setValues）で確実に書き込み
+  sheet.getRange(targetRow, 1, 1, rowData.length).setValues([rowData]);
+  SpreadsheetApp.flush();
+
+  // 4. フィルターが元々存在していた場合、拡張した範囲で再適用して元の条件を復元
+  if (filterRange) {
+    try {
+      const newMaxRow = Math.max(filterRange.getLastRow(), targetRow);
+      const newFilterRange = sheet.getRange(
+        filterRange.getRow(),
+        filterRange.getColumn(),
+        newMaxRow - filterRange.getRow() + 1,
+        filterRange.getNumColumns()
+      );
+      const newFilter = newFilterRange.createFilter();
+      if (filterCriteriaMap) {
+        for (const colStr in filterCriteriaMap) {
+          newFilter.setColumnFilterCriteria(parseInt(colStr, 10), filterCriteriaMap[colStr]);
+        }
+      }
+    } catch (e) {
+      Logger.log('フィルター再適用中の軽微な警告: ' + e.message);
+    }
+  }
+}
+
 // ==========================================
 // 1. logs (会話ログ・直近30日ローリング保持) 操作
 // ヘッダー: [時刻, 発言者, メッセージ, 画像URL, AI返答, 入力トークン, 出力トークン, キャッシュトークン, 合計トークン]
@@ -157,7 +233,7 @@ function appendLog(timestamp, sender, message, imageUrl, aiReply, tokenUsage) {
   const cachedTokens = tokenUsage ? (tokenUsage.cachedContentTokenCount || 0) : '';
   const totalTokens = tokenUsage ? (tokenUsage.totalTokenCount || 0) : '';
 
-  sheet.appendRow([
+  appendRowSafely_(sheet, [
     timestamp || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss'),
     sender || 'user',
     message || '',
@@ -287,7 +363,7 @@ function applyTaskActions(actions) {
       const taskId = 'T_' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmmss') + '_' + Math.floor(Math.random() * 1000);
       const dueDate = act.due_date || '';
       const memo = act.memo ? String(act.memo).trim() : '';
-      sheet.appendRow([taskId, act.title, dueDate, '未完了', todayStr, '', memo]);
+      appendRowSafely_(sheet, [taskId, act.title, dueDate, '未完了', todayStr, '', memo]);
       const formattedTitle = formatTaskTitleWithBadge(act.title);
       results.push(`📝 タスク追加: ${formattedTitle}${dueDate ? ` (期限: ${dueDate})` : ''}`);
     } else if (act.action === 'update') {
@@ -385,7 +461,7 @@ function applyRoutineActions(actions) {
     if (act.action === 'add' && act.title) {
       const type = act.type || 'day_of_week';
       const value = act.value || 'MON';
-      sheet.appendRow([act.title, type, value, '', act.memo || '']);
+      appendRowSafely_(sheet, [act.title, type, value, '', act.memo || '']);
       results.push(`🔄 ルーティン追加: ${act.title} (${value})`);
     }
   }
@@ -448,7 +524,7 @@ function applyShoppingActions(actions) {
     if (!act || !act.action) continue;
 
     if (act.action === 'add' && act.item) {
-      sheet.appendRow([act.item, act.category || '日用品', '未買', todayStr]);
+      appendRowSafely_(sheet, [act.item, act.category || '日用品', '未買', todayStr]);
       results.push(`🛒 買物リスト追加: ${act.item}`);
     } else if (act.action === 'complete' && act.item) {
       const items = getShoppingList();
@@ -522,7 +598,7 @@ function applyInputStockActions(actions) {
     if (!act || !act.action) continue;
 
     if (act.action === 'add' && act.title) {
-      sheet.appendRow([act.type || '映画', act.title, act.memo || '', '未', '']);
+      appendRowSafely_(sheet, [act.type || '映画', act.title, act.memo || '', '未', '']);
       results.push(`🎬 インプット追加: ${act.title}`);
     } else if (act.action === 'complete' && act.title) {
       const list = getInputStockList();
@@ -625,7 +701,7 @@ function setMemoryValue(key, value) {
   }
 
   // 見つからなかった場合のみ新規行として追加
-  sheet.appendRow([key, String(value)]);
+  appendRowSafely_(sheet, [key, String(value)]);
 }
 
 /**

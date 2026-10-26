@@ -167,7 +167,7 @@ function dailyMidnightBatch() {
 
       if (shouldGenerate) {
         const taskId = 'R_' + Utilities.formatDate(now, 'Asia/Tokyo', 'yyyyMMdd') + '_' + (i + 1);
-        taskSheet.appendRow([
+        appendRowSafely_(taskSheet, [
           taskId,
           r.ruleName,
           todayStr,

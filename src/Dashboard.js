@@ -336,7 +336,7 @@ function apiAddTask(authKey, payload) {
   const dueDate = (payload.dueDate || '').trim();
   const memo = (payload.memo || '').trim();
 
-  sheet.appendRow([taskId, fullTitle, dueDate, '未完了', todayStr, '', memo]);
+  appendRowSafely_(sheet, [taskId, fullTitle, dueDate, '未完了', todayStr, '', memo]);
   return { success: true, taskId: taskId };
 }
 
@@ -389,7 +389,7 @@ function apiAddShoppingItem(authKey, item, category) {
   if (!item || !item.trim()) throw new Error('品名を入力してください');
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.SHOPPING);
   const todayStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
-  sheet.appendRow([item.trim(), (category || '日用品').trim(), '未買', todayStr]);
+  appendRowSafely_(sheet, [item.trim(), (category || '日用品').trim(), '未買', todayStr]);
   return { success: true };
 }
 
@@ -419,7 +419,7 @@ function apiAddInputStock(authKey, payload) {
   if (!verifyDashboardAccess(authKey)) throw new Error('Unauthorized');
   if (!payload || !payload.title || !payload.title.trim()) throw new Error('タイトルを入力してください');
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.INPUT_STOCK);
-  sheet.appendRow([
+  appendRowSafely_(sheet, [
     (payload.type || '映画').trim(),
     payload.title.trim(),
     (payload.memo || '').trim(),
@@ -476,7 +476,7 @@ function apiAddRoutine(authKey, payload) {
   if (!verifyDashboardAccess(authKey)) throw new Error('Unauthorized');
   if (!payload || !payload.ruleName || !payload.ruleName.trim()) throw new Error('ルール名を入力してください');
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.ROUTINES);
-  sheet.appendRow([
+  appendRowSafely_(sheet, [
     payload.ruleName.trim(),
     (payload.type || 'day_of_week').trim(),
     (payload.value || 'MON').trim(),

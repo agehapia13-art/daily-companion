@@ -17,7 +17,12 @@ function setupSpreadsheet() {
   let logsSheet = ss.getSheetByName(SYSTEM_CONSTANTS.SHEET_NAMES.LOGS);
   if (!logsSheet) logsSheet = ss.insertSheet(SYSTEM_CONSTANTS.SHEET_NAMES.LOGS);
   if (logsSheet.getLastRow() === 0) {
-    logsSheet.appendRow(['時刻', '発言者', 'メッセージ', '画像URL', 'AI返答']);
+    logsSheet.appendRow(['時刻', '発言者', 'メッセージ', '画像URL', 'AI返答', '入力トークン', '出力トークン', 'キャッシュトークン', '合計トークン']);
+    formatHeaderRow_(logsSheet);
+  } else if (logsSheet.getLastColumn() < 9) {
+    // 既存シートのヘッダーを9列へ自動拡張
+    const newHeaders = ['入力トークン', '出力トークン', 'キャッシュトークン', '合計トークン'];
+    logsSheet.getRange(1, 6, 1, 4).setValues([newHeaders]);
     formatHeaderRow_(logsSheet);
   }
 

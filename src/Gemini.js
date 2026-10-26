@@ -190,11 +190,11 @@ F. 【過ごし方の相談・空き時間の発生】
 }
 
 /**
- * Gemini API への共通リクエスト＆自動リトライ関数（503/429対策・思考パート除外）
+ * Gemini API への共通リクエスト＆自動リトライ関数（503/429対策・思考パート除外・usageMetadata取得）
  * @param {Object} requestPayload
- * @return {string} 抽出されたレスポンステキスト
+ * @return {{text: string, usage: Object|null}} 抽出されたテキストおよび使用量メタデータ
  */
-function fetchGeminiTextWithRetry(requestPayload) {
+function fetchGeminiResultWithRetry(requestPayload) {
   const config = getConfig();
   const url = `${SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE}?key=${config.geminiApiKey}`;
   const options = {
@@ -260,7 +260,19 @@ function fetchGeminiTextWithRetry(requestPayload) {
     throw new Error('Gemini APIからテキスト返答が得られませんでした。');
   }
 
-  return contentText.trim();
+  return {
+    text: contentText.trim(),
+    usage: jsonResponse.usageMetadata || null
+  };
+}
+
+/**
+ * テキストのみを取得するレガシー互換ラッパー
+ * @param {Object} requestPayload
+ * @return {string}
+ */
+function fetchGeminiTextWithRetry(requestPayload) {
+  return fetchGeminiResultWithRetry(requestPayload).text;
 }
 
 /**
@@ -323,7 +335,8 @@ function callGeminiFlash(userText, imageBlobs, contextText, todayLogsText, custo
     ]
   };
 
-  let cleaned = fetchGeminiTextWithRetry(requestPayload);
+  const geminiResult = fetchGeminiResultWithRetry(requestPayload);
+  let cleaned = geminiResult.text;
   if (cleaned.startsWith('```json')) {
     cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
   } else if (cleaned.startsWith('```')) {
@@ -331,7 +344,11 @@ function callGeminiFlash(userText, imageBlobs, contextText, todayLogsText, custo
   }
 
   try {
-    return JSON.parse(cleaned);
+    const parsed = JSON.parse(cleaned);
+    if (parsed && typeof parsed === 'object') {
+      parsed._usage = geminiResult.usage;
+    }
+    return parsed;
   } catch (err) {
     Logger.log('JSONパース失敗: ' + cleaned);
     return {
@@ -340,7 +357,8 @@ function callGeminiFlash(userText, imageBlobs, contextText, todayLogsText, custo
       calendar_actions: [],
       shopping_actions: [],
       input_stock_actions: [],
-      routine_actions: []
+      routine_actions: [],
+      _usage: geminiResult.usage
     };
   }
 }

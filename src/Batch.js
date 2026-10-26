@@ -16,7 +16,14 @@ function dailyMidnightBatch() {
   const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const targetDateStr = Utilities.formatDate(yesterday, 'Asia/Tokyo', 'yyyy-MM-dd');
 
-  const logs = getLogs();
+  // 前日および当日未明（03:00まで）のログを集約
+  const logsYesterday = getLogs(targetDateStr);
+  const logsTodayEarly = getLogs(todayStr).filter(l => {
+    const tStr = l.timestampStr || '';
+    return tStr.includes(' 00:') || tStr.includes(' 01:') || tStr.includes(' 02:');
+  });
+  const logs = logsYesterday.concat(logsTodayEarly);
+
   const tasks = getTasks();
   const inputStock = getInputStockList();
   const memory = getMemory();
@@ -205,18 +212,18 @@ function dailyMidnightBatch() {
   }
 
   // ----------------------------------------------------
-  // 6. ログ整理 (Notion日報成功時のみ安全にクリア)
+  // 6. ログ整理 (直近30日分はスプレッドシートに保持し、30日を超えた古いログのみ安全に整理)
   // ----------------------------------------------------
   try {
     if (isDailyReportSuccess) {
-      Logger.log('6. 当日ログクリア処理開始 (日報投稿成功確認済み)');
-      clearDailyLogs();
-      Logger.log('当日ログクリア完了');
+      Logger.log('6. ログローリング整理処理開始 (直近30日保持・日報投稿成功確認済み)');
+      cleanOldLogs(30);
+      Logger.log('ログローリング整理完了');
     } else {
-      Logger.log('⚠️ Notion日報投稿が完了していないため、ログクリアを保留しました (データ保護)');
+      Logger.log('⚠️ Notion日報投稿が完了していないため、ログ整理を保留しました (データ保護)');
     }
   } catch (clearErr) {
-    Logger.log('ログクリアエラー: ' + clearErr.message);
+    Logger.log('ログ整理エラー: ' + clearErr.message);
   }
 
   Logger.log('=== 深夜統合バッチ終了 ===');

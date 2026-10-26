@@ -27,45 +27,79 @@ function getOrCreateSheet(sheetName) {
 }
 
 // ==========================================
-// 1. logs (当日ログ) 操作
-// ヘッダー: [時刻, 発言者, メッセージ, 画像URL, AI返答]
+// 1. logs (会話ログ・直近30日ローリング保持) 操作
+// ヘッダー: [時刻, 発言者, メッセージ, 画像URL, AI返答, 入力トークン, 出力トークン, キャッシュトークン, 合計トークン]
 // ==========================================
 
 /**
- * 当日の会話ログを全件取得
+ * 会話ログを取得（targetDateStr 指定時はその日付のみ、未指定時は全件）
+ * @param {string=} targetDateStr オプション: 'yyyy-MM-dd' 形式で特定日付のログのみ抽出
  * @return {Array<Object>} ログ一覧
  */
-function getLogs() {
+function getLogs(targetDateStr) {
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.LOGS);
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
 
-  const values = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
-  return values.map(row => ({
-    timestamp: row[0],
-    sender: row[1],
-    message: String(row[2] || ''),
-    imageUrl: String(row[3] || ''),
-    aiReply: String(row[4] || '')
-  }));
+  const values = sheet.getRange(2, 1, lastRow - 1, Math.min(sheet.getLastColumn(), 9)).getValues();
+  const logs = [];
+
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+    const timestamp = row[0];
+    const tStr = (timestamp instanceof Date)
+      ? Utilities.formatDate(timestamp, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss')
+      : String(timestamp || '');
+
+    if (targetDateStr) {
+      if (!tStr.startsWith(targetDateStr)) continue;
+    }
+
+    logs.push({
+      timestamp: timestamp,
+      timestampStr: tStr,
+      sender: row[1],
+      message: String(row[2] || ''),
+      imageUrl: String(row[3] || ''),
+      aiReply: String(row[4] || ''),
+      promptTokens: row[5] || 0,
+      candidatesTokens: row[6] || 0,
+      cachedTokens: row[7] || 0,
+      totalTokens: row[8] || 0
+    });
+  }
+
+  return logs;
 }
 
 /**
   * 当日の会話ログを全件取得し、極小高密度の会話テキスト（HH:mm User: ... / AI: ...）に圧縮変換
   * 日時・秒・空列・重複を除去し、朝から夜までの全伏線を最小トークンで保持
   * @param {string=} beforeTimestamp オプション: 指定日時（例: "2026-10-25 20:46:00"）より前のログのみを抽出（過去時点シミュレーション用）
+  * @param {string=} targetDateStr オプション: 指定日付（例: "2026-10-25"）のログのみ抽出（過去シミュレーション用。省略時は今日の日付）
   * @return {string}
   */
-function getCondensedTodayLogs(beforeTimestamp) {
-  const allLogs = getLogs();
+function getCondensedTodayLogs(beforeTimestamp, targetDateStr) {
+  // 指定日付または今日（JST）の日付のログのみを抽出（過去ログ蓄積があっても当日のログだけを安全に抽出）
+  let filterDateStr = targetDateStr;
+  if (!filterDateStr) {
+    if (beforeTimestamp) {
+      const match = beforeTimestamp.match(/^(\d{4}-\d{2}-\d{2})/);
+      filterDateStr = match ? match[1] : Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+    } else {
+      filterDateStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+    }
+  }
+
+  const allLogs = getLogs(filterDateStr);
   if (allLogs.length === 0) return '';
 
   const validPairs = allLogs.filter(log => {
     if (!log.message || log.message.trim() === '') return false;
     if (beforeTimestamp) {
-      const tStr = (log.timestamp instanceof Date)
+      const tStr = log.timestampStr || ((log.timestamp instanceof Date)
         ? Utilities.formatDate(log.timestamp, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss')
-        : String(log.timestamp);
+        : String(log.timestamp));
       if (tStr >= beforeTimestamp) return false;
     }
     return true;
@@ -108,33 +142,73 @@ function getCondensedTodayLogs(beforeTimestamp) {
 }
 
 /**
- * ログを追加
+ * ログを追加（トークン使用量メタデータ対応）
  * @param {string} timestamp 日時文字列
  * @param {string} sender 発言者（user / ai）
  * @param {string} message メッセージ本文
  * @param {string} imageUrl 関連画像URL
  * @param {string} aiReply AIの返答内容
+ * @param {Object=} tokenUsage オプション: Gemini usageMetadata ({ promptTokenCount, candidatesTokenCount, cachedContentTokenCount, totalTokenCount })
  */
-function appendLog(timestamp, sender, message, imageUrl, aiReply) {
+function appendLog(timestamp, sender, message, imageUrl, aiReply, tokenUsage) {
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.LOGS);
+  const promptTokens = tokenUsage ? (tokenUsage.promptTokenCount || 0) : '';
+  const candidatesTokens = tokenUsage ? (tokenUsage.candidatesTokenCount || 0) : '';
+  const cachedTokens = tokenUsage ? (tokenUsage.cachedContentTokenCount || 0) : '';
+  const totalTokens = tokenUsage ? (tokenUsage.totalTokenCount || 0) : '';
+
   sheet.appendRow([
     timestamp || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss'),
     sender || 'user',
     message || '',
     imageUrl || '',
-    aiReply || ''
+    aiReply || '',
+    promptTokens,
+    candidatesTokens,
+    cachedTokens,
+    totalTokens
   ]);
 }
 
 /**
- * ログシートをクリア（ヘッダー行は残す）
+ * 指定日数（デフォルト30日）を超えた古いログを安全にパージ
+ * @param {number=} retentionDays 保持日数（デフォルト30日）
  */
-function clearDailyLogs() {
+function cleanOldLogs(retentionDays) {
+  const days = (typeof retentionDays === 'number' && retentionDays > 0) ? retentionDays : 30;
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.LOGS);
   const lastRow = sheet.getLastRow();
-  if (lastRow > 1) {
-    sheet.deleteRows(2, lastRow - 1);
+  if (lastRow <= 1) return;
+
+  const now = new Date();
+  const cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
+  const cutoffStr = Utilities.formatDate(cutoffDate, 'Asia/Tokyo', 'yyyy-MM-dd 00:00:00');
+
+  const values = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  let deleteCount = 0;
+  for (let i = 0; i < values.length; i++) {
+    const val = values[i][0];
+    const tStr = (val instanceof Date)
+      ? Utilities.formatDate(val, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss')
+      : String(val);
+    if (tStr < cutoffStr) {
+      deleteCount++;
+    } else {
+      break; // ログは時系列昇順のため、閾値以降は残す
+    }
   }
+
+  if (deleteCount > 0) {
+    sheet.deleteRows(2, deleteCount);
+    Logger.log(`[cleanOldLogs] ${deleteCount} 件の古いログ(${days}日超過)を削除しました`);
+  }
+}
+
+/**
+ * ログシートの整理（直近30日を保持して古いログのみ安全にパージ）
+ */
+function clearDailyLogs() {
+  cleanOldLogs(30);
 }
 
 // ==========================================

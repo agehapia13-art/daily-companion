@@ -175,7 +175,7 @@ function doPost(e) {
             clearImageBuffer();
           }
 
-          // ログ追記 (画像内容の要約があればテキストに統合して保存し、文脈を永続化)
+          // ログ追記 (画像内容の要約があればテキストに統合して保存し、トークン使用量・キャッシュ状況も記録)
           const nowStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
           const imgUrlString = imageUrls.join('\n');
           let loggedUserText = userText;
@@ -183,7 +183,8 @@ function doPost(e) {
             const imgDesc = `[画像内容: ${aiResult.image_summary.trim()}]`;
             loggedUserText = loggedUserText ? `${loggedUserText}\n${imgDesc}` : imgDesc;
           }
-          appendLog(nowStr, 'user', loggedUserText, imgUrlString, replyText);
+          const tokenUsage = (aiResult && aiResult._usage) ? aiResult._usage : null;
+          appendLog(nowStr, 'user', loggedUserText, imgUrlString, replyText, tokenUsage);
 
           // メモリー更新: 日中の通常チャットでの profile 勝手な上書きを禁止（深夜バッチで1日まとめて慎重に代謝）
           // ※「プロファイル更新して」「設定変更して」等、ユーザーが明示的にプロファイル変更を求めた場合のみ日中反映

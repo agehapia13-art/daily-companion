@@ -79,10 +79,11 @@ function doPost(e) {
         const imageUrls = bufferedImages.urls;
 
         // C. 本日の全会話ログ（極小高密度フォーマット: HH:mm User: ... / AI: ...）およびコンテキスト情報の取得
+        // ※静的なカレンダー予定とシート情報を先頭にまとめ、毎分変わる現在日時・会話ログを末尾にしてプレフィックスキャッシュを保護
         const todayLogsCondensed = getCondensedTodayLogs();
         const sheetContext = getSpreadsheetContext(userText, todayLogsCondensed);
         const calendarContext = getCalendarAndHolidayContext();
-        const combinedContext = `${sheetContext}\n\n${calendarContext}`;
+        const combinedContext = `${calendarContext}\n\n${sheetContext}`;
 
         // D. Gemini 3.8 Flash 呼び出し（JSON取得）
         let aiResult;

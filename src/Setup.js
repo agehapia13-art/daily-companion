@@ -215,7 +215,7 @@ function runPromptScenario(scenario) {
 
     if (isSamePrompt) {
       const sheetCtx = getSpreadsheetContext(turn.user, candidateLogs, simulatedDate);
-      const res = callGeminiFlash(turn.user, [], `${sheetCtx}\n\n${calendarContext}`, candidateLogs, candidatePrompt);
+      const res = callGeminiFlash(turn.user, [], `${calendarContext}\n\n${sheetCtx}`, candidateLogs, candidatePrompt);
       const reply = res.reply_text || '';
       Logger.log(`\n【AI応答】:\n${reply}${formatActionSummary_(res)}`);
 
@@ -225,8 +225,8 @@ function runPromptScenario(scenario) {
       const liveSheetCtx = getSpreadsheetContext(turn.user, liveLogs, simulatedDate);
       const candSheetCtx = getSpreadsheetContext(turn.user, candidateLogs, simulatedDate);
 
-      const liveRes = callGeminiFlash(turn.user, [], `${liveSheetCtx}\n\n${calendarContext}`, liveLogs, livePrompt);
-      const candRes = callGeminiFlash(turn.user, [], `${candSheetCtx}\n\n${calendarContext}`, candidateLogs, candidatePrompt);
+      const liveRes = callGeminiFlash(turn.user, [], `${calendarContext}\n\n${liveSheetCtx}`, liveLogs, livePrompt);
+      const candRes = callGeminiFlash(turn.user, [], `${calendarContext}\n\n${candSheetCtx}`, candidateLogs, candidatePrompt);
 
       const liveReply = liveRes.reply_text || '';
       const candReply = candRes.reply_text || '';

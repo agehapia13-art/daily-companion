@@ -238,6 +238,14 @@ function fetchGeminiTextWithRetry(requestPayload) {
   }
 
   const jsonResponse = JSON.parse(responseText);
+
+  // トークン使用量およびキャッシュヒット状況のロギング
+  if (jsonResponse.usageMetadata) {
+    const u = jsonResponse.usageMetadata;
+    const cached = u.cachedContentTokenCount || 0;
+    Logger.log(`[Gemini Token Usage] Prompt: ${u.promptTokenCount}, Candidates: ${u.candidatesTokenCount}, Cached: ${cached}, Total: ${u.totalTokenCount}`);
+  }
+
   let contentText = '';
   if (jsonResponse.candidates && jsonResponse.candidates.length > 0 && jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts) {
     const parts = jsonResponse.candidates[0].content.parts;

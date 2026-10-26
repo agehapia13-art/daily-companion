@@ -695,8 +695,9 @@ function getSpreadsheetContext(queryText, todayLogsText, simulatedNowDate) {
     weatherDisplay = weatherDisplay.split('｜')[0].trim();
   }
 
-  let context = `【現在日時】: ${nowStr}\n`;
-  context += `【プロファイル】: ${memory.profile || '未設定'}\n`;
+  // --- 【静的・準静的コンテキスト（プレフィックス安定化・キャッシュ適合）】 ---
+  // ※プロファイル・用語辞書・記憶・タスク等を先頭に集約し、プレフィックス共通部分を4,096トークン以上に最大化する
+  let context = `【プロファイル】: ${memory.profile || '未設定'}\n`;
   context += `【天気・気温】: ${weatherDisplay}\n`;
   context += `【気圧急降下】: ${memory.pressure_alert === 'TRUE' ? '急降下中(注意)' : '安定'}\n`;
 
@@ -769,6 +770,10 @@ function getSpreadsheetContext(queryText, todayLogsText, simulatedNowDate) {
       context += `登録済み定期ルーティン: ${routineItems.join(', ')}\n`;
     }
   }
+
+  // --- 【動的コンテキスト（毎分可変）】 ---
+  // ※分単位で変化する現在日時は末尾に配置し、先行する静的情報のプレフィックスキャッシュを保護する
+  context += `【現在日時】: ${nowStr}\n`;
 
   return context.trim();
 }

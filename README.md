@@ -2,6 +2,8 @@
 
 サウンドディレクター専属の生活伴走アシスタントとして、LINE・Google Apps Script (GAS)・Gemini 3.8 Flash・Googleスプレッドシート・Googleカレンダー・Notion API・Open-Meteoを完全統合したパーソナル自動化システムです。
 
+> 🧭 **最高憲章**: 本システムの存在意義・思想定義・行動原理は [GRAND_DESIGN.md](file:///Users/yasudayuki/Documents/antigravity/resilient-noether/GRAND_DESIGN.md) に完全定義されています。すべての機能・プロンプト・改修は本グランドデザインを北極星として設計されます。
+
 ---
 
 ## 🌟 システムの特徴と主要アーキテクチャ

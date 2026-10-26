@@ -1,6 +1,6 @@
 # 生活伴走システム プロンプト設計・改修ガバナンスルール
 
-本プロジェクト（`daily-companion`）におけるシステムプロンプトの改修・改善を行う際、エージェントは必ず以下の原則とアーキテクチャを厳格に順守しなければならない。
+本プロジェクト（`daily-companion`）におけるシステムプロンプトの改修・改善を行う際、エージェントは必ず最上位憲章である [GRAND_DESIGN.md](file:///Users/yasudayuki/Documents/antigravity/resilient-noether/GRAND_DESIGN.md) の思想定義、および以下の原則・アーキテクチャを厳格に順守しなければならない。
 
 ---
 

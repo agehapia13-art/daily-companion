@@ -1489,17 +1489,17 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
 
     <!-- 4. 周期・記憶タブ -->
     <section id="tab-memory" class="tab-panel" style="display:none;">
-      <!-- 周期メンテナンススタンプ -->
+      <!-- 周期・活動履歴スタンプ -->
       <div class="toolbar">
-        <div class="section-summary">🔄 周期メンテナンス</div>
-        <button class="icon-btn" onclick="openMemoryEditModal('cycle_stamps_raw', '周期メンテナンス記録')">✎ 編集</button>
+        <div class="section-summary">🔄 周期メンテ・活動履歴</div>
+        <button class="icon-btn" onclick="openMemoryEditModal('cycle_stamps_raw', '周期メンテ・活動履歴')">✎ 編集</button>
       </div>
       <div id="stampGridContainer" class="stamp-grid"></div>
 
       <div class="quick-add-box" style="margin-bottom:24px;">
-        <div class="form-label">＋ 新しい周期記録を追加・更新</div>
+        <div class="form-label">＋ 新しい周期・活動記録を追加・更新</div>
         <div class="quick-add-row">
-          <input type="text" id="newStampLabel" class="organic-input" style="flex:1;" placeholder="例：ギター弦交換、美容院、シーツ洗濯">
+          <input type="text" id="newStampLabel" class="organic-input" style="flex:1;" placeholder="例：読書、ギター演奏、爪切り、美容院">
           <button class="btn-primary" onclick="addNewCycleStamp()">今日実施で記録</button>
         </div>
       </div>
@@ -1539,11 +1539,11 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
         <div id="memRolling" class="memory-content"></div>
       </div>
 
-      <!-- 週間サマリー -->
+      <!-- 直近生活・活動サマリー -->
       <div class="memory-card">
         <div class="memory-header">
-          <div class="memory-title">🍵 体調・睡眠サマリー</div>
-          <button class="icon-btn" onclick="openMemoryEditModal('weekly_summary', '体調・睡眠サマリー')">✎ 編集</button>
+          <div class="memory-title">🍵 直近生活・活動サマリー</div>
+          <button class="icon-btn" onclick="openMemoryEditModal('weekly_summary', '直近生活・活動サマリー')">✎ 編集</button>
         </div>
         <div id="memWeekly" class="memory-content"></div>
       </div>
@@ -2521,7 +2521,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
 
       const stampGrid = document.getElementById('stampGridContainer');
       if (stamps.length === 0) {
-        stampGrid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;">周期スタンプはまだ記録されていません。</div>';
+        stampGrid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;">周期・活動スタンプはまだ記録されていません。</div>';
       } else {
         stampGrid.innerHTML = stamps.map(s => {
           const daysText = (s.elapsedDays !== null && s.elapsedDays !== undefined)

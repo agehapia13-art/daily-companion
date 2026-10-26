@@ -715,13 +715,13 @@ function getSpreadsheetContext(queryText, todayLogsText, simulatedNowDate) {
     context += `【直近活動・関心バッファ】:\n${memory.rolling_memory}\n`;
   }
   if (memory.weekly_summary) {
-    context += `【直近サマリー】: ${memory.weekly_summary}\n`;
+    context += `【直近1〜2週間の生活・活動サマリー】: ${memory.weekly_summary}\n`;
   }
   if (memory.monthly_report_ready === 'TRUE') {
     context += `【月報通知フラグ】: TRUE\n`;
   }
   if (memory.cycle_stamps && memory.cycle_stamps.trim() !== '') {
-    context += `【周期・スキルアップ履歴（cycle_stamps）】:\n${memory.cycle_stamps.trim()}\n`;
+    context += `【活動・メンテナンス最終記録（cycle_stamps）】:\n${memory.cycle_stamps.trim()}\n`;
   }
 
   // 1. 未完了タスクのみを超圧縮 (完了・破棄は完全除外)

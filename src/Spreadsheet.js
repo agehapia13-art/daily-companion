@@ -574,7 +574,8 @@ function getMemory() {
     system_prompt: '',
     custom_system_prompt: '',
     rolling_memory: '',
-    dictionary: ''
+    dictionary: '',
+    ideal_self: ''
   };
 
   if (lastRow <= 1) return memoryObj;
@@ -748,6 +749,51 @@ function filterRelevantDictionaryEntries(dictionaryText, queryText) {
 }
 
 /**
+ * 会話履歴テキストから直近のログ記録時刻（HH:mm）を抽出
+ * @param {string} todayLogsText
+ * @return {string|null}
+ */
+function extractLastLogTime(todayLogsText) {
+  if (!todayLogsText || typeof todayLogsText !== 'string') return null;
+  const lines = todayLogsText.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const match = lines[i].match(/^(\d{1,2}:\d{2})/);
+    if (match) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
+/**
+ * 直前のやり取り時刻と現在日時の差分を計算し、経過時間テキストを生成
+ * @param {string|null} lastTimeStr 'HH:mm'
+ * @param {Date} nowDate
+ * @return {string}
+ */
+function formatElapsedTime(lastTimeStr, nowDate) {
+  if (!lastTimeStr) return 'なし（本日初回の発言）';
+  const parts = lastTimeStr.split(':');
+  const lastMinutes = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+  const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes();
+
+  let diff = nowMinutes - lastMinutes;
+  if (diff < 0) {
+    diff += 24 * 60; // 日またぎ
+  }
+
+  if (diff < 1) {
+    return '1分未満（直前のやり取り直後）';
+  } else if (diff < 60) {
+    return `${diff}分経過`;
+  } else {
+    const hours = Math.floor(diff / 60);
+    const mins = diff % 60;
+    return `${hours}時間${mins > 0 ? mins + '分' : ''}経過（計${diff}分）`;
+  }
+}
+
+/**
  * Geminiへ送信用にスプレッドシートの現在状態を高密度テキスト（トークン最小化）として抽出
  * @param {string=} queryText ユーザー発言等の判定対象テキスト
  * @param {string=} todayLogsText 本日の会話履歴テキスト（辞書抽出の対象に含める）
@@ -770,8 +816,11 @@ function getSpreadsheetContext(queryText, todayLogsText, simulatedNowDate) {
   }
 
   // --- 【静的・準静的コンテキスト（プレフィックス安定化・キャッシュ適合）】 ---
-  // ※プロファイル・用語辞書・記憶・タスク等を先頭に集約し、プレフィックス共通部分を4,096トークン以上に最大化する
+  // ※プロファイル・理念・用語辞書・記憶・タスク等を先頭に集約し、プレフィックス共通部分を4,096トークン以上に最大化する
   let context = `【プロファイル】: ${memory.profile || '未設定'}\n`;
+  if (memory.ideal_self && memory.ideal_self.trim() !== '') {
+    context += `【ありたい人間像・生活指針（判断の羅針盤）】: ${memory.ideal_self.trim()}\n`;
+  }
   context += `【天気・気温】: ${weatherDisplay}\n`;
   context += `【気圧急降下】: ${memory.pressure_alert === 'TRUE' ? '急降下中(注意)' : '安定'}\n`;
 
@@ -846,8 +895,11 @@ function getSpreadsheetContext(queryText, todayLogsText, simulatedNowDate) {
   }
 
   // --- 【動的コンテキスト（毎分可変）】 ---
-  // ※分単位で変化する現在日時は末尾に配置し、先行する静的情報のプレフィックスキャッシュを保護する
+  // ※分単位で変化する現在日時・経過時間は末尾に配置し、先行する静的情報のプレフィックスキャッシュを保護する
   context += `【現在日時】: ${nowStr}\n`;
+  const lastTimeStr = extractLastLogTime(todayLogsText);
+  const elapsedStr = formatElapsedTime(lastTimeStr, now);
+  context += `【直前のやり取りからの経過時間】: ${elapsedStr}\n`;
 
   return context.trim();
 }

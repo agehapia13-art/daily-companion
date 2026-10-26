@@ -78,6 +78,7 @@ function setupSpreadsheet() {
     memorySheet.appendRow(['monthly_report_ready', 'FALSE']);
     memorySheet.appendRow(['system_prompt', '']);
     memorySheet.appendRow(['dictionary', '・ぽこあポケモン（ぽこあ）: Nintendo Switch 2用ゲーム（2026年3月5日発売予定）。スローライフ・サンドボックス作品。※スマホの「ポケポケ」とは全くの別物。\n・ぱずぎり: パズルアクションゲーム。\n・残響フラクタル: ユーザーが執筆・制作しているオリジナルの創作作品。']);
+    memorySheet.appendRow(['ideal_self', '健やかな心身と社会性のある繋がりを保ちつつ、罪悪感のない休息とメリハリのある活動を両立し、専門性（サウンドディレクション等）・創作・大切な人との繋がりを自然に前進させる生活']);
   }
 
   const defaultSheet = ss.getSheetByName('シート1') || ss.getSheetByName('Sheet1');
@@ -139,16 +140,16 @@ function syncSystemPromptToSpreadsheet() {
  */
 function testCustomScenario() {
   const scenario = {
-    name: 'カスタム検証: 平日朝の起床＆目標宣言 → ルーティン完了報告（2ターン連鎖）',
+    name: 'カスタム検証: 行動宣言直後のタスク追加（お湯張り宣言9分後・先回り暴走の防止検証）',
     initialLogs: '',
     turns: [
       {
-        time: '2026-10-26 07:01:44',
-        user: 'おはよう。今日は仕事前に生活伴走システムの改善をやりたいんだよね'
+        time: '2026-10-26 19:08:00',
+        user: '風呂洗ってお湯張ってくる'
       },
       {
-        time: '2026-10-26 07:09:26',
-        user: '今日のメダル受け取り完了'
+        time: '2026-10-26 19:17:00',
+        user: 'タスク追加して：アイロンがけ'
       }
     ]
   };

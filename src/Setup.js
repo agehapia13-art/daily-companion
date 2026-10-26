@@ -401,39 +401,100 @@ function testScene4to6() {
  * 1. 起床直後の低覚醒状態を踏まえ、いきなり作業に入らせず極小負荷のウォームアップ（身体覚醒・水分・身支度等）を促せているか
  * 2. 単なる応援相槌で終わらず、10時始業から逆算した「ウォームアップ → 主活動（集中枠） → 始業前バッファ」のタイムラインを提案できているか
  */
+/**
+ * シーン7: 平日朝 07:01 起床直後の活動目標宣言（10時リモート始業前・3時間の可処分時間）
+ * 検証点:
+ * 1. 起床直後の低覚醒状態を踏まえ、いきなり作業に入らせず極小負荷のウォームアップ（身体覚醒・水分・身支度等）を促せているか
+ * 2. 単なる応援相槌で終わらず、10時始業から逆算した「ウォームアップ → 主活動（集中枠） → 始業前バッファ」のタイムラインを提案できているか
+ * @return {{ oldReply: string, newReply: string }} Turn 2（シーン8）への引き継ぎ用回答オブジェクト
+ */
 function testScene7_MorningWakeUpAndGoal() {
-  runPromptComparisonCase(
-    'シーン7: 平日朝07:01 起床直後の活動目標宣言（10時リモート始業前）',
-    '2026-10-26 07:01:44',
-    '',
-    'おはよう。今日は仕事前に生活伴走システムの改善をやりたいんだよね',
-    'previous'
-  );
+  const simulatedDate = new Date('2026-10-26T07:01:44+09:00');
+  const userMessage = 'おはよう。今日は仕事前に生活伴走システムの改善をやりたいんだよね';
+  const sheetContext = getSpreadsheetContext(userMessage, '', simulatedDate);
+  const calendarContext = getCalendarAndHolidayContext();
+  const combinedContext = `${sheetContext}\n\n${calendarContext}`;
+
+  const memory = getMemory();
+  const customSuffix = (memory.custom_system_prompt && memory.custom_system_prompt.trim() !== '')
+    ? `\n\n【追加カスタム指示（最優先フォーマット・ルール）】\n${memory.custom_system_prompt.trim()}`
+    : '';
+
+  const oldPrompt = getPreviousRestrictedPrompt().trim() + customSuffix;
+  const newPrompt = getDefaultSystemPrompt().trim() + customSuffix;
+
+  Logger.log('============================================================');
+  Logger.log('🧪 【シーン7: 平日朝07:01 起床直後の活動目標宣言（10時リモート始業前）】');
+  Logger.log('⏰ シミュレーション日時: 2026-10-26(月) 07:01');
+  Logger.log('💬 ユーザー発言: ' + userMessage);
+  Logger.log('============================================================');
+
+  const oldResult = callGeminiFlash(userMessage, [], combinedContext, '', oldPrompt);
+  const newResult = callGeminiFlash(userMessage, [], combinedContext, '', newPrompt);
+
+  Logger.log('\n--- 1. 直前プロンプト（今朝まで稼働・提案抑制版） ---\n' + (oldResult.reply_text || ''));
+  Logger.log('\n--- 2. 今回再構築版（タイムライン設計・ウォームアップ対応） ---\n' + (newResult.reply_text || ''));
+  Logger.log('============================================================\n');
+
+  return {
+    oldReply: oldResult.reply_text || '',
+    newReply: newResult.reply_text || ''
+  };
 }
 
 /**
  * シーン8: 平日朝 07:09 ルーティン完了報告（始業まで2時間50分の可処分時間）
- * 検証点:
- * 1. タスク完了の労い（聞き手視点）とタスク更新
- * 2. 単に文を閉じて会話を終了させず、事前のスケジュールに沿って次のネクストアクション（身支度や改善作業）へ自然にバトンを渡せているか
+ * シーン7で各プロンプトが実際に出力した回答を動的にログとして受け取って実行します。
+ * @param {{ oldReply: string, newReply: string }} [scene7Replies]
  */
-function testScene8_RoutineCompleteWithBuffer() {
-  const logs = '07:01 User: おはよう。今日は仕事前に生活伴走システムの改善をやりたいんだよね\nAI: おはようございます！10時の始業まで約3時間ありますね。まずは水分補給や身支度で身体のエンジンをかけつつ、07:45〜09:45あたりでガッツリ改善作業の集中時間を取るスケジュールはいかがでしょうか？';
-  runPromptComparisonCase(
-    'シーン8: 平日朝07:09 ルーティン完了報告（始業まで2時間50分余白）',
-    '2026-10-26 07:09:26',
-    logs,
-    '今日のメダル受け取り完了',
-    'previous'
-  );
+function testScene8_RoutineCompleteWithBuffer(scene7Replies) {
+  // 引数が省略された場合は、自動でシーン7を実行して最新の回答を取得
+  const replies = scene7Replies || testScene7_MorningWakeUpAndGoal();
+
+  const msg1 = 'おはよう。今日は仕事前に生活伴走システムの改善をやりたいんだよね';
+  const msg2 = '今日のメダル受け取り完了';
+  const simulatedDate2 = new Date('2026-10-26T07:09:26+09:00');
+  const calendarContext = getCalendarAndHolidayContext();
+
+  const memory = getMemory();
+  const customSuffix = (memory.custom_system_prompt && memory.custom_system_prompt.trim() !== '')
+    ? `\n\n【追加カスタム指示（最優先フォーマット・ルール）】\n${memory.custom_system_prompt.trim()}`
+    : '';
+
+  const oldPrompt = getPreviousRestrictedPrompt().trim() + customSuffix;
+  const newPrompt = getDefaultSystemPrompt().trim() + customSuffix;
+
+  // 各プロンプトがシーン7で返した実際の回答をそれぞれのコンテキストログに注入
+  const oldLogs = `07:01 User: ${msg1}\nAI: ${replies.oldReply.replace(/\n/g, ' ')}`;
+  const newLogs = `07:01 User: ${msg1}\nAI: ${replies.newReply.replace(/\n/g, ' ')}`;
+
+  const oldSheetContext = getSpreadsheetContext(msg2, oldLogs, simulatedDate2);
+  const newSheetContext = getSpreadsheetContext(msg2, newLogs, simulatedDate2);
+
+  Logger.log('============================================================');
+  Logger.log('🧪 【シーン8: 平日朝07:09 ルーティン完了報告（※シーン7の回答を動的継承）】');
+  Logger.log('⏰ シミュレーション日時: 2026-10-26(月) 07:09');
+  Logger.log('💬 ユーザー発言: ' + msg2);
+  Logger.log('============================================================');
+
+  const oldResult = callGeminiFlash(msg2, [], `${oldSheetContext}\n\n${calendarContext}`, oldLogs, oldPrompt);
+  const newResult = callGeminiFlash(msg2, [], `${newSheetContext}\n\n${calendarContext}`, newLogs, newPrompt);
+
+  Logger.log('\n--- 1. 直前プロンプト（今朝まで稼働・提案抑制版） ---\n' + (oldResult.reply_text || ''));
+  Logger.log('\n--- 2. 今回再構築版（タイムライン設計・ウォームアップ対応） ---\n' + (newResult.reply_text || ''));
+  Logger.log('============================================================\n');
 }
 
 /**
- * 手動テスト用: シーン7・8を一括テスト
+ * 手動テスト用: シーン7とシーン8を完全連鎖実行
+ * シーン7で出力された各プロンプトの回答をそのままシーン8の会話ログに渡し、
+ * 連続対話（Turn 1 → Turn 2）として新旧の挙動差を検証します。
  */
 function testScene7and8() {
-  testScene7_MorningWakeUpAndGoal();
-  testScene8_RoutineCompleteWithBuffer();
+  Logger.log('🚀 >>> シーン7＆8 連鎖対話テストを開始します <<< 🚀');
+  const scene7Replies = testScene7_MorningWakeUpAndGoal();
+  testScene8_RoutineCompleteWithBuffer(scene7Replies);
+  Logger.log('🏁 >>> シーン7＆8 連鎖対話テストが完了しました <<< 🏁');
 }
 
 

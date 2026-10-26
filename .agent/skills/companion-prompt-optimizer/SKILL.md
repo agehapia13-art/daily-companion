@@ -3,7 +3,7 @@ name: companion-prompt-optimizer
 description: >-
   生活伴走システムの会話ログやユーザー指摘からプロンプトの課題を分析し、
   READMEに定めたプロンプト方針・直交4層体系との整合性を大枠から監査するチェックリストを適用した上で、
-  プロンプト改善・本番スプレッドシート反映・GASプッシュ・テストケース準備までを自律実行するスキル。
+  プロンプト改善・GASテスト準備・本番スプレッドシート反映までを実行するスキル。
 ---
 
 # 生活伴走システム プロンプト改善＆検証支援スキル
@@ -46,22 +46,27 @@ flowchart TD
 
 ## 🔄 標準改修＆検証ワークフロー
 
+> **重要（新旧比較の保全）**:
+> GASの `runPromptScenario` は **「スプレッドシート現行版（`memory!system_prompt`）」** と **「コード最新候補版（`src/Gemini.js`）」** を比較する。
+> したがって、**テスト検証前にスプレッドシート（`memory!system_prompt`）を上書きしてはならない**（上書きすると比較元の現行プロンプトが消えてしまうため）。ユーザーのテスト確認後に本番スプレッドシートへ反映すること。
+
 ```mermaid
 sequenceDiagram
     autonumber
     actor User as ユーザー
     participant Agent as Antigravity (AI)
+    participant GAS as GAS環境 (Setup.js / Gemini.js)
     participant Sheet as スプレッドシート (memory)
-    participant GAS as GAS本番環境
 
     User->>Agent: 「ログ見てプロンプト改善して」「この挙動直して」
     Note over Agent: 【ステップ1】ログ・事象の客観的分析
     Note over Agent: 【ステップ2】3階層自己監査チェックリストをパスしたプロンプト改修 (src/Gemini.js)
-    Agent->>Sheet: 【ステップ3】node scripts/sheet-cli.js set-prompt (本番即時反映)
-    Note over Agent: 【ステップ4】テストケース追加/更新 (src/Setup.js)
-    Agent->>GAS: npm run push (clasp push で全コード同期)
-    Agent-->>User: 【ステップ5】改修方針・チェックリスト適合状況・テスト準備完了を報告
-    User->>GAS: 【ステップ6】GASエディタでテスト関数を実行・ログ確認
+    Note over Agent: 【ステップ3】src/Setup.js の testCustomScenario に検証シナリオをセット
+    Agent->>GAS: npm run push (clasp push でコードのみ同期 ※スプシはまだ未更新)
+    Agent-->>User: 【ステップ4】改修方針・チェックリスト適合状況・テスト準備完了を報告
+    User->>GAS: 【ステップ5】GASエディタで testCustomScenario を実行し新旧比較を確認
+    User->>Agent: 「OK、本番反映して」
+    Agent->>Sheet: 【ステップ6】node scripts/sheet-cli.js set-prompt で本番即時昇格
 ```
 
 ### ステップ1: ログ・事象の客観的分析
@@ -70,18 +75,15 @@ sequenceDiagram
 
 ### ステップ2: 3階層自己監査チェックリストを通したプロンプト最小改修
 - 上記の【自己監査チェックリスト】3階層全項目を自ら点検しながら、`src/Gemini.js` の `getDefaultSystemPrompt()` を原則ベースで最小限に改修する。
-- `node -c src/Gemini.js` で構文エラーがないことを確認。
 
-### ステップ3: スプレッドシート本番即時反映
-- `node scripts/sheet-cli.js set-prompt` を実行し、スプレッドシート（`memory!system_prompt`）へ即時反映する。
+### ステップ3: 検証シナリオの設定 ＆ GASプッシュ（テスト関数を増殖させない）
+- 個別のテスト関数（`testScene9` 等）を新規追加してファイルを肥大化させてはならない。
+- `src/Setup.js` の **`testCustomScenario()`** 内の `scenario` オブジェクト（`turns` 配列で単発・複数ターン連鎖どちらも記述可能）を対象の検証シナリオに書き換える。
+- `npm run check` で構文を確認し、`npm run push`（`clasp push`）でGASへ同期する。
+- **※この時点ではまだ `node scripts/sheet-cli.js set-prompt` を実行しないこと**（現行本番プロンプトとの新旧比較を可能にするため）。
 
-### ステップ4: テストケースの追加/更新 ＆ GASプッシュ
-- 事象を再現するテスト関数を `src/Setup.js` に追加（または連鎖テストを構成）。
-- `baselineType` に不変の過去プロンプト（`getOriginalLegacyPrompt` / `getPreviousRestrictedPrompt`）を正しく割り当てる。
-- `npm run push`（`clasp push`）でGAS本番環境へ全ファイルを同期。
+### ステップ4: ユーザーへのテスト準備報告
+- 改修内容、チェックリスト全項目の適合状況、およびGASエディタで `testCustomScenario`（または全体回帰テスト `testAllStandardScenarios`）を実行できる旨を報告する。
 
-### ステップ5: ユーザーへの完了報告
-- 改修内容、チェックリスト全項目の適合状況、およびGASエディタで実行すべきテスト関数名を明示してユーザーに報告する。
-
-### ステップ6: ユーザーによるテスト実行・確認
-- ユーザーがGASエディタで対象のテスト関数を実行し、新旧プロンプトの挙動差を確認する。
+### ステップ5〜6: テスト確認後のスプレッドシート本番反映
+- ユーザーがGASエディタでテスト結果を確認し承認したら、`node scripts/sheet-cli.js set-prompt` を実行してスプレッドシート（`memory!system_prompt`）へ本番反映する。

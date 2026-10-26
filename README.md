@@ -91,6 +91,8 @@
 
 ```
 .
+├── AGENTS.md             # Antigravity（AIエージェント）行動憲章・思考原則
+├── .agent/               # プロンプト設計ガバナンスルール ＆ プロンプト改善スキル
 ├── .clasp.json           # clasp設定 (rootDir: "src", Git管理対象外)
 ├── appsscript.json       # タイムゾーン (Asia/Tokyo) およびV8ランタイム設定
 ├── service-account.json  # Google Cloud サービスアカウント秘密鍵 (Git管理対象外)
@@ -109,11 +111,10 @@
 │   ├── Batch.js          # dailyMidnightBatch (深夜03:00バッチ / 消化インプット連携 / 重複ガード / ログ保護)
 │   ├── Dashboard.js      # WebダッシュボードAPI（タスク編集/破棄対応）・HTMLテンプレート ＆ リッチメニュー登録
 │   ├── Webhook.js        # doPost (LINE Webhook & ダッシュボードJSON API) & doGet
-│   └── Setup.js          # 手動実行・設定・テスト専用（シート初期化・プロンプト同期・タイマー登録・各テスト）
+│   └── Setup.js          # 初期設定・メンテナンス・汎用プロンプト検証ランナー（単発＆複数ターン連鎖対応）
 ├── scripts/
 │   ├── build-dashboard.js # src/Dashboard.js から docs/index.html を自動生成するスクリプト
-│   ├── sheet-cli.js       # Antigravity/ローカルからスプレッドシートを直接読み書き・同期する操作CLI
-│   └── test-prompt.js     # 新旧プロンプトの回答・提案バリエーションをドライラン比較検証するスクリプト
+│   └── sheet-cli.js       # Antigravity/ローカルからスプレッドシートを直接読み書き・同期する操作CLI
 └── README.md
 ```
 
@@ -233,24 +234,22 @@ Googleアカウントの権限設定・スコープ承認が必要となるた�
 4. **モジュールモード**:
    オフのままで正常動作します。
 
-### 5. 初期設定・手動操作（`Setup.gs`）
+### 5. 初期設定・検証テスト関数（`Setup.gs`）
 
-手動で実行したい設定やテストは、すべて **`Setup.gs`** を開けば一番上に揃っています：
+手動で実行する初期設定・メンテナンス・ドライラン検証は、すべて **`Setup.gs`** に整理されています：
 
-- `setupSpreadsheet`: スプレッドシートの全6タブとヘッダーを自動初期化
-- `syncSystemPromptToSpreadsheet`: コード上の最新システムプロンプトをスプレッドシートの `memory` シート (`system_prompt` 行) に同期保存
-- `setupTriggers`: 毎日午前3時の深夜バッチタイマートリガーを自動登録
-- `setupLineRichMenuFromSetup`: LINEトーク画面下部に4分割リッチメニューを自動登録・有効化（GitHub PagesおよびLIFF URLを自動構成）
-- `testWebhookSimulation`: LINE受信テスト
-- `testWebSearchSimulation`: Web検索テスト
-- `testMidnightBatchSimulation`: 深夜バッチ手動実行テスト
-- `testMemoryLifecycleSimulation`: 記憶代謝テスト
-- `testPromptComparisonSimulation`: 新旧プロンプト比較ドライラン（主要シーン一括実行）
-- `testScene1_EveningSnackWaiting` 〜 `testScene6_SickAndBored`: 各生活シーン（食後お菓子待ち、ゲーム後余白、就寝前、朝ゆとり、風呂沸かし宣言、体調不良×暇）の単体新旧比較テスト
-- `testScene4to6`: シーン4〜6の一括新旧比較テスト
-- `testScene7_MorningWakeUpAndGoal`: シーン7単体テスト（朝の起床直後＆活動目標宣言）
-- `testScene8_RoutineCompleteWithBuffer`: シーン8単体テスト（ルーティン完了報告＆余白時間）
-- `testScene7and8`: シーン7＆8完全連鎖対話テスト（Turn 1の回答を動的にTurn 2へ引き継ぐ動的連鎖検証）
+- **初期構築・メンテナンス**:
+  - `setupSpreadsheet`: スプレッドシートの全6タブとヘッダーを自動初期化
+  - `setupTriggers`: 毎日午前3時の深夜バッチタイマートリガーを自動登録
+  - `setupLineRichMenuFromSetup`: LINEトーク画面下部に4分割リッチメニューを自動登録・有効化
+  - `syncSystemPromptToSpreadsheet`: コード上の最新プロンプト（`Gemini.js`）をスプレッドシートの `memory` シート (`system_prompt` 行) に本番反映
+- **プロンプト比較・連続対話検証（完全ドライラン）**:
+  - `testCustomScenario`: スポット検証用。`turns` 配列に1ターン（単発）または複数ターン（前ターンのAI回答を次ターンのログへ動的継承する連鎖対話）を定義し、現行スプシ稼働プロンプトとコード最新候補プロンプトを比較テスト（DB操作アクションの出力も併せて表示）
+  - `testAllStandardScenarios`: 標準回帰テスト用。4大基本シナリオ（①隙間時間の多様性提案・重複排除、②直前物理行動の1文送り出し、③体調不良×暇の属性適合、④起床〜段取り提案→完了報告の2ターン連続対話）を一括検証
+- **サブシステム検証**:
+  - `testDailyBriefingOutput`: デイリーブリーフィング生成ドライラン
+  - `testMemoryLifecycleSimulation`: 記憶新陳代謝（`rolling_memory` / `profile` 等）のドライラン
+  - `testMidnightBatchSimulation`: 深夜統合バッチの本番手動実行
 
 ---
 

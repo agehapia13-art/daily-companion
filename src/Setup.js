@@ -13,24 +13,33 @@
 function setupSpreadsheet() {
   const ss = getSpreadsheet();
 
-  // 1. logs タブ
+  // 1. logs タブ（全16列対応）
+  const logHeaders = [
+    '時刻', '発言者', 'メッセージ', '画像URL', 'AI返答',
+    'Lite入力', 'Lite出力', 'Liteキャッシュ',
+    'Flash入力', 'Flash出力', 'Flashキャッシュ',
+    '新総トークン', '判定タグ/フェーズ',
+    '旧AI返答（比較用）', '旧Flash総トークン', 'トークン削減差分'
+  ];
   let logsSheet = ss.getSheetByName(SYSTEM_CONSTANTS.SHEET_NAMES.LOGS);
   if (!logsSheet) logsSheet = ss.insertSheet(SYSTEM_CONSTANTS.SHEET_NAMES.LOGS);
   if (logsSheet.getLastRow() === 0) {
-    logsSheet.appendRow(['時刻', '発言者', 'メッセージ', '画像URL', 'AI返答', '入力トークン', '出力トークン', 'キャッシュトークン', '合計トークン']);
+    logsSheet.appendRow(logHeaders);
     formatHeaderRow_(logsSheet);
-  } else if (logsSheet.getLastColumn() < 9) {
-    // 既存シートのヘッダーを9列へ自動拡張
-    const newHeaders = ['入力トークン', '出力トークン', 'キャッシュトークン', '合計トークン'];
-    logsSheet.getRange(1, 6, 1, 4).setValues([newHeaders]);
+  } else {
+    logsSheet.getRange(1, 1, 1, logHeaders.length).setValues([logHeaders]);
     formatHeaderRow_(logsSheet);
   }
 
-  // 2. tasks タブ
+  // 2. tasks タブ（全8列対応: リマインド目安追加）
+  const taskHeaders = ['タスクID', 'タスク名', '期限', 'ステータス(未完了/完了/破棄)', '登録日', '完了日', 'メモ', 'リマインド目安'];
   let tasksSheet = ss.getSheetByName(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
   if (!tasksSheet) tasksSheet = ss.insertSheet(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
   if (tasksSheet.getLastRow() === 0) {
-    tasksSheet.appendRow(['タスクID', 'タスク名', '期限', 'ステータス(未完了/完了/破棄)', '登録日', '完了日', 'メモ']);
+    tasksSheet.appendRow(taskHeaders);
+    formatHeaderRow_(tasksSheet);
+  } else if (tasksSheet.getLastColumn() < 8) {
+    tasksSheet.getRange(1, 8).setValue('リマインド目安');
     formatHeaderRow_(tasksSheet);
   }
 
@@ -119,24 +128,31 @@ function setupLineRichMenuFromSetup() {
 }
 
 /**
- * 手動実行用: コード上の最新システムプロンプト（getDefaultSystemPrompt）を
- * スプレッドシートの memory シート (system_prompt) に本番反映
+ * 手動実行用: コード上の最新システムプロンプト（旧システム用）および
+ * 2モデル体制の全モジュールプロンプト群をスプレッドシートの memory シートに一括反映
  */
 function syncSystemPromptToSpreadsheet() {
-  const promptText = getDefaultSystemPrompt();
-  setMemoryValue('system_prompt', promptText);
-  Logger.log('✅ スプレッドシートの memory シートに最新の system_prompt を保存しました！');
+  setMemoryValue('system_prompt', getDefaultSystemPrompt());
+  setMemoryValue('prompt_lite', getDefaultPromptLite());
+  setMemoryValue('prompt_core', getDefaultPromptCore());
+  setMemoryValue('prompt_phase_a', getDefaultPromptPhaseA());
+  setMemoryValue('prompt_phase_b', getDefaultPromptPhaseB());
+  setMemoryValue('prompt_phase_c', getDefaultPromptPhaseC());
+  setMemoryValue('prompt_phase_d', getDefaultPromptPhaseD());
+  setMemoryValue('prompt_db', getDefaultPromptDb());
+  setMemoryValue('prompt_relief', getDefaultPromptRelief());
+  Logger.log('✅ スプレッドシートの memory シートに全プロンプトモジュールを保存しました！');
 }
 
 // =============================================================================
-// 2. プロンプト比較・連続対話検証テスト（完全ドライラン）
+// 2. プロンプト比較・連続対話検証テスト（完全ドライラン・2モデルAB比較対応）
 // =============================================================================
 
 /**
  * ★スポット検証用: 任意の単発または連続対話シナリオをテスト実行
  * プロンプト改善時はこの関数内の scenario を書き換えて実行してください。
  * - turns が1件なら単発テスト、複数件なら前のターンのAI回答を自動的に次ターンのログへ引き継ぐ連鎖テストになります。
- * - スプレッドシートの現行稼働プロンプト（memory!system_prompt）と、コード上の新候補プロンプト（Gemini.js）を比較します。
+ * - 新システム（2モデル体制: Lite + Flash）と旧システム（単一Flash 6,400文字）の応答・トークン・アクションを並列比較します。
  */
 function testCustomScenario() {
   const scenario = {
@@ -171,10 +187,9 @@ function testAllStandardScenarios() {
 }
 
 /**
- * 汎用プロンプト検証ランナー（単発 ＆ 複数ターン動的連鎖対応）
- * スプレッドシートやLINEを一切変更せず、現行稼働プロンプト（memory!system_prompt）と
- * コード上の最新プロンプト（getDefaultSystemPrompt）の出力およびDBアクションを比較します。
- * ※両プロンプトが同一（すでにスプシ反映済み）の場合は、無駄な2重呼び出しを省いて1回のみ実行します。
+ * 汎用プロンプト検証ランナー（単発 ＆ 複数ターン動的連鎖・新旧AB比較対応）
+ * スプレッドシートやLINEを一切変更せず、新システム（Lite + 動的アセンブルFlash）と
+ * 旧システム（単一Flash）の出力・トークン消費・DBアクションを並列比較します。
  *
  * @param {{
  *   name: string,
@@ -183,31 +198,14 @@ function testAllStandardScenarios() {
  * }} scenario
  */
 function runPromptScenario(scenario) {
-  const calendarContext = getCalendarAndHolidayContext();
   const memory = getMemory();
-  const customSuffix = (memory.custom_system_prompt && memory.custom_system_prompt.trim() !== '')
-    ? `\n\n【追加カスタム指示（最優先フォーマット・ルール）】\n${memory.custom_system_prompt.trim()}`
-    : '';
+  // ドライランでは強制的に AB_TEST モードとして新旧両方を並列実行して比較
+  const testMemory = Object.assign({}, memory, { system_mode: 'AB_TEST' });
 
-  const liveBase = (memory.system_prompt && memory.system_prompt.trim() !== '')
-    ? memory.system_prompt.trim()
-    : getDefaultSystemPrompt().trim();
-  const candidateBase = getDefaultSystemPrompt().trim();
-  const isSamePrompt = (liveBase === candidateBase);
-
-  const livePrompt = liveBase + customSuffix;
-  const candidatePrompt = candidateBase + customSuffix;
-
-  let liveLogs = scenario.initialLogs || '';
-  let candidateLogs = scenario.initialLogs || '';
+  let runningLogs = scenario.initialLogs || '';
 
   Logger.log('============================================================');
-  Logger.log(`🧪 【${scenario.name}】 (${scenario.turns.length}ターン)`);
-  if (isSamePrompt) {
-    Logger.log('ℹ️ スプレッドシート現行版とコード最新版が同一のため、単一プロンプトで検証します。');
-  } else {
-    Logger.log('🔄 [1. 現行スプシ稼働版] vs [2. コード最新候補版] を比較検証します。');
-  }
+  Logger.log(`🧪 【${scenario.name}】 (${scenario.turns.length}ターン / 新旧AB並列ドライラン)`);
   Logger.log('============================================================');
 
   for (let i = 0; i < scenario.turns.length; i++) {
@@ -219,32 +217,21 @@ function runPromptScenario(scenario) {
     Logger.log(`\n--- 💬 Turn ${i + 1} [${timeLabel}] ---`);
     Logger.log(`User: ${turn.user}`);
 
-    if (isSamePrompt) {
-      const sheetCtx = getSpreadsheetContext(turn.user, candidateLogs, simulatedDate);
-      const res = callGeminiFlash(turn.user, [], `${calendarContext}\n\n${sheetCtx}`, candidateLogs, candidatePrompt);
-      const reply = res.reply_text || '';
-      Logger.log(`\n【AI応答】:\n${reply}${formatActionSummary_(res)}`);
+    const outcome = executeCompanionTurn(turn.user, [], runningLogs, testMemory, simulatedDate);
+    const meta = outcome.logMeta || {};
+    const newReply = (outcome.primaryResult && outcome.primaryResult.reply_text) || '';
+    const oldReply = (outcome.oldResult && outcome.oldResult.reply_text) || '';
 
-      const logLine = `${hhmm} User: ${turn.user}\nAI: ${reply.replace(/\n/g, ' ')}`;
-      candidateLogs = candidateLogs ? `${candidateLogs}\n${logLine}` : logLine;
-    } else {
-      const liveSheetCtx = getSpreadsheetContext(turn.user, liveLogs, simulatedDate);
-      const candSheetCtx = getSpreadsheetContext(turn.user, candidateLogs, simulatedDate);
-
-      const liveRes = callGeminiFlash(turn.user, [], `${calendarContext}\n\n${liveSheetCtx}`, liveLogs, livePrompt);
-      const candRes = callGeminiFlash(turn.user, [], `${calendarContext}\n\n${candSheetCtx}`, candidateLogs, candidatePrompt);
-
-      const liveReply = liveRes.reply_text || '';
-      const candReply = candRes.reply_text || '';
-
-      Logger.log(`\n--- 1. 現行スプシ稼働版 ---\n${liveReply}${formatActionSummary_(liveRes)}`);
-      Logger.log(`\n--- 2. コード最新候補版 ---\n${candReply}${formatActionSummary_(candRes)}`);
-
-      const liveLogLine = `${hhmm} User: ${turn.user}\nAI: ${liveReply.replace(/\n/g, ' ')}`;
-      const candLogLine = `${hhmm} User: ${turn.user}\nAI: ${candReply.replace(/\n/g, ' ')}`;
-      liveLogs = liveLogs ? `${liveLogs}\n${liveLogLine}` : liveLogLine;
-      candidateLogs = candidateLogs ? `${candidateLogs}\n${candLogLine}` : candLogLine;
+    Logger.log(`\n🧭 [Lite判定]: ${meta.phaseAndTags || ''}`);
+    Logger.log(`📊 [トークン]: 新合計 ${meta.newTotalTokens} tok (Lite:${(meta.litePromptTokens || 0) + (meta.liteCandidatesTokens || 0)} + Flash:${(meta.flashPromptTokens || 0) + (meta.flashCandidatesTokens || 0)}) vs 旧合計 ${meta.oldTotalTokens} tok ➡️ 差分: ${meta.tokenReductionDiff}`);
+    Logger.log(`\n🆕 【新システム (${outcome.phaseLabel})】:\n${newReply}${formatActionSummary_(outcome.primaryResult)}`);
+    Logger.log(`\n🕰️ 【旧システム】:\n${oldReply}${formatActionSummary_(outcome.oldResult || {})}`);
+    if (outcome.missedActionsNote) {
+      Logger.log(`\n${outcome.missedActionsNote}`);
     }
+
+    const logLine = `${hhmm} User: ${turn.user}\nAI: ${newReply.replace(/\n/g, ' ')}`;
+    runningLogs = runningLogs ? `${runningLogs}\n${logLine}` : logLine;
   }
   Logger.log('\n============================================================\n');
 }

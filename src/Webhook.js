@@ -78,18 +78,17 @@ function doPost(e) {
         const imageBlobs = bufferedImages.blobs;
         const imageUrls = bufferedImages.urls;
 
-        // C. 本日の全会話ログ（極小高密度フォーマット: HH:mm User: ... / AI: ...）およびコンテキスト情報の取得
-        // ※静的なカレンダー予定とシート情報を先頭にまとめ、毎分変わる現在日時・会話ログを末尾にしてプレフィックスキャッシュを保護
+        // C. 本日の全会話ログおよびメモリー情報の取得
         const todayLogsCondensed = getCondensedTodayLogs();
-        const sheetContext = getSpreadsheetContext(userText, todayLogsCondensed);
-        const calendarContext = getCalendarAndHolidayContext();
-        const combinedContext = `${calendarContext}\n\n${sheetContext}`;
+        const memory = getMemory();
 
-        // D. Gemini 3.8 Flash 呼び出し（JSON取得）
+        // D. 生活伴走エンジン実行（system_mode: AB_TEST | NEW | OLD 対応）
+        let turnOutcome = null;
         let aiResult;
         let isGeminiSuccess = false;
         try {
-          aiResult = callGeminiFlash(userText, imageBlobs, combinedContext, todayLogsCondensed);
+          turnOutcome = executeCompanionTurn(userText, imageBlobs, todayLogsCondensed, memory);
+          aiResult = turnOutcome.primaryResult;
           isGeminiSuccess = true;
         } catch (geminiErr) {
           const errStr = String(geminiErr.message || '');
@@ -118,8 +117,15 @@ function doPost(e) {
           };
         }
 
-        // F. DB・カレンダー操作アクションの即時適用（ブリーフィングおよび返信文へ確実に反映させるため先に実行）
-        let replyText = (aiResult.reply_text || '了解いたしました。').trim();
+        // F. DB・カレンダー操作アクションの即時適用（※二重実行防止のため新システム側のアクションのみ実行）
+        const stripManualNoticeLines = (text) => {
+          return String(text || '').split('\n').filter(line => {
+            const trimmed = line.trim();
+            return !/^(📝\s*タスク追加|📝\s*タスク更新|✅\s*タスク完了|🗑️\s*タスク破棄|📅\s*カレンダー|🛒\s*買物|🎬\s*インプット|🔄\s*ルーティン)/.test(trimmed);
+          }).join('\n').trim();
+        };
+
+        let pureReplyText = (aiResult.reply_text || '了解いたしました。').trim();
         const executedNotices = [];
 
         try {
@@ -147,26 +153,49 @@ function doPost(e) {
           Logger.log('アクション先行適用エラー: ' + actionErr.message);
         }
 
-        // F2. 実行されたDB/カレンダー操作通知の統合（重複防止）
-        // プログラムが正式な通知文字列（✅ タスク完了: ..., 📝 タスク追加: ..., 📅 カレンダー追加: ...）を一元付加する
         if (executedNotices.length > 0) {
-          // AIが返信文内に手動で書いた可能性がある絵文字プレフィックス付き通知行を除去して一本化
-          const cleanedReplyLines = replyText.split('\n').filter(line => {
-            const trimmed = line.trim();
-            return !/^(📝\s*タスク追加|📝\s*タスク更新|✅\s*タスク完了|🗑️\s*タスク破棄|📅\s*カレンダー|🛒\s*買物|🎬\s*インプット|🔄\s*ルーティン)/.test(trimmed);
-          });
-          replyText = cleanedReplyLines.join('\n').trim();
-          replyText += '\n\n' + executedNotices.join('\n');
+          pureReplyText = stripManualNoticeLines(pureReplyText);
+        }
+
+        // logs シート保存用の新システム返答（次ターンの会話履歴汚染を防ぐため旧返答や比較装飾を含めない）
+        let loggedAiReply = pureReplyText;
+        if (executedNotices.length > 0) {
+          loggedAiReply += '\n\n' + executedNotices.join('\n');
+        }
+
+        // LINE 送信用の表示テキスト構築（AB_TEST モード時は1吹き出しで上下比較表示）
+        let lineDisplayText = loggedAiReply;
+        if (isGeminiSuccess && turnOutcome && turnOutcome.mode === 'AB_TEST' && turnOutcome.oldResult) {
+          const newTok = (turnOutcome.logMeta && turnOutcome.logMeta.newTotalTokens !== undefined)
+            ? Number(turnOutcome.logMeta.newTotalTokens).toLocaleString()
+            : '-';
+          const oldTok = (turnOutcome.logMeta && turnOutcome.logMeta.oldTotalTokens !== undefined)
+            ? Number(turnOutcome.logMeta.oldTotalTokens).toLocaleString()
+            : '-';
+          const oldCleanReply = stripManualNoticeLines(turnOutcome.oldResult.reply_text || '');
+
+          lineDisplayText = `🆕【新システム】(${turnOutcome.phaseLabel} / 合計 ${newTok} tok)\n${pureReplyText}\n\n`;
+          lineDisplayText += `━━━━━━━━━━━━━━\n`;
+          lineDisplayText += `🕰️【旧システム】(合計 ${oldTok} tok)\n${oldCleanReply}`;
+
+          if (turnOutcome.missedActionsNote) {
+            lineDisplayText += `\n\n${turnOutcome.missedActionsNote}`;
+          }
+          if (executedNotices.length > 0) {
+            lineDisplayText += `\n\n${executedNotices.join('\n')}`;
+          }
         }
 
         // プログラム制御による朝ブリーフィング合流（1日1回・初回のみ確実に付加し即時配信完了記録）
         if (isFirstHello && isGeminiSuccess) {
           markBriefingDeliveredToday();
-          replyText += '\n\n' + buildDailyBriefingText();
+          const briefingText = buildDailyBriefingText();
+          lineDisplayText += '\n\n' + briefingText;
+          loggedAiReply += '\n\n' + briefingText;
         }
 
         // G. LINE Reply API で返答送信
-        replyLineMessage(replyToken, replyText);
+        replyLineMessage(replyToken, lineDisplayText);
 
         // H. 返答完了後の後続処理（ログ保存・メモリー更新・バッファクリア）
         try {
@@ -175,7 +204,7 @@ function doPost(e) {
             clearImageBuffer();
           }
 
-          // ログ追記 (画像内容の要約があればテキストに統合して保存し、トークン使用量・キャッシュ状況も記録)
+          // ログ追記 (第5列には新システムの返答のみを保存し、第6〜16列にLite/Flash別トークン・判定・旧比較を記録)
           const nowStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
           const imgUrlString = imageUrls.join('\n');
           let loggedUserText = userText;
@@ -183,12 +212,17 @@ function doPost(e) {
             const imgDesc = `[画像内容: ${aiResult.image_summary.trim()}]`;
             loggedUserText = loggedUserText ? `${loggedUserText}\n${imgDesc}` : imgDesc;
           }
-          const tokenUsage = (aiResult && aiResult._usage) ? aiResult._usage : null;
-          appendLog(nowStr, 'user', loggedUserText, imgUrlString, replyText, tokenUsage);
+          const logMeta = turnOutcome ? turnOutcome.logMeta : (aiResult._usage || null);
+          appendLog(nowStr, 'user', loggedUserText, imgUrlString, loggedAiReply, logMeta);
 
-          // メモリー更新: 日中の通常チャットでの profile 勝手な上書きを禁止（深夜バッチで1日まとめて慎重に代謝）
-          // ※「プロファイル更新して」「設定変更して」等、ユーザーが明示的にプロファイル変更を求めた場合のみ日中反映
+          // メモリー更新
           if (aiResult.memory_updates) {
+            // cycle_stamps のオンデマンド更新（散歩・読書・楽器・爪切り等の実施報告時）
+            if (aiResult.memory_updates.cycle_stamps_updates) {
+              updateCycleStampsSafely(aiResult.memory_updates.cycle_stamps_updates);
+              Logger.log('周期スタンプ(cycle_stamps)を更新しました: ' + aiResult.memory_updates.cycle_stamps_updates);
+            }
+
             const isExplicitProfileRequest = userText && (
               userText.includes('プロフィール') ||
               userText.includes('プロファイル') ||
@@ -210,7 +244,6 @@ function doPost(e) {
           }
 
           // 月報通知フラグの解除
-          const memory = getMemory();
           if (memory.monthly_report_ready === 'TRUE') {
             setMemoryValue('monthly_report_ready', 'FALSE');
           }

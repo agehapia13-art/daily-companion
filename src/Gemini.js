@@ -176,13 +176,15 @@ function getDefaultSystemPrompt() {
 }
 
 /**
- * Gemini API への共通リクエスト＆自動リトライ関数（503/429対策・思考パート除外・usageMetadata取得）
+ * Gemini API への共通リクエスト＆自動リトライ関数（503/429対策・思考パート除外・usageMetadata取得・エンドポイント指定対応）
  * @param {Object} requestPayload
+ * @param {string=} customEndpointBase オプション: Lite等の別モデルエンドポイントベースURL
  * @return {{text: string, usage: Object|null}} 抽出されたテキストおよび使用量メタデータ
  */
-function fetchGeminiResultWithRetry(requestPayload) {
+function fetchGeminiResultWithRetry(requestPayload, customEndpointBase) {
   const config = getConfig();
-  const url = `${SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE}?key=${config.geminiApiKey}`;
+  let endpointBase = customEndpointBase || SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE;
+  let url = `${endpointBase}?key=${config.geminiApiKey}`;
   const options = {
     method: 'post',
     contentType: 'application/json',
@@ -205,6 +207,14 @@ function fetchGeminiResultWithRetry(requestPayload) {
         break;
       }
 
+      // もしカスタムエンドポイント（Lite等）が404だった場合、標準Flashエンドポイントへ自動フォールバック
+      if (statusCode === 404 && endpointBase !== SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE) {
+        Logger.log(`[Gemini API フォールバック] 指定モデルが404のため標準モデルへフォールバックします`);
+        endpointBase = SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE;
+        url = `${endpointBase}?key=${config.geminiApiKey}`;
+        continue;
+      }
+
       if ((statusCode === 503 || statusCode === 429 || statusCode >= 500) && attempt < maxRetries) {
         const delayMs = (attempt + 1) * 1200;
         Logger.log(`[Gemini API リトライ] ステータス ${statusCode} のため ${delayMs}ms 後に再試行します (試行 ${attempt + 1}/${maxRetries})`);
@@ -223,9 +233,18 @@ function fetchGeminiResultWithRetry(requestPayload) {
     }
   }
 
+  return extractGeminiCandidateResult_(responseText);
+}
+
+/**
+ * Gemini API レスポンス文字列からテキストと usageMetadata を抽出する共通ヘルパー
+ * @param {string} responseText
+ * @return {{text: string, usage: Object|null}}
+ * @private
+ */
+function extractGeminiCandidateResult_(responseText) {
   const jsonResponse = JSON.parse(responseText);
 
-  // トークン使用量およびキャッシュヒット状況のロギング
   if (jsonResponse.usageMetadata) {
     const u = jsonResponse.usageMetadata;
     const cached = u.cachedContentTokenCount || 0;
@@ -253,6 +272,54 @@ function fetchGeminiResultWithRetry(requestPayload) {
 }
 
 /**
+ * JSON文字列を安全にパースしてアクションオブジェクトへ変換するヘルパー
+ * @param {string} rawText
+ * @param {Object|null} usage
+ * @return {Object}
+ * @private
+ */
+function parseGeminiActionJson_(rawText, usage) {
+  let cleaned = String(rawText || '').trim();
+  if (cleaned.startsWith('```json')) {
+    cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+  } else if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+  }
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (parsed && typeof parsed === 'object') {
+      parsed._usage = usage;
+      return parsed;
+    }
+  } catch (err) {
+    // テキスト前後に余分な文字がある場合の救済抽出
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      try {
+        const sub = JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
+        if (sub && typeof sub === 'object') {
+          sub._usage = usage;
+          return sub;
+        }
+      } catch (e2) {}
+    }
+    Logger.log('JSONパース失敗: ' + cleaned);
+  }
+
+  return {
+    reply_text: cleaned,
+    task_actions: [],
+    calendar_actions: [],
+    shopping_actions: [],
+    input_stock_actions: [],
+    routine_actions: [],
+    _usage: usage
+  };
+}
+
+/**
  * テキストのみを取得するレガシー互換ラッパー
  * @param {Object} requestPayload
  * @return {string}
@@ -262,7 +329,7 @@ function fetchGeminiTextWithRetry(requestPayload) {
 }
 
 /**
- * Gemini 3.8 Flash APIへ低レイテンシ・グラウンディング呼び出しを実行
+ * Gemini 3.8 Flash APIへ低レイテンシ・グラウンディング呼び出しを実行（旧システム・単一モデル互換）
  * @param {string} userText ユーザーの入力テキスト
  * @param {Array<GoogleAppsScript.Base.Blob>} imageBlobs 添付画像Blob一覧
  * @param {string} contextText スプレッドシートやカレンダー等のコンテキスト情報
@@ -271,9 +338,18 @@ function fetchGeminiTextWithRetry(requestPayload) {
  * @return {Object} 解析されたJSONオブジェクト
  */
 function callGeminiFlash(userText, imageBlobs, contextText, todayLogsText, customSystemPrompt) {
+  const requestPayload = buildOldSystemPayloadFromContext_(userText, imageBlobs, contextText, todayLogsText, customSystemPrompt);
+  const geminiResult = fetchGeminiResultWithRetry(requestPayload);
+  return parseGeminiActionJson_(geminiResult.text, geminiResult.usage);
+}
+
+/**
+ * 旧システム用のリクエストペイロードを構築
+ * @private
+ */
+function buildOldSystemPayloadFromContext_(userText, imageBlobs, contextText, todayLogsText, customSystemPrompt) {
   const currentTurnParts = [];
 
-  // 画像入力の追加
   if (imageBlobs && Array.isArray(imageBlobs)) {
     for (let i = 0; i < imageBlobs.length; i++) {
       const blob = imageBlobs[i];
@@ -290,7 +366,6 @@ function callGeminiFlash(userText, imageBlobs, contextText, todayLogsText, custo
     }
   }
 
-  // 最新のテキスト
   let promptBody = `${contextText}\n\n`;
   if (todayLogsText && typeof todayLogsText === 'string' && todayLogsText.trim() !== '') {
     promptBody += `=== 本日の会話履歴 (時系列) ===\n${todayLogsText}\n\n`;
@@ -298,7 +373,7 @@ function callGeminiFlash(userText, imageBlobs, contextText, todayLogsText, custo
   promptBody += `=== ユーザーの最新発言 ===\n${userText || '（画像を受信しました。内容を確認してください）'}`;
   currentTurnParts.push({ text: promptBody });
 
-  const requestPayload = {
+  return {
     systemInstruction: {
       parts: [{ text: customSystemPrompt || getSystemPrompt() }]
     },
@@ -320,33 +395,832 @@ function callGeminiFlash(userText, imageBlobs, contextText, todayLogsText, custo
       }
     ]
   };
+}
 
-  const geminiResult = fetchGeminiResultWithRetry(requestPayload);
-  let cleaned = geminiResult.text;
-  if (cleaned.startsWith('```json')) {
-    cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-  } else if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+// =============================================================================
+// 2モデル体制（Flash-Lite 司令塔 ＋ Flash 動的アセンブル実行）＆ A/Bテスト並行エンジン
+// =============================================================================
+
+/**
+ * Flash-Lite 出力強制用の JSON スキーマ (Structured Outputs)
+ */
+const LITE_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    tags: {
+      type: 'ARRAY',
+      items: {
+        type: 'STRING',
+        enum: ['DB依頼', '事実質問', '単発行動の開始', '活動目標の表明', '完了報告', '体調・疲労の訴え', '過ごし方相談', '雑談']
+      }
+    },
+    previous_action_status: {
+      type: 'STRING',
+      enum: ['継続中', '完了済み', '該当なし']
+    },
+    location: {
+      type: 'STRING',
+      enum: ['自宅', '職場', '移動中', '外出先']
+    },
+    health_status: {
+      type: 'STRING',
+      enum: ['通常', '低調', '不調']
+    },
+    weather_relevance: {
+      type: 'BOOLEAN'
+    },
+    matched_habit_topic: {
+      type: 'STRING'
+    }
+  },
+  required: ['tags', 'previous_action_status', 'location', 'health_status', 'weather_relevance', 'matched_habit_topic']
+};
+
+/**
+ * デフォルトの前段 Flash-Lite 判定プロンプト (prompt_lite)
+ * @return {string}
+ */
+function getDefaultPromptLite() {
+  return `あなたは生活伴走システムの状況分析・ルーティング専任AIです。
+返信文の作成は行わず、与えられた「客観的時刻・経過時間データ」「本日の会話履歴」「ユーザーの最新発言」から、現在の状況を正確に分類・推論して指定のJSONスキーマで出力してください。
+
+【各フィールドの判定基準】
+1. tags（発言の要素分類・複数該当可）:
+   - "DB依頼": タスク、カレンダー予定、買い物メモ、インプットストック、定期ルーティンの追加・変更・削除・記録の依頼。
+   - "事実質問": 世の中の事実、店舗・施設情報、イベント期日、天気、仕様などの調査・確認を求める質問。
+   - "単発行動の開始": これから直ちに行う単発の物理行動・移動・家事・準備・作業等の開始宣言（「〜してくる」「〜始める」「〜行ってくる」等）。
+   - "活動目標の表明": 今日や週末など、これからの時間枠でやりたいこと・目標の表明。
+   - "完了報告": 行動やタスク、日課を終えたという報告（「〜終わった」「〜完了」「〜したよ」等）。
+   - "体調・疲労の訴え": 眠気、だるさ、痛み、重さ、疲れ、寝不足などの心身シグナルの言及。
+   - "過ごし方相談": 空き時間や余白に何をして過ごすか、段取りや選択肢を求める相談。
+   - "雑談": 日常の出来事の共有、感想、挨拶、フリートーク。
+
+2. previous_action_status（直前行動の完了・継続推論）:
+   - 直前の会話履歴でユーザーが何らかの行動開始を宣言していた場合、そこからの経過時間（Δt）と最新発言の内容から推論する：
+     * "継続中": 経過時間Δtが短くその行動や後続の本番行動がまだ終わっていない、または作業・外出の最中と推察される場合（例: 準備や行動開始から数分〜十数分しか経っておらず、完了の言及もない場合）。
+     * "完了済み": 最新発言で完了が報告された、または十分な時間が経過し一段落したと推察される場合。
+     * "該当なし": 直前に行動開始の宣言がない、または本日初回の発言である場合。
+
+3. location（現在地の特定）:
+   - 会話文脈、カレンダー予定、時間帯から現在地を推論し、"自宅" / "職場" / "移動中" / "外出先" のいずれかを出力。
+
+4. health_status（当日の心身シグナル抽出）:
+   - 当日ログおよび最新発言の事実から、"通常" / "低調"（眠気・軽い疲れ等） / "不調"（痛み・強いだるさ・体調不良等）を判定。
+
+5. weather_relevance（屋外・天気の関与判定）:
+   - 外出・移動の言及、天気・気温・気圧の質問、または屋外活動（散歩・買い物等）の可能性がある場合は true、室内完結のやり取りなら false。
+
+6. matched_habit_topic（関連生活習慣トピックの動的キー照合）:
+   - コンテキストで提示された【登録済み生活習慣トピック一覧】の中で、今回の発言または直前の継続中行動に直接関連するトピック名があればそのトピック名を1つ出力。無関係であれば "none" を出力。`;
+}
+
+/**
+ * デフォルトの後段 Flash 共通コア指示 (prompt_core)
+ * @return {string}
+ */
+function getDefaultPromptCore() {
+  return `あなたは、ユーザー専属の『生活伴走システム』の対話エージェントです。
+心身の健康と社会的な繋がりを土台に、罪悪感のない休息と活動のメリハリをつけ、ユーザーが『ありたい人間像』へ自然体で近づくことを支える「状況を映す鏡（リフレクション）× 行動の触媒（カタリスト）」として伴走してください。
+
+【生活伴走システムの提供能力と支援手段】
+あなたが直接実行できる機能・支援手段は、以下の4つのみです：
+1. 対話とリフレクション（状況の鏡）:
+   LINEメッセージへの返答、思考の整理、共感、および客観的な状況（現在時刻、直前からの経過時間Δt、次の予定までの残り時間）の提示。
+2. 行動選択肢の提示（カタリスト）:
+   余白時間や状況に合わせ、5領域から今すぐ着手できる具体的な行動カード（2〜3枚）の提案。
+3. データ・予定の管理（JSONアクション）:
+   タスク・買物・インプットの記録・更新、およびGoogleカレンダーへの予定登録・削除。
+4. 情報の調査・リンク提供（Web検索）:
+   Google検索を用いた事実・期日・店舗情報の確認、およびWebページやGoogleマップ等のURL提示。
+
+【基本対話原則】
+- 口調と距離感: 敬体（です・ます調）をベースに、対等な大人に対する落ち着いた頼れる伴走者として応答する。日常行動に対して予防的な小言や過度な気遣い（「〜に気をつけて」等）は添えない。
+- 主語と視点の分離: あなたは行動の当事者ではなく「伴走者（聞き手）」である。当事者本人の立場の表現や、ユーザーのセルフケアに対してAI側からお礼を述べる主客転倒は行わない。
+- 監視用語の排除: 「予定通り」「計画通り」「スケジュール通り」といった管理・監視的な表現は使わず、時間や予定は心地よい目安として扱う。
+- 準備行動と本番行動の分離: 機器の稼働や下準備などの「準備・トリガー行動」を「本番の行動」そのものと混同しない。準備中は手元が空いている（または進行中である）ことを前提に文脈を捉える。
+- 独自用語の厳守: コンテキストの【用語辞書】にある定義・属性を正確に守り、一般名詞や別作品と混同しない。
+- 月報通知: コンテキストの【月報通知フラグ】が TRUE の場合は、返信の末尾に「先月の振り返りまとめをNotionにまとめておきました！」と添える。
+
+【出力形式】
+必ず純粋なJSON文字列のみを出力すること（Markdownコードブロックや解説文は含めない）。
+必須キーは "reply_text" のみとし、実行すべきアクションがない場合は他のキーを省略すること。`;
+}
+
+/**
+ * デフォルトのフェーズA専用モジュール (prompt_phase_a)
+ * @return {string}
+ */
+function getDefaultPromptPhaseA() {
+  return `【現在の行動フェーズ: フェーズA（進行中モメンタムの保護・受託専念）】
+- ユーザーは現在、直前に開始した行動や作業の「継続中（または準備の進行中）」にあります。
+- 現在のモメンタム（勢い・集中）を邪魔しないことが最優先です。
+- ユーザーから依頼された事項（タスク追加やメモ登録、質問への回答など）のみを1〜2文で簡潔・軽快に引き受けて完了報告し、別の行動提案や後続フェーズへの先回り言及は一切行わずに会話をスッキリと閉じてください。`;
+}
+
+/**
+ * デフォルトのフェーズB専用モジュール (prompt_phase_b)
+ * @return {string}
+ */
+function getDefaultPromptPhaseB() {
+  return `【現在の行動フェーズ: フェーズB（単発行動への即時送り出し）】
+- ユーザーはこれから直ちに行う行動の開始を宣言しました。
+- 移動や着手の勢いを止めないよう、「了解と気持ちよい送り出し」の1〜2文のみで即座に完結してください。
+- その行動が終わった後の先読み提案や、条件付きの後続アドバイス、予防的な注意喚起は一切添えず、軽快に送り出してください。`;
+}
+
+/**
+ * デフォルトのフェーズC専用モジュール (prompt_phase_c)
+ * @return {string}
+ */
+function getDefaultPromptPhaseC() {
+  return `【現在の行動フェーズ: フェーズC（余白時間の輪郭化 ＆ 触媒カード提示）】
+- 行動の一区切りや余白時間、または過ごし方の相談が発生しています。
+- 「何か進めますか？それとも休みますか？」といった丸投げの質問は行わず、以下のステップで『鏡（リフレクション）× 触媒（カタリスト）』として伴走してください：
+
+1. 時間の輪郭化（状況の鏡）:
+   - コンテキストの【時間の鏡（次の境界までの残り時間）】を踏まえ、次の予定や就寝（23:00目安）、または生活準備に必要な時間を差し引いた「今使えるリアルな余白時間」の見通しを簡潔に示す。
+2. 具体的選択肢カード（2〜3枚）の提示:
+   - 現在の心身状態・時間帯・場所・余白時間の長さにフィットする具体的な行動選択肢を、以下の5領域から偏りなく2〜3枚組み合わせて手元に差し出す（同日中にすでに提案済みの項目は重複提案しない）：
+     ① 実務・生活課題（未完了タスク、買物、日常の手入れ。※タスクの「リマインド目安」が現在の時刻・状況に合致するものや期限が近いものを優先。「あ、今リマインドしてと言われていたタイミングだな」と判断したものは自然に織り交ぜる）
+     ② 創造・専門スキル（コンテキストの skill_options や cycle_stamps のご無沙汰・未着手項目から、空き時間の粒度に合う音楽制作・練習またはビジネス・思考スキル）
+     ③ 文化・娯楽インプット（ゲーム、読書、未消化の input_stock 作品など。趣味・ゲーム時間は尊重しつつ、当日すでに十分満喫した後は別領域も爽やかに混ぜる）
+     ④ 身体・回復（長時間作業後の1分ストレッチ、3分軽運動、3〜4日外歩きが空いた時や好天候時の15分散歩・外気浴、無音での耳休め、純粋な休息）
+     ⑤ 社会・対人（家族との団らん・会話、連絡、外出など）
+   - ※21:30以降は就寝に向けたクールダウン時間帯とし、高負荷・高覚醒な提案は避けて低負荷な選択肢や休息を中心にする。`;
+}
+
+/**
+ * デフォルトのフェーズD専用モジュール (prompt_phase_d)
+ * @return {string}
+ */
+function getDefaultPromptPhaseD() {
+  return `【現在の行動フェーズ: フェーズD（通常対話・状況連動リフレクション）】
+- ユーザーの発言に対して、対等な大人の伴走者として自然に共感・応答してください。
+- もし現在の時刻や会話の状況（帰宅した、夜になった、自室にいる、一息ついている等）が、未完了タスクの『リマインド目安』や期日とちょうど合致しているものがあれば、「あ、今リマインドしてと言われていたタイミングだな」と判断し、機転を利かせて自然に声をかけてください。
+- 特別な予定やタスクの合致がない純粋な雑談・報告の場合は、無理にタスク提案へ誘導せず、心地よい対話と必要に応じた時間の鏡（次の予定までの目安）のみを添えてください。`;
+}
+
+/**
+ * デフォルトのDB操作仕様 ＆ JSONスキーマ (prompt_db)
+ * @return {string}
+ */
+function getDefaultPromptDb() {
+  return `【データベース・カレンダー操作仕様 ＆ 出力JSONスキーマ】
+タスク・カレンダー・買物・インプット・ルーティン・メモリー操作が必要な場合は、以下の仕様に従ってJSONキーを出力してください（不要なキーは省略すること）：
+
+1. タスク操作 (task_actions):
+   - 命名規則: 指示語を補い \`対象/プロジェクト：具体的な内容\` の形式で命名する。時間指定がある場合は末尾に \`（〜HH:mmまで）\` を明記する。
+   - リマインド目安 (remind_context): 新規追加(add)や更新(update)の際、そのタスクを提案すべき最適なタイミング・状況（例: \`隙間15分・自室\`, \`夜・帰宅後\`, \`休日まとまった時間・PC\`, \`19時以降\` 等）を文脈から推論して必ず付与する。特に昼頃までの日中締切（\`〜11:59まで\` 等）があるタスクには \`締切前日夜 または 当日朝\` を設定する。
+2. カレンダー操作 (calendar_actions):
+   - 個人メインカレンダーのみ操作可能（家族共用カレンダーは読み取り専用）。
+   - 既存予定の変更時は、旧予定の \`delete\` と新予定の \`add\` をセットで出力する。
+3. 周期記録・辞書・プロファイル更新 (memory_updates):
+   - ユーザーが \`cycle_stamps\` の対象活動（爪切り、外歩き・散歩、読書（本・漫画）、ピアノ演奏、ギター練習、楽曲制作、ビジネスインプット等）を実施した報告があった場合は、\`cycle_stamps_updates\` に \`"項目名: YYYY-MM-DD"\` を出力して当日日付へ更新する。
+
+{
+  "reply_text": "【必須】ユーザーへの返信文",
+  "image_summary": "（※画像添付時のみ）画像の客観的な内容要約",
+  "task_actions": [
+    { "action": "add", "title": "対象：具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安（例: 夜・自室 / 休日PC 等）" },
+    { "action": "update", "task_id": "T_...", "target_title": "対象名", "new_title": "新タイトル", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" },
+    { "action": "complete", "task_id": "T_...", "title": "完了タスク名" },
+    { "action": "delete", "task_id": "T_...", "title": "破棄タスク名" }
+  ],
+  "calendar_actions": [
+    { "action": "add", "title": "予定名", "start_time": "YYYY-MM-DDTHH:mm:ss", "end_time": "YYYY-MM-DDTHH:mm:ss", "is_all_day": false, "recurrence_days": [] },
+    { "action": "delete", "title": "予定名", "date": "YYYY-MM-DD", "delete_series": false }
+  ],
+  "shopping_actions": [
+    { "action": "add", "item": "品名", "category": "カテゴリ" },
+    { "action": "complete", "item": "品名" },
+    { "action": "delete", "item": "品名" }
+  ],
+  "input_stock_actions": [
+    { "action": "add", "type": "映画/音楽/本/ゲーム/その他", "title": "タイトル", "memo": "メモ" },
+    { "action": "complete", "title": "タイトル" },
+    { "action": "delete", "title": "タイトル" }
+  ],
+  "routine_actions": [
+    { "action": "add", "title": "ルール名", "type": "day_of_week/day_of_month/interval_days", "value": "設定値" }
+  ],
+  "memory_updates": {
+    "cycle_stamps_updates": "（※対象活動の実施報告時のみ）項目名: YYYY-MM-DD",
+    "dictionary": "（※新出用語の説明時のみ）単語名: 客観的な定義",
+    "profile": "（※明示的なプロファイル変更指示時のみ）更新後のプロファイル全文"
   }
+}`;
+}
+
+/**
+ * デフォルトの引き算・回復優先モジュール (prompt_relief)
+ * @return {string}
+ */
+function getDefaultPromptRelief() {
+  return `【特別介入モード: 引き算・リスケ・心身回復の最優先】
+- 現在、ユーザーに疲労・体調不良のシグナル、または予定の崩れ（揺らぎ）が発生しています。
+- タスクの消化や計画の遂行を促すことはやめ、「今日はやめておきましょう」「別日に回して、今は回復と休息を最優先にしましょう」という『引き算・撤退の意思決定』をシステム側から能動的に提案し、罪悪感のない休息を全面的に肯定してください。
+- もし本日期限のタスクがある場合は、無理に今日やらせるのではなく、明日以降へのリスケジュール（期限変更の提案）や、現在の安静姿勢・低負荷でどうしてもやりたい場合のみの極小選択肢にとどめてください。`;
+}
+
+/**
+ * 前段 Flash-Lite を実行し、発言要素分解・文脈推論・動的キー照合を行う
+ * @param {string} userText
+ * @param {boolean} hasImages
+ * @param {string} todayLogsText
+ * @param {Object} memory
+ * @param {Object} precomputed { nowStr, elapsedStr, boundaryInfo, todayEvents, habitTopics }
+ * @return {{result: Object, usage: Object|null}}
+ */
+function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed) {
+  const systemPrompt = (memory.prompt_lite && memory.prompt_lite.trim() !== '')
+    ? memory.prompt_lite.trim()
+    : getDefaultPromptLite();
+
+  const topicsStr = (precomputed.habitTopics && precomputed.habitTopics.length > 0)
+    ? precomputed.habitTopics.join(', ')
+    : '入浴, 食事, 身支度, 作業, 睡眠, 家事';
+
+  let userContent = `【登録済み生活習慣トピック一覧】: ${topicsStr}\n`;
+  userContent += `【現在日時】: ${precomputed.nowStr}\n`;
+  userContent += `【直前のやり取りからの経過時間(Δt)】: ${precomputed.elapsedStr}\n`;
+  userContent += `【時間の鏡（現在の予定・次の境界までの残り時間）】: ${precomputed.boundaryInfo.summaryText}\n`;
+  userContent += `【本日のカレンダー予定一覧】: ${precomputed.todayEvents.length > 0 ? precomputed.todayEvents.join(' / ') : '予定なし'}\n\n`;
+  userContent += `=== 本日の会話履歴 (時系列) ===\n${todayLogsText || '（本日初回の発言）'}\n\n`;
+  userContent += `=== ユーザーの最新発言 ===\n${userText || '（画像送信）'}${hasImages ? '\n[※画像添付あり]' : ''}`;
+
+  const payload = {
+    systemInstruction: {
+      parts: [{ text: systemPrompt }]
+    },
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: userContent }]
+      }
+    ],
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: 'application/json',
+      responseSchema: LITE_RESPONSE_SCHEMA
+    }
+  };
 
   try {
-    const parsed = JSON.parse(cleaned);
-    if (parsed && typeof parsed === 'object') {
-      parsed._usage = geminiResult.usage;
-    }
-    return parsed;
-  } catch (err) {
-    Logger.log('JSONパース失敗: ' + cleaned);
+    const res = fetchGeminiResultWithRetry(payload, SYSTEM_CONSTANTS.GEMINI_LITE_ENDPOINT_BASE);
+    const parsed = JSON.parse(res.text);
     return {
-      reply_text: cleaned,
-      task_actions: [],
-      calendar_actions: [],
-      shopping_actions: [],
-      input_stock_actions: [],
-      routine_actions: [],
-      _usage: geminiResult.usage
+      result: {
+        tags: Array.isArray(parsed.tags) ? parsed.tags : ['雑談'],
+        previous_action_status: parsed.previous_action_status || '該当なし',
+        location: parsed.location || '自宅',
+        health_status: parsed.health_status || '通常',
+        weather_relevance: Boolean(parsed.weather_relevance),
+        matched_habit_topic: parsed.matched_habit_topic || 'none'
+      },
+      usage: res.usage
+    };
+  } catch (err) {
+    Logger.log('Flash-Lite 判定エラー (安全フォールバック適用): ' + err.message);
+    return {
+      result: {
+        tags: ['DB依頼', '過ごし方相談', '雑談'],
+        previous_action_status: '該当なし',
+        location: '自宅',
+        health_status: '通常',
+        weather_relevance: false,
+        matched_habit_topic: 'none'
+      },
+      usage: { promptTokenCount: 0, candidatesTokenCount: 0, cachedContentTokenCount: 0, totalTokenCount: 0 }
     };
   }
+}
+
+/**
+ * GASルール層: Flash-Liteの判定結果と客観的時間境界から行動フェーズ（A/B/C/D）を決定
+ * @param {Object} liteResult
+ * @param {Object} boundaryInfo
+ * @return {string} 'PHASE_A' | 'PHASE_B' | 'PHASE_C' | 'PHASE_D'
+ */
+function determineActionPhase(liteResult, boundaryInfo) {
+  const tags = (liteResult && Array.isArray(liteResult.tags)) ? liteResult.tags : [];
+  const prevStatus = (liteResult && liteResult.previous_action_status) ? liteResult.previous_action_status : '該当なし';
+
+  // 2-1. [単発行動の開始]（〜してくる/〜始める）がある？ -> 最優先でフェーズB（即時送り出し）
+  if (tags.indexOf('単発行動の開始') !== -1) {
+    return 'PHASE_B';
+  }
+
+  // 2-2. [活動目標の表明] または [過ごし方相談] がある？ -> フェーズC（余白・段取り・触媒カード提示）
+  if (tags.indexOf('活動目標の表明') !== -1 || tags.indexOf('過ごし方相談') !== -1) {
+    return 'PHASE_C';
+  }
+
+  // 2-3. 直前行動の推論結果が『継続中』である？ -> フェーズA（進行中の保護・受託専念）
+  if (prevStatus === '継続中') {
+    return 'PHASE_A';
+  }
+
+  // 2-4. [完了報告] がある？ または『完了済み』で次の予定まで余白（30分以上）がある？ -> フェーズC
+  const hasFreeMargin = boundaryInfo && !boundaryInfo.isDuringEvent && boundaryInfo.minutesUntilNext >= 30;
+  if (tags.indexOf('完了報告') !== -1 || (prevStatus === '完了済み' && hasFreeMargin)) {
+    return 'PHASE_C';
+  }
+
+  // それ以外 -> フェーズD（通常応答・雑談・状況連動リマインド）
+  return 'PHASE_D';
+}
+
+/**
+ * 新システムの後段 Flash 用リクエストペイロードを動的アセンブルで構築
+ * @param {string} userText
+ * @param {Array<GoogleAppsScript.Base.Blob>} imageBlobs
+ * @param {string} todayLogsText
+ * @param {Object} memory
+ * @param {Object} liteResult
+ * @param {string} phase 'PHASE_A' | 'PHASE_B' | 'PHASE_C' | 'PHASE_D'
+ * @param {Object} precomputed { now, nowStr, todayDate, elapsedStr, boundaryInfo, todayEvents }
+ * @return {Object} Gemini API requestPayload
+ */
+function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory, liteResult, phase, precomputed) {
+  const tags = Array.isArray(liteResult.tags) ? liteResult.tags : [];
+  const hasImages = Boolean(imageBlobs && imageBlobs.length > 0);
+  const isRelief = (liteResult.health_status === '低調' || liteResult.health_status === '不調');
+  const needDbModule = (tags.indexOf('DB依頼') !== -1 || tags.indexOf('完了報告') !== -1 || hasImages || isRelief);
+  const needSearch = (tags.indexOf('事実質問') !== -1);
+  const needWeather = (Boolean(liteResult.weather_relevance) || phase === 'PHASE_C' || isRelief);
+
+  // ----------------------------------------------------
+  // 1. プロンプトモジュールの動的選別・結合
+  // ----------------------------------------------------
+  const promptModules = [];
+
+  // 3-1. コアプロンプト（常時注入）
+  const corePrompt = (memory.prompt_core && memory.prompt_core.trim() !== '')
+    ? memory.prompt_core.trim()
+    : getDefaultPromptCore();
+  promptModules.push(corePrompt);
+
+  // 3-2. フェーズ専用モジュール
+  if (phase === 'PHASE_A') {
+    promptModules.push((memory.prompt_phase_a && memory.prompt_phase_a.trim() !== '') ? memory.prompt_phase_a.trim() : getDefaultPromptPhaseA());
+  } else if (phase === 'PHASE_B') {
+    promptModules.push((memory.prompt_phase_b && memory.prompt_phase_b.trim() !== '') ? memory.prompt_phase_b.trim() : getDefaultPromptPhaseB());
+  } else if (phase === 'PHASE_C') {
+    promptModules.push((memory.prompt_phase_c && memory.prompt_phase_c.trim() !== '') ? memory.prompt_phase_c.trim() : getDefaultPromptPhaseC());
+  } else {
+    promptModules.push((memory.prompt_phase_d && memory.prompt_phase_d.trim() !== '') ? memory.prompt_phase_d.trim() : getDefaultPromptPhaseD());
+  }
+
+  // 3-5. 引き算・回復優先モジュール（心身低調・不調時）
+  if (isRelief) {
+    promptModules.push((memory.prompt_relief && memory.prompt_relief.trim() !== '') ? memory.prompt_relief.trim() : getDefaultPromptRelief());
+  }
+
+  // 3-3. DB操作仕様 ＆ JSONスキーマ
+  if (needDbModule) {
+    promptModules.push((memory.prompt_db && memory.prompt_db.trim() !== '') ? memory.prompt_db.trim() : getDefaultPromptDb());
+  } else {
+    promptModules.push(`【出力JSONスキーマ】\n{ "reply_text": "【必須】ユーザーへの返信文" }`);
+  }
+
+  // カスタムレイアウト指示（常時末尾）
+  if (memory.custom_system_prompt && memory.custom_system_prompt.trim() !== '') {
+    promptModules.push(`【追加カスタム指示（最優先フォーマット・ルール）】\n${memory.custom_system_prompt.trim()}`);
+  }
+
+  const finalSystemPrompt = promptModules.join('\n\n==================================================\n\n');
+
+  // ----------------------------------------------------
+  // 2. コンテキストデータの動的選別・構築
+  // ----------------------------------------------------
+  let contextLines = [];
+  contextLines.push(`【プロファイル（恒久生活基盤）】: ${memory.profile || '未設定'}`);
+  contextLines.push(`【現在日時】: ${precomputed.nowStr}`);
+  contextLines.push(`【直前のやり取りからの経過時間(Δt)】: ${precomputed.elapsedStr}`);
+  contextLines.push(`【時間の鏡（現在の予定・次の境界までの残り時間）】: ${precomputed.boundaryInfo.summaryText}`);
+  contextLines.push(`【現在地推論】: ${liteResult.location || '自宅'} / 【心身状態】: ${liteResult.health_status || '通常'}`);
+
+  if (memory.monthly_report_ready === 'TRUE') {
+    contextLines.push(`【月報通知フラグ】: TRUE`);
+  }
+
+  // 3-4. 関連生活習慣トピックのオンデマンド注入（該当エントリーのみピンポイント抽出）
+  if (liteResult.matched_habit_topic && liteResult.matched_habit_topic !== 'none' && memory.lifestyle_habits) {
+    const habitEntry = extractHabitEntryByTopic(memory.lifestyle_habits, liteResult.matched_habit_topic);
+    if (habitEntry) {
+      contextLines.push(`【関連する生活習慣メモリー (${liteResult.matched_habit_topic})】:\n${habitEntry}`);
+    }
+  }
+
+  // 3-6. 天気・気圧データの条件付き注入
+  if (needWeather) {
+    let weatherDisplay = memory.weather_info || '';
+    let pressureAlertVal = memory.pressure_alert || 'FALSE';
+    if (!weatherDisplay || weatherDisplay.includes('エラー')) {
+      try {
+        const freshW = fetchWeatherAndPressure();
+        if (freshW && freshW.weatherInfo) {
+          weatherDisplay = freshW.weatherInfo;
+          pressureAlertVal = freshW.pressureAlert;
+        }
+      } catch (e) {}
+    }
+    if (typeof hasOfficeEventToday === 'function' && !hasOfficeEventToday() && weatherDisplay.includes('｜')) {
+      weatherDisplay = weatherDisplay.split('｜')[0].trim();
+    }
+    contextLines.push(`【天気・気温】: ${weatherDisplay || '情報なし'}`);
+    contextLines.push(`【気圧急降下】: ${pressureAlertVal === 'TRUE' ? '急降下中(注意)' : '安定'}`);
+  }
+
+  // タスク・買物・インプット・カレンダー・ありたい姿の条件付き注入
+  const uncompletedTasks = (phase === 'PHASE_C' || phase === 'PHASE_D' || needDbModule) ? getTasks('未完了') : [];
+  const pendingInput = (phase === 'PHASE_C' || needDbModule) ? getInputStockList('未') : [];
+  const unboughtShopping = (phase === 'PHASE_C' || needDbModule) ? getShoppingList('未買') : [];
+
+  // 用語辞書（出現キーワードのみオンデマンド抽出）
+  if (memory.dictionary && memory.dictionary.trim() !== '') {
+    const taskTitlesText = uncompletedTasks.map(t => t.title).join(' ');
+    const inputTitlesText = pendingInput.map(inp => inp.title).join(' ');
+    const searchTarget = `${userText || ''}\n${todayLogsText || ''}\n${taskTitlesText}\n${inputTitlesText}`;
+    const relevantDict = filterRelevantDictionaryEntries(memory.dictionary, searchTarget);
+    if (relevantDict) {
+      contextLines.push(`【用語辞書（客観的前提知識・誤認防止）】:\n${relevantDict}`);
+    }
+  }
+
+  // フェーズC（余白・段取り）専用コンパス＆候補プール
+  if (phase === 'PHASE_C') {
+    if (!isRelief) {
+      if (memory.ideal_self && memory.ideal_self.trim() !== '') {
+        contextLines.push(`【ありたい人間像・生活指針（判断の羅針盤）】: ${memory.ideal_self.trim()}`);
+      }
+      if (memory.skill_options && memory.skill_options.trim() !== '') {
+        contextLines.push(`【能動的スキルアップメニュー (skill_options)】:\n${memory.skill_options.trim()}`);
+      }
+      if (memory.cycle_stamps && memory.cycle_stamps.trim() !== '') {
+        contextLines.push(`【活動・メンテナンス最終記録 (cycle_stamps)】:\n${memory.cycle_stamps.trim()}`);
+      }
+      if (memory.weekly_summary && memory.weekly_summary.trim() !== '') {
+        contextLines.push(`【直近1〜2週間の生活・活動サマリー】: ${memory.weekly_summary.trim()}`);
+      }
+    }
+    const calCtx = getCalendarAndHolidayContext(precomputed.now);
+    contextLines.push(calCtx);
+  } else if (needDbModule && userText && /(予定|カレンダー|スケジュール|出社|休み|休日|土曜|日曜|来週|明後日|明日)/.test(userText)) {
+    const calCtx = getCalendarAndHolidayContext(precomputed.now);
+    contextLines.push(calCtx);
+  } else if (precomputed.todayEvents && precomputed.todayEvents.length > 0) {
+    contextLines.push(`【本日のカレンダー予定】: ${precomputed.todayEvents.join(' / ')}`);
+  }
+
+  // 未完了タスク一覧（フェーズC、フェーズDのリマインド目安照合、DB操作・Relief時のみ注入）
+  if (phase === 'PHASE_C' || phase === 'PHASE_D' || needDbModule) {
+    contextLines.push(`【未完了タスク一覧】: ${formatUncompletedTasksForContext(uncompletedTasks, precomputed.todayDate)}`);
+  }
+
+  if (phase === 'PHASE_C' || needDbModule) {
+    if (unboughtShopping.length > 0) {
+      contextLines.push(`【買物リスト(未買)】: ${unboughtShopping.map(s => s.item).join(', ')}`);
+    }
+    if (pendingInput.length > 0) {
+      const inputItems = pendingInput.map(inp => `[${inp.type}]${inp.title}${inp.memo ? '(' + inp.memo + ')' : ''}`);
+      contextLines.push(`【インプット未消化】: ${inputItems.join(', ')}`);
+    }
+  }
+
+  if (needDbModule && userText && /(ルーティン|定期|習慣)/.test(userText)) {
+    const routines = getRoutines();
+    if (routines.length > 0) {
+      contextLines.push(`【登録済み定期ルーティン】: ${routines.map(r => `${r.ruleName}(${r.type}:${r.value})`).join(', ')}`);
+    }
+  }
+
+  // ----------------------------------------------------
+  // 3. マルチモーダル＆会話履歴の組み立て
+  // ----------------------------------------------------
+  const currentTurnParts = [];
+  if (hasImages) {
+    for (let i = 0; i < imageBlobs.length; i++) {
+      const blob = imageBlobs[i];
+      if (blob) {
+        currentTurnParts.push({
+          inlineData: {
+            mimeType: blob.getContentType() || 'image/jpeg',
+            data: Utilities.base64Encode(blob.getBytes())
+          }
+        });
+      }
+    }
+  }
+
+  let promptBody = contextLines.join('\n') + '\n\n';
+  if (todayLogsText && todayLogsText.trim() !== '') {
+    promptBody += `=== 本日の会話履歴 (時系列) ===\n${todayLogsText.trim()}\n\n`;
+  }
+  promptBody += `=== ユーザーの最新発言 ===\n${userText || '（画像を受信しました。内容を確認してください）'}`;
+  currentTurnParts.push({ text: promptBody });
+
+  const requestPayload = {
+    systemInstruction: {
+      parts: [{ text: finalSystemPrompt }]
+    },
+    contents: [
+      {
+        role: 'user',
+        parts: currentTurnParts
+      }
+    ],
+    generationConfig: {
+      temperature: 0.7,
+      thinkingConfig: {
+        thinkingBudget: 0
+      }
+    }
+  };
+
+  if (needSearch) {
+    requestPayload.tools = [{ googleSearch: {} }];
+  } else {
+    requestPayload.generationConfig.responseMimeType = 'application/json';
+  }
+
+  return requestPayload;
+}
+
+/**
+ * 新・旧2つのGeminiリクエストペイロードを UrlFetchApp.fetchAll で完全並列実行
+ * @param {Object} newPayload
+ * @param {Object} oldPayload
+ * @return {{newRes: {text: string, usage: Object|null}, oldRes: {text: string, usage: Object|null}}}
+ * @private
+ */
+function fetchNewAndOldParallel_(newPayload, oldPayload) {
+  const config = getConfig();
+  const url = `${SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE}?key=${config.geminiApiKey}`;
+
+  const reqNew = {
+    url: url,
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(newPayload),
+    muteHttpExceptions: true
+  };
+  const reqOld = {
+    url: url,
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(oldPayload),
+    muteHttpExceptions: true
+  };
+
+  const responses = UrlFetchApp.fetchAll([reqNew, reqOld]);
+  const resNewRaw = responses[0];
+  const resOldRaw = responses[1];
+
+  let newResult;
+  if (resNewRaw.getResponseCode() >= 200 && resNewRaw.getResponseCode() < 300) {
+    newResult = extractGeminiCandidateResult_(resNewRaw.getContentText());
+  } else {
+    Logger.log(`[並列実行 新システムリトライ] ステータス ${resNewRaw.getResponseCode()}`);
+    Utilities.sleep(1000);
+    newResult = fetchGeminiResultWithRetry(newPayload);
+  }
+
+  let oldResult;
+  if (resOldRaw.getResponseCode() >= 200 && resOldRaw.getResponseCode() < 300) {
+    oldResult = extractGeminiCandidateResult_(resOldRaw.getContentText());
+  } else {
+    Logger.log(`[並列実行 旧システムリトライ] ステータス ${resOldRaw.getResponseCode()}`);
+    try {
+      Utilities.sleep(1000);
+      oldResult = fetchGeminiResultWithRetry(oldPayload);
+    } catch (oldErr) {
+      oldResult = {
+        text: JSON.stringify({ reply_text: `（旧システム一時エラー: ${oldErr.message}）` }),
+        usage: { promptTokenCount: 0, candidatesTokenCount: 0, cachedContentTokenCount: 0, totalTokenCount: 0 }
+      };
+    }
+  }
+
+  return { newRes: newResult, oldRes: oldResult };
+}
+
+/**
+ * 旧システム側だけが検出し、新システム側が取りこぼしたDB/カレンダーアクションがないか比較検知
+ * @param {Object} newParsed
+ * @param {Object} oldParsed
+ * @return {string} 差分注記文字列（差分なしなら空文字）
+ * @private
+ */
+function detectMissedActionsFromOld_(newParsed, oldParsed) {
+  if (!oldParsed) return '';
+  const missed = [];
+
+  const newTasks = (newParsed && Array.isArray(newParsed.task_actions)) ? newParsed.task_actions : [];
+  const oldTasks = Array.isArray(oldParsed.task_actions) ? oldParsed.task_actions : [];
+  if (oldTasks.length > 0 && newTasks.length === 0) {
+    const names = oldTasks.map(t => `${t.action}:${t.title || t.target_title || ''}`).join(', ');
+    missed.push(`タスク(${names})`);
+  }
+
+  const newCals = (newParsed && Array.isArray(newParsed.calendar_actions)) ? newParsed.calendar_actions : [];
+  const oldCals = Array.isArray(oldParsed.calendar_actions) ? oldParsed.calendar_actions : [];
+  if (oldCals.length > 0 && newCals.length === 0) {
+    const names = oldCals.map(c => `${c.action}:${c.title || ''}`).join(', ');
+    missed.push(`予定(${names})`);
+  }
+
+  const newShops = (newParsed && Array.isArray(newParsed.shopping_actions)) ? newParsed.shopping_actions : [];
+  const oldShops = Array.isArray(oldParsed.shopping_actions) ? oldParsed.shopping_actions : [];
+  if (oldShops.length > 0 && newShops.length === 0) {
+    const names = oldShops.map(s => `${s.action}:${s.item || ''}`).join(', ');
+    missed.push(`買物(${names})`);
+  }
+
+  if (missed.length > 0) {
+    return `⚠️ [旧のみ検出: ${missed.join(' / ')}]`;
+  }
+  return '';
+}
+
+/**
+ * 生活伴走システムの1ターン統合実行エンジン（system_mode: AB_TEST | NEW | OLD 完全対応）
+ * @param {string} userText
+ * @param {Array<GoogleAppsScript.Base.Blob>} imageBlobs
+ * @param {string} todayLogsText
+ * @param {Object=} memoryOpt
+ * @param {Date=} simulatedNowDate
+ * @return {{
+ *   mode: string,
+ *   phase: string,
+ *   phaseLabel: string,
+ *   liteResult: Object|null,
+ *   primaryResult: Object,
+ *   oldResult: Object|null,
+ *   missedActionsNote: string,
+ *   logMeta: Object
+ * }}
+ */
+function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, simulatedNowDate) {
+  const memory = memoryOpt || getMemory();
+  const mode = memory.system_mode || 'AB_TEST';
+  const now = simulatedNowDate || new Date();
+
+  // ----------------------------------------------------
+  // A. OLDモード（完全ロールバック・旧システム単独稼働）
+  // ----------------------------------------------------
+  if (mode === 'OLD') {
+    const sheetContext = getSpreadsheetContext(userText, todayLogsText, now);
+    const calendarContext = getCalendarAndHolidayContext(now);
+    const combinedContext = `${calendarContext}\n\n${sheetContext}`;
+    const oldRes = callGeminiFlash(userText, imageBlobs, combinedContext, todayLogsText);
+    return {
+      mode: 'OLD',
+      phase: 'OLD',
+      phaseLabel: '旧単独',
+      liteResult: null,
+      primaryResult: oldRes,
+      oldResult: oldRes,
+      missedActionsNote: '',
+      logMeta: oldRes._usage || null
+    };
+  }
+
+  // ----------------------------------------------------
+  // B. 0. GAS前処理: 客観数値の機械的算出
+  // ----------------------------------------------------
+  const nowStr = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd(E) HH:mm');
+  const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const lastTimeStr = extractLastLogTime(todayLogsText);
+  const elapsedStr = formatElapsedTime(lastTimeStr, now);
+  const boundaryInfo = getNextBoundaryInfo(now);
+  const todayEvents = getTodayEventsList(now);
+  const habitTopics = extractHabitTopicsList(memory.lifestyle_habits);
+
+  const precomputed = {
+    now: now,
+    nowStr: nowStr,
+    todayDate: todayDate,
+    elapsedStr: elapsedStr,
+    boundaryInfo: boundaryInfo,
+    todayEvents: todayEvents,
+    habitTopics: habitTopics
+  };
+
+  // ----------------------------------------------------
+  // C. 1. 前段 Flash-Lite 実行
+  // ----------------------------------------------------
+  const hasImages = Boolean(imageBlobs && imageBlobs.length > 0);
+  const liteCall = callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed);
+  const liteResult = liteCall.result;
+  const liteUsage = liteCall.usage || {};
+
+  // ----------------------------------------------------
+  // D. 2. GAS ルール層: フェーズ判定
+  // ----------------------------------------------------
+  const phase = determineActionPhase(liteResult, boundaryInfo);
+  const phaseMap = {
+    'PHASE_A': 'フェーズA(進行中保護)',
+    'PHASE_B': 'フェーズB(即時送出)',
+    'PHASE_C': 'フェーズC(余白・触媒)',
+    'PHASE_D': 'フェーズD(通常対話)'
+  };
+  const phaseShortMap = {
+    'PHASE_A': 'フェーズA',
+    'PHASE_B': 'フェーズB',
+    'PHASE_C': 'フェーズC',
+    'PHASE_D': 'フェーズD'
+  };
+  const phaseLabel = phaseShortMap[phase] || phase;
+  const phaseFullLabel = phaseMap[phase] || phase;
+  const tagsStr = (liteResult.tags || []).join(',');
+  const phaseAndTags = `[${phaseFullLabel} / ${tagsStr} / 直前:${liteResult.previous_action_status} / 体調:${liteResult.health_status} / topic:${liteResult.matched_habit_topic}]`;
+
+  // ----------------------------------------------------
+  // E. 3. 新システムのリクエスト構築
+  // ----------------------------------------------------
+  const newPayload = buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory, liteResult, phase, precomputed);
+
+  // ----------------------------------------------------
+  // F. 4. 後段 Flash の実行 (NEW 単独 vs AB_TEST 並列)
+  // ----------------------------------------------------
+  let newParsed;
+  let newUsage = {};
+  let oldParsed = null;
+  let oldUsage = {};
+
+  if (mode === 'AB_TEST') {
+    const sheetContext = getSpreadsheetContext(userText, todayLogsText, now);
+    const calendarContext = getCalendarAndHolidayContext(now);
+    const combinedContext = `${calendarContext}\n\n${sheetContext}`;
+    const oldPayload = buildOldSystemPayloadFromContext_(userText, imageBlobs, combinedContext, todayLogsText);
+
+    const parallelRes = fetchNewAndOldParallel_(newPayload, oldPayload);
+    newUsage = parallelRes.newRes.usage || {};
+    newParsed = parseGeminiActionJson_(parallelRes.newRes.text, newUsage);
+
+    oldUsage = parallelRes.oldRes.usage || {};
+    oldParsed = parseGeminiActionJson_(parallelRes.oldRes.text, oldUsage);
+  } else {
+    // NEW 単独稼働モード
+    const singleRes = fetchGeminiResultWithRetry(newPayload);
+    newUsage = singleRes.usage || {};
+    newParsed = parseGeminiActionJson_(singleRes.text, newUsage);
+  }
+
+  // ----------------------------------------------------
+  // G. 5. トークン集計・削減差分・取りこぼし検知
+  // ----------------------------------------------------
+  const litePrompt = liteUsage.promptTokenCount || 0;
+  const liteCand = liteUsage.candidatesTokenCount || 0;
+  const liteCache = liteUsage.cachedContentTokenCount || 0;
+  const liteTotal = liteUsage.totalTokenCount || (litePrompt + liteCand);
+
+  const flashPrompt = newUsage.promptTokenCount || 0;
+  const flashCand = newUsage.candidatesTokenCount || 0;
+  const flashCache = newUsage.cachedContentTokenCount || 0;
+  const flashTotal = newUsage.totalTokenCount || (flashPrompt + flashCand);
+
+  const newTotalTokens = liteTotal + flashTotal;
+  const oldTotalTokens = oldParsed ? (oldUsage.totalTokenCount || ((oldUsage.promptTokenCount || 0) + (oldUsage.candidatesTokenCount || 0))) : '';
+
+  let tokenReductionDiff = '';
+  if (mode === 'AB_TEST' && typeof oldTotalTokens === 'number' && oldTotalTokens > 0) {
+    const diff = newTotalTokens - oldTotalTokens;
+    const pct = ((diff / oldTotalTokens) * 100).toFixed(1);
+    const sign = diff > 0 ? '+' : '';
+    tokenReductionDiff = `${sign}${diff} tok (${sign}${pct}%)`;
+  }
+
+  const missedActionsNote = (mode === 'AB_TEST' && oldParsed)
+    ? detectMissedActionsFromOld_(newParsed, oldParsed)
+    : '';
+
+  const logMeta = {
+    isTwoModel: true,
+    litePromptTokens: litePrompt,
+    liteCandidatesTokens: liteCand,
+    liteCachedTokens: liteCache,
+    flashPromptTokens: flashPrompt,
+    flashCandidatesTokens: flashCand,
+    flashCachedTokens: flashCache,
+    newTotalTokens: newTotalTokens,
+    phaseAndTags: phaseAndTags,
+    oldAiReply: oldParsed ? (oldParsed.reply_text || '') : '',
+    oldTotalTokens: oldTotalTokens,
+    tokenReductionDiff: tokenReductionDiff
+  };
+
+  return {
+    mode: mode,
+    phase: phase,
+    phaseLabel: phaseLabel,
+    liteResult: liteResult,
+    primaryResult: newParsed,
+    oldResult: oldParsed,
+    missedActionsNote: missedActionsNote,
+    logMeta: logMeta
+  };
 }
 
 /**
@@ -487,24 +1361,18 @@ ${logsSummary || 'ログなし'}
      ② 触れたエンタメ・作品・音楽・ゲーム・趣味（作品名・アーティスト名・ゲームタイトル等の固有名詞、ゲームタスク、プレイや視聴時の感想・評価など）
    - 【過度な圧縮の禁止】: ここに記録された関心は将来プロファイルへ昇格するかどうかの重要な判定材料となるため、文字数制限を理由に作品名や感想を削ぎ落とさないでください（1行に無理に収めず、2〜3文や複数行になっても構いません）。
    - 既存のrolling_memoryの末尾に追加し、全体で直近7〜10日分を超えた古い日付のブロックは自動で押し出し削除（忘却）してください。
-2. profile（長期記憶・支援前提条件）の格上げ・新陳代謝ルール（★厳格かつ保守的に運用すること）:
-   - 目的: プロファイルは「生活基盤（住居・家族・勤務）と、日々のタイムマネジメント・行動支援に必要な前提条件」を保持する場所です。
-   - 【格上げ（昇格）の3大条件】以下のいずれかを満たした場合のみ、プロファイルへの追記・反映を許可します：
-     ① 恒久的な生活基盤・住まいに関する客観的事実: 住居・家族構成・最寄り駅・勤務形態などの恒久的事実（1回の言及でも即反映）。
-     ② rolling_memory内での定着（習慣・体質・ルーティン・趣味）: 直近7〜10日分のrolling_memoryの中で「3日以上言及されている」行動・体質・ルーティン・趣味関心（例: 慢性的な体質対策、一定期間継続してプレイしているゲームや趣味など）。7〜10日の中で1〜2日触れただけのものは一過性のものとして格上げせず、rolling_memoryに留めてください。
-     ③ ユーザーによる明示的な宣言: 「これを日課にする」「ライフワークとして続ける」「プロファイルに覚えておいて」と本人が明言した場合。
-   - 【具体的数値・支援前提の保護】: 移動所要時間や身支度・メイク時間のようなスケジュール支援に直結する具体的数値・条件を、性格表現（「〜なタイプ」等）のように勝手に要約・抽象化・削除することは固く禁じます。
-   - 【原則維持】上記①〜③の条件を満たす明確な事実がない限り、既存プロファイルの文章・数値をそのまま一字一句維持して返してください。
-3. cycle_stamps（生活メンテナンス ＆ 趣味・リフレッシュ・能動的活動の最終実施記録）:
-   - 目的: 次回のお手入れ時期や、趣味・リフレッシュ・能動的活動の「ご無沙汰（疎遠）」を検知して再提案するための日付スタンプ（カンマ区切りまたは改行区切りの「項目名: YYYY-MM-DD」形式）です。
-   - 対象カテゴリ:
-     ① 生活・機材メンテナンス: 「爪切り」「美容院・ヘアカット」「歯科健診・定期通院」「シーツ洗濯」「機材メンテ」など、身体・生活環境・機材の全体的・本格的な定期メンテナンス。
-     ② 趣味・リフレッシュ・能動的活動: ユーザーが当日の会話ログで実施したことが確認できた活動（例: 読書、楽器演奏、楽曲制作、散歩・外出、鑑賞、特定の趣味・創作活動など）。
-       * 会話ログで実施が確認できた項目の日付を当日（${targetDateStr}）に更新（または新規追加）してください。
-       * 既存の項目（過去に記録されたスタンプ）は、当日のログで実施が確認されない限り、日付を変更せずそのまま維持してください。
+2. profile（長期記憶・恒久生活基盤）の新陳代謝ルール（★厳格かつ保守的に運用すること）:
+   - 目的: プロファイルは「恒久的な生活基盤（住居・家族構成・最寄り駅・勤務形態・移動所要時間）」のみを純粋に保持する場所です（※入浴・食事・身支度・睡眠などのトピック別生活習慣は別キー lifestyle_habits で管理するため、profile には混ぜないでください）。
+   - 【反映条件】: 住居・家族構成・勤務形態・通勤時間などの恒久的事実に変更があった場合、またはユーザーが明示的に「プロファイルに覚えておいて」と指示した場合のみ更新を許可します。
+   - 【原則維持】上記の明確な変更事実がない限り、既存プロファイルの文章・数値をそのまま一字一句維持して返してください。
+3. cycle_stamps（生活メンテナンス ＆ 創造・能動的活動の最終実施記録）:
+   - 目的: 次回のお手入れ時期や、創造・スキルアップ・運動活動の「ご無沙汰（疎遠）」を検知して再提案するためのスタンプ（改行区切りの「項目名: YYYY-MM-DD」または「項目名: 未着手」形式）です。
+   - 対象項目:
+     * 爪切り、外歩き・散歩（出社日の上大岡駅徒歩15分強や近所の散歩・外出徒歩を含む）、読書（本・漫画）、ピアノ演奏、ギター練習、楽曲制作、ビジネスインプット など。
+     * 会話ログで実施が確認できた項目の値を当日（${targetDateStr}）に更新してください。
+     * 既存の項目（過去に記録された日付や「未着手」の表記）は、当日のログで実施が確認されない限り、架空の日付を捏造せずそのままの値（「未着手」なら「未着手」のまま）を維持してください。
    - 【絶対除外ルール】:
-     ① 日常の軽微なお手入れや部分ケア（例: 引っ掛かりがあった爪1本だけを削った、気になる枝毛を切った）は cycle_stamps には絶対に記録しないでください。
-     ② このような局所的ケアや応急処置はすべて 1 の rolling_memory のみに記録し、cycle_stamps には追記せず既存の記録をそのまま維持してください。
+     ① 日常の軽微なお手入れや部分ケア（例: 爪1本だけを削った、枝毛を切った、浴槽の軽いブラシがけ等）は cycle_stamps には記録せず、既存の記録をそのまま維持してください。
 4. weekly_summary（直近1〜2週間の生活・活動・感想統合サマリー）:
    - 体調だけでなく、直近1〜2週間の「生活・活動・関心の動向」を200〜300文字程度で高密度にまとめてください。
    - 【必須の3大要素】:

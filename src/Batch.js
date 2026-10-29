@@ -105,7 +105,7 @@ function dailyMidnightBatch() {
   }
 
   // ----------------------------------------------------
-  // 4. ルーティンタスク自動投入 (重複ガード付き)
+  // 4. ルーティンタスク自動投入 (重複ガード ＆ 期間限定ルーティン自動満了ガード付き)
   // ----------------------------------------------------
   try {
     Logger.log('4. ルーティンタスク自動投入処理開始');
@@ -114,6 +114,7 @@ function dailyMidnightBatch() {
     const currentDayName = dayNames[now.getDay()];
     const currentDayOfMonth = now.getDate();
     const taskSheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
+    const routineSheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.ROUTINES);
 
     // 既存の未完了タスク名一覧を取得（重複ガード用）
     const existingUncompletedTasks = tasks.filter(t => t.status === '未完了');
@@ -122,6 +123,20 @@ function dailyMidnightBatch() {
     for (let i = 0; i < routines.length; i++) {
       const r = routines[i];
       let shouldGenerate = false;
+
+      // すでに満了ステータスになっているルーティンはスキップ
+      if (r.type === 'expired' || (r.memo && r.memo.includes('[期間満了'))) {
+        continue;
+      }
+
+      // 【期間限定ルーティンの自動満了ガード】（例: "〜11/07まで" 等）
+      if (isRoutineExpired_(r, now, todayStr)) {
+        routineSheet.getRange(r.rowIndex, 2).setValue('expired');
+        const updatedMemo = r.memo ? `${r.memo} [期間満了:${todayStr}]` : `[期間満了:${todayStr}]`;
+        routineSheet.getRange(r.rowIndex, 5).setValue(updatedMemo);
+        Logger.log(`期間限定ルーティンが満了日を過ぎたため自動停止しました: ${r.ruleName}`);
+        continue;
+      }
 
       // 本日すでに生成済みの場合はスキップ
       if (r.lastGeneratedDate === todayStr) {
@@ -167,6 +182,9 @@ function dailyMidnightBatch() {
 
       if (shouldGenerate) {
         const taskId = 'R_' + Utilities.formatDate(now, 'Asia/Tokyo', 'yyyyMMdd') + '_' + (i + 1);
+        const remindCtx = (typeof normalizeTaskRemindContext_ === 'function')
+          ? normalizeTaskRemindContext_(r.ruleName, '日課・隙間時間')
+          : '日課・隙間時間';
         appendRowSafely_(taskSheet, [
           taskId,
           r.ruleName,
@@ -174,7 +192,8 @@ function dailyMidnightBatch() {
           '未完了',
           todayStr,
           '',
-          r.memo || '定期ルーティン自動投入'
+          r.memo || '定期ルーティン自動投入',
+          remindCtx
         ]);
         updateRoutineLastGenerated(r.rowIndex, todayStr);
         Logger.log(`ルーティンタスク投入成功: ${r.ruleName}`);
@@ -227,4 +246,45 @@ function dailyMidnightBatch() {
   }
 
   Logger.log('=== 深夜統合バッチ終了 ===');
+}
+
+/**
+ * ルーティン名またはメモに含まれる期日（例: "〜11/07まで" / "2026-11-07まで"）を解析し、
+ * 本日時点で期間満了しているかを判定する
+ * @param {Object} r ルーティンオブジェクト
+ * @param {Date} now 現在日時
+ * @param {string} todayStr 'yyyy-MM-dd'
+ * @return {boolean}
+ * @private
+ */
+function isRoutineExpired_(r, now, todayStr) {
+  const text = `${r.ruleName || ''} ${r.memo || ''}`;
+
+  // 1. YYYY-MM-DDまで / YYYY/MM/DDまで のパターン
+  const ymdMatch = text.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})\s*まで/);
+  if (ymdMatch) {
+    const y = ymdMatch[1];
+    const m = ('0' + parseInt(ymdMatch[2], 10)).slice(-2);
+    const d = ('0' + parseInt(ymdMatch[3], 10)).slice(-2);
+    const expStr = `${y}-${m}-${d}`;
+    return todayStr > expStr;
+  }
+
+  // 2. MM/DDまで のパターン（例: "〜11/07まで"）
+  const mdMatch = text.match(/[〜~\-（\(]?\s*(\d{1,2})\/(\d{1,2})\s*まで/);
+  if (mdMatch) {
+    const expMonth = parseInt(mdMatch[1], 10);
+    const expDay = parseInt(mdMatch[2], 10);
+    let expYear = now.getFullYear();
+    // 現在が10〜12月で期限が1〜3月の場合は翌年とみなす
+    if (now.getMonth() + 1 >= 10 && expMonth <= 3) {
+      expYear += 1;
+    }
+    const m = ('0' + expMonth).slice(-2);
+    const d = ('0' + expDay).slice(-2);
+    const expStr = `${expYear}-${m}-${d}`;
+    return todayStr > expStr;
+  }
+
+  return false;
 }

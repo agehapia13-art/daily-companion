@@ -103,8 +103,8 @@ function appendRowSafely_(sheet, rowData) {
 }
 
 // ==========================================
-// 1. logs (会話ログ・直近30日ローリング保持) 操作
-// ヘッダー: [時刻, 発言者, メッセージ, 画像URL, AI返答, 入力トークン, 出力トークン, キャッシュトークン, 合計トークン]
+// 1. logs (会話ログ・直近30日ローリング保持・全16列対応) 操作
+// ヘッダー: [時刻, 発言者, メッセージ, 画像URL, AI返答, Lite入力, Lite出力, Liteキャッシュ, Flash入力, Flash出力, Flashキャッシュ, 新総トークン, 判定タグ/フェーズ, 旧AI返答（比較用）, 旧Flash総トークン, トークン削減差分]
 // ==========================================
 
 /**
@@ -117,7 +117,8 @@ function getLogs(targetDateStr) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
 
-  const values = sheet.getRange(2, 1, lastRow - 1, Math.min(sheet.getLastColumn(), 9)).getValues();
+  const maxCol = Math.max(9, Math.min(sheet.getLastColumn(), 16));
+  const values = sheet.getRange(2, 1, lastRow - 1, maxCol).getValues();
   const logs = [];
 
   for (let i = 0; i < values.length; i++) {
@@ -138,10 +139,17 @@ function getLogs(targetDateStr) {
       message: String(row[2] || ''),
       imageUrl: String(row[3] || ''),
       aiReply: String(row[4] || ''),
-      promptTokens: row[5] || 0,
-      candidatesTokens: row[6] || 0,
-      cachedTokens: row[7] || 0,
-      totalTokens: row[8] || 0
+      litePromptTokens: row[5] || 0,
+      liteCandidatesTokens: row[6] || 0,
+      liteCachedTokens: row[7] || 0,
+      flashPromptTokens: row[8] || 0,
+      flashCandidatesTokens: row[9] || 0,
+      flashCachedTokens: row[10] || 0,
+      totalTokens: row[11] || row[8] || 0,
+      phaseAndTags: String(row[12] || ''),
+      oldAiReply: String(row[13] || ''),
+      oldTotalTokens: row[14] || 0,
+      tokenReductionDiff: String(row[15] || '')
     });
   }
 
@@ -198,13 +206,17 @@ function getCondensedTodayLogs(beforeTimestamp, targetDateStr) {
     const prefix = timeStr ? `${timeStr} ` : '';
     lines.push(`${prefix}User: ${log.message.trim()}`);
     if (log.aiReply && log.aiReply.trim()) {
-      // 朝ブリーフィング枠および末尾の機械的DB操作通知行を除去して純粋な会話応答のみを保持（トークン節約＆模倣誤爆防止）
+      // 朝ブリーフィング枠、A/Bテスト比較装飾、および末尾の機械的DB操作通知行を除去して純粋な会話応答のみを保持
       let cleanedReply = log.aiReply
         .replace(/━━━━━━━━━━━━━━\s*☀️\s*本日のデイリーブリーフィング[\s\S]*$/, '')
+        .replace(/━━━━━━━━━━━━━━\s*🕰️\s*【旧システム】[\s\S]*$/, '')
         .split('\n')
         .filter(line => {
           const trimmed = line.trim();
-          return trimmed !== '' && !/^(📝\s*タスク追加|📝\s*タスク更新|✅\s*タスク完了|🗑️\s*タスク破棄|📅\s*カレンダー|🛒\s*買物|🎬\s*インプット|🔄\s*ルーティン)/.test(trimmed);
+          return trimmed !== '' &&
+            !/^🆕\s*【新システム】/.test(trimmed) &&
+            !/^⚠️\s*\[旧のみ検出/.test(trimmed) &&
+            !/^(📝\s*タスク追加|📝\s*タスク更新|✅\s*タスク完了|🗑️\s*タスク破棄|📅\s*カレンダー|🛒\s*買物|🎬\s*インプット|🔄\s*ルーティン)/.test(trimmed);
         })
         .join(' ')
         .trim();
@@ -218,32 +230,63 @@ function getCondensedTodayLogs(beforeTimestamp, targetDateStr) {
 }
 
 /**
- * ログを追加（トークン使用量メタデータ対応）
+ * ログを追加（2モデル体制・A/Bテスト全16列対応 ＆ 旧モード後方互換）
  * @param {string} timestamp 日時文字列
  * @param {string} sender 発言者（user / ai）
  * @param {string} message メッセージ本文
  * @param {string} imageUrl 関連画像URL
- * @param {string} aiReply AIの返答内容
- * @param {Object=} tokenUsage オプション: Gemini usageMetadata ({ promptTokenCount, candidatesTokenCount, cachedContentTokenCount, totalTokenCount })
+ * @param {string} aiReply AIの返答内容（※次ターン履歴保護のため新システムの純粋返答のみ格納）
+ * @param {Object=} logMeta トークン使用量・判定ログ・旧システム比較メタデータ
  */
-function appendLog(timestamp, sender, message, imageUrl, aiReply, tokenUsage) {
+function appendLog(timestamp, sender, message, imageUrl, aiReply, logMeta) {
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.LOGS);
-  const promptTokens = tokenUsage ? (tokenUsage.promptTokenCount || 0) : '';
-  const candidatesTokens = tokenUsage ? (tokenUsage.candidatesTokenCount || 0) : '';
-  const cachedTokens = tokenUsage ? (tokenUsage.cachedContentTokenCount || 0) : '';
-  const totalTokens = tokenUsage ? (tokenUsage.totalTokenCount || 0) : '';
+  const ts = timestamp || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
 
-  appendRowSafely_(sheet, [
-    timestamp || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss'),
-    sender || 'user',
-    message || '',
-    imageUrl || '',
-    aiReply || '',
-    promptTokens,
-    candidatesTokens,
-    cachedTokens,
-    totalTokens
-  ]);
+  if (logMeta && logMeta.isTwoModel) {
+    appendRowSafely_(sheet, [
+      ts,
+      sender || 'user',
+      message || '',
+      imageUrl || '',
+      aiReply || '',
+      logMeta.litePromptTokens !== undefined ? logMeta.litePromptTokens : '',
+      logMeta.liteCandidatesTokens !== undefined ? logMeta.liteCandidatesTokens : '',
+      logMeta.liteCachedTokens !== undefined ? logMeta.liteCachedTokens : '',
+      logMeta.flashPromptTokens !== undefined ? logMeta.flashPromptTokens : '',
+      logMeta.flashCandidatesTokens !== undefined ? logMeta.flashCandidatesTokens : '',
+      logMeta.flashCachedTokens !== undefined ? logMeta.flashCachedTokens : '',
+      logMeta.newTotalTokens !== undefined ? logMeta.newTotalTokens : '',
+      logMeta.phaseAndTags || '',
+      logMeta.oldAiReply || '',
+      logMeta.oldTotalTokens !== undefined ? logMeta.oldTotalTokens : '',
+      logMeta.tokenReductionDiff || ''
+    ]);
+  } else {
+    // OLDモード（単一Flash）またはレガシー呼び出し時
+    const promptTokens = logMeta ? (logMeta.promptTokenCount || 0) : '';
+    const candidatesTokens = logMeta ? (logMeta.candidatesTokenCount || 0) : '';
+    const cachedTokens = logMeta ? (logMeta.cachedContentTokenCount || 0) : '';
+    const totalTokens = logMeta ? (logMeta.totalTokenCount || 0) : '';
+
+    appendRowSafely_(sheet, [
+      ts,
+      sender || 'user',
+      message || '',
+      imageUrl || '',
+      aiReply || '',
+      '',
+      '',
+      '',
+      promptTokens,
+      candidatesTokens,
+      cachedTokens,
+      '',
+      '[OLD単独モード]',
+      '',
+      totalTokens,
+      ''
+    ]);
+  }
 }
 
 /**
@@ -288,8 +331,8 @@ function clearDailyLogs() {
 }
 
 // ==========================================
-// 2. tasks (単発タスク) 操作
-// ヘッダー: [タスクID, タスク名, 期限, ステータス(未完了/完了/破棄), 登録日, 完了日, メモ]
+// 2. tasks (単発タスク・全8列対応) 操作
+// ヘッダー: [タスクID, タスク名, 期限, ステータス(未完了/完了/破棄), 登録日, 完了日, メモ, リマインド目安]
 // ==========================================
 
 /**
@@ -302,7 +345,8 @@ function getTasks(filterStatus) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
 
-  const values = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
+  const numCols = Math.max(7, Math.min(sheet.getLastColumn(), 8));
+  const values = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
   const tasks = values.map((row, index) => ({
     rowIndex: index + 2,
     id: String(row[0]),
@@ -311,7 +355,8 @@ function getTasks(filterStatus) {
     status: String(row[3]),
     createdDate: row[4] ? Utilities.formatDate(new Date(row[4]), 'Asia/Tokyo', 'yyyy-MM-dd') : '',
     completedDate: row[5] ? Utilities.formatDate(new Date(row[5]), 'Asia/Tokyo', 'yyyy-MM-dd') : '',
-    memo: String(row[6])
+    memo: String(row[6] || ''),
+    remindContext: row[7] ? String(row[7]).trim() : ''
   }));
 
   if (filterStatus) {
@@ -345,7 +390,27 @@ function formatTaskTitleWithBadge(title) {
 }
 
 /**
- * Geminiレスポンスに基づくタスク操作を適用
+ * 日中締切（〜11:59まで、〜12:59まで等の午前〜昼締切）が含まれるタスクに対して
+ * 「締切前日夜 または 当日朝」のリマインド目安を自動補完するヘルパー
+ * @param {string} title
+ * @param {string} rawRemindContext
+ * @return {string}
+ */
+function normalizeTaskRemindContext_(title, rawRemindContext) {
+  let ctx = String(rawRemindContext || '').trim();
+  const t = String(title || '');
+  // 04:00〜13:59 までの日中締切パターン検知（例: 〜11:59まで、12:00締切、正午まで 等）
+  const hasDaytimeDeadline = /(?:0?[4-9]|1[0-3]):[0-5]\d\s*(?:まで|締切)|午前中|正午まで/.test(t);
+  if (hasDaytimeDeadline) {
+    if (!ctx.includes('前日') && !ctx.includes('朝')) {
+      ctx = ctx ? `締切前日夜・当日朝 / ${ctx}` : '締切前日夜 または 当日朝';
+    }
+  }
+  return ctx;
+}
+
+/**
+ * Geminiレスポンスに基づくタスク操作を適用（8列目「リマインド目安」対応）
  * @param {Array<Object>} actions
  * @return {Array<string>} 適用結果のメッセージリスト
  */
@@ -363,7 +428,8 @@ function applyTaskActions(actions) {
       const taskId = 'T_' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmmss') + '_' + Math.floor(Math.random() * 1000);
       const dueDate = act.due_date || '';
       const memo = act.memo ? String(act.memo).trim() : '';
-      appendRowSafely_(sheet, [taskId, act.title, dueDate, '未完了', todayStr, '', memo]);
+      const remindContext = normalizeTaskRemindContext_(act.title, act.remind_context);
+      appendRowSafely_(sheet, [taskId, act.title, dueDate, '未完了', todayStr, '', memo, remindContext]);
       const formattedTitle = formatTaskTitleWithBadge(act.title);
       results.push(`📝 タスク追加: ${formattedTitle}${dueDate ? ` (期限: ${dueDate})` : ''}`);
     } else if (act.action === 'update') {
@@ -381,6 +447,10 @@ function applyTaskActions(actions) {
             sheet.getRange(t.rowIndex, 2).setValue(newTitle);
             sheet.getRange(t.rowIndex, 3).setValue(newDue);
             sheet.getRange(t.rowIndex, 7).setValue(newMemo);
+            if (act.remind_context !== undefined) {
+              const newRemind = normalizeTaskRemindContext_(newTitle, act.remind_context);
+              sheet.getRange(t.rowIndex, 8).setValue(newRemind);
+            }
             const formattedTitle = formatTaskTitleWithBadge(newTitle);
             results.push(`📝 タスク更新: ${formattedTitle}${newDue ? ` (期限: ${newDue})` : ''}`);
             break;
@@ -651,7 +721,18 @@ function getMemory() {
     custom_system_prompt: '',
     rolling_memory: '',
     dictionary: '',
-    ideal_self: ''
+    ideal_self: '',
+    lifestyle_habits: '',
+    skill_options: '',
+    system_mode: 'AB_TEST',
+    prompt_lite: '',
+    prompt_core: '',
+    prompt_phase_a: '',
+    prompt_phase_b: '',
+    prompt_phase_c: '',
+    prompt_phase_d: '',
+    prompt_db: '',
+    prompt_relief: ''
   };
 
   if (lastRow <= 1) return memoryObj;
@@ -672,6 +753,15 @@ function getMemory() {
       if (key === 'pressure_alert' || key === 'monthly_report_ready') {
         // 真偽値の文字列表現を大文字 'TRUE' / 'FALSE' に正規化
         memoryObj[key] = val.toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE';
+      } else if (key === 'system_mode' || key === 'ab_test_mode') {
+        const upper = val.toUpperCase();
+        if (upper === 'OLD') {
+          memoryObj.system_mode = 'OLD';
+        } else if (upper === 'NEW' || upper === 'FALSE') {
+          memoryObj.system_mode = 'NEW';
+        } else {
+          memoryObj.system_mode = 'AB_TEST';
+        }
       } else {
         memoryObj[key] = val;
       }
@@ -768,6 +858,119 @@ function updateDictionarySafely(newDictionaryCandidate) {
     setMemoryValue('dictionary', updated);
     Logger.log('用語辞書に新しい前提知識を追記しました');
   }
+}
+
+/**
+ * cycle_stamps の特定項目を既存の他のスタンプを破壊せずに安全にマージ更新
+ * @param {string} updatesText 例: "外歩き・散歩: 2026-10-29"
+ */
+function updateCycleStampsSafely(updatesText) {
+  if (!updatesText || typeof updatesText !== 'string' || !updatesText.trim()) return;
+  const currentMemory = getMemory();
+  const existingRaw = (currentMemory.cycle_stamps || '').trim();
+
+  const parseEntries = (text) => {
+    const map = {};
+    const order = [];
+    const lines = text.split(/[,\n]+/).map(s => s.trim()).filter(s => s.length > 0);
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^([^:：]+)[：:]\s*(.+)$/);
+      if (m) {
+        const key = m[1].replace(/^[・\-\s]+/, '').trim();
+        const val = m[2].trim();
+        if (key) {
+          if (!map.hasOwnProperty(key)) order.push(key);
+          map[key] = val;
+        }
+      }
+    }
+    return { map: map, order: order };
+  };
+
+  const existing = parseEntries(existingRaw);
+  const incoming = parseEntries(updatesText);
+
+  for (let i = 0; i < incoming.order.length; i++) {
+    const k = incoming.order[i];
+    if (!existing.map.hasOwnProperty(k)) {
+      existing.order.push(k);
+    }
+    existing.map[k] = incoming.map[k];
+  }
+
+  const mergedLines = existing.order.map(k => `${k}: ${existing.map[k]}`);
+  setMemoryValue('cycle_stamps', mergedLines.join('\n'));
+}
+
+/**
+ * lifestyle_habits テキストから登録済みの見出しトピック一覧（例: ['入浴', '食事', '身支度', ...]）を動的に抽出
+ * @param {string} lifestyleHabitsText
+ * @return {Array<string>}
+ */
+function extractHabitTopicsList(lifestyleHabitsText) {
+  if (!lifestyleHabitsText || typeof lifestyleHabitsText !== 'string') return [];
+  const topics = [];
+  const lines = lifestyleHabitsText.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].trim().match(/^\[([^\]]+)\]/);
+    if (match && match[1]) {
+      const topic = match[1].trim();
+      if (topic && topics.indexOf(topic) === -1) {
+        topics.push(topic);
+      }
+    }
+  }
+  return topics;
+}
+
+/**
+ * lifestyle_habits テキストから指定されたトピック名に合致するエントリー行のみをピンポイント抽出
+ * @param {string} lifestyleHabitsText
+ * @param {string} matchedTopic 例: "入浴" または "[入浴]"
+ * @return {string}
+ */
+function extractHabitEntryByTopic(lifestyleHabitsText, matchedTopic) {
+  if (!lifestyleHabitsText || !matchedTopic || matchedTopic === 'none') return '';
+  const cleanTarget = String(matchedTopic).replace(/[\[\]]/g, '').trim();
+  if (!cleanTarget || cleanTarget === 'none') return '';
+
+  const lines = lifestyleHabitsText.split('\n');
+  const matchedLines = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const match = line.match(/^\[([^\]]+)\]/);
+    if (match && match[1].trim() === cleanTarget) {
+      matchedLines.push(line);
+    }
+  }
+  return matchedLines.join('\n');
+}
+
+/**
+ * 未完了タスク配列をコンテキスト注入用の高密度文字列に整形（リマインド目安・7日超過警告付き）
+ * @param {Array<Object>} uncompletedTasks
+ * @param {Date} todayDate
+ * @return {string}
+ */
+function formatUncompletedTasksForContext(uncompletedTasks, todayDate) {
+  if (!uncompletedTasks || uncompletedTasks.length === 0) return 'なし';
+  const taskLines = uncompletedTasks.map(t => {
+    let warningTag = '';
+    if (t.createdDate && todayDate) {
+      const parts = t.createdDate.split('-');
+      if (parts.length === 3) {
+        const cDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        const diffDays = Math.floor((todayDate.getTime() - cDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays >= 7) {
+          warningTag = ' [⚠️登録後7日以上経過]';
+        }
+      }
+    }
+    const remindPart = (t.remindContext && t.remindContext.trim()) ? ` [目安:${t.remindContext.trim()}]` : '';
+    const memoPart = (t.memo && t.memo.trim()) ? ` (メモ:${t.memo.trim()})` : '';
+    return `[${t.id}] ${t.title}${t.dueDate ? ' (期限:' + t.dueDate + ')' : ''}${remindPart}${memoPart}${warningTag}`;
+  });
+  return taskLines.join(' / ');
 }
 
 /**

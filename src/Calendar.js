@@ -1,15 +1,39 @@
 /**
- * Calendar.js - Googleカレンダーおよび日本の祝日取得モジュール（動的ウィンドウ対応）
+ * Calendar.js - Googleカレンダーおよび日本の祝日取得モジュール（動的ウィンドウ・複数家族共用カレンダー対応）
  */
+
+const USER_PREFIX = '♪';
+const OTHER_PREFIXES = ['◆', '★', '♯', '#'];
+
+/**
+ * 第2家族共用カレンダーの予定タイトルから抽出対象かどうかを判定
+ * - 本人の記号（♪）が含まれる（単独、または ◆♪ / ♪★ 等の連名） -> 抽出: 共用(本人)
+ * - 家族メンバーの記号（♪, ◆, ★, ♯, #）が一切含まれない -> 抽出: 共用(家族全体)
+ * - 本人以外の記号のみ含まれる -> 除外
+ * @param {string} title
+ * @return {{include: boolean, category: string}}
+ */
+function evaluateHouseholdEvent(title) {
+  const t = String(title || '');
+  if (t.includes(USER_PREFIX)) {
+    return { include: true, category: '共用(本人)' };
+  }
+  const hasOther = OTHER_PREFIXES.some(p => t.includes(p));
+  if (!hasOther) {
+    return { include: true, category: '共用(家族全体)' };
+  }
+  return { include: false, category: '除外' };
+}
 
 /**
  * 曜日と時間帯に応じた動的ウィンドウでカレンダー予定と日本の祝日を取得し、コンテキスト文字列として整形
  * - 日曜 18:00以降: 今日〜翌週日曜 23:59:59 (来週1週間全体)
  * - それ以外 (月〜土、日曜18時前): 今日〜翌週月曜 23:59:59 (今週 + 直近週末 + 週明け月曜)
+ * @param {Date=} simulatedNowDate オプション: シミュレーション日時
  * @return {string}
  */
-function getCalendarAndHolidayContext() {
-  const now = new Date();
+function getCalendarAndHolidayContext(simulatedNowDate) {
+  const now = simulatedNowDate || new Date();
   const startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
 
   const dayOfWeek = now.getDay(); // 0: 日, 1: 月, 2: 火, 3: 水, 4: 木, 5: 金, 6: 土
@@ -59,7 +83,7 @@ function getCalendarAndHolidayContext() {
     calendarText += `・メインカレンダー取得エラー: ${e.message}\n`;
   }
 
-  // 2. 家族共用カレンダーのイベント取得（完全読み取り専用・「♪」記号フィルタ付き）
+  // 2. 第1家族共用カレンダーのイベント取得（完全読み取り専用・「♪」記号フィルタ付き）
   if (config.familyCalendarId) {
     try {
       const familyCal = CalendarApp.getCalendarById(config.familyCalendarId);
@@ -87,7 +111,42 @@ function getCalendarAndHolidayContext() {
     }
   }
 
-  // 3. 日本の祝日カレンダーのイベント取得（期間内に祝日が存在する場合のみ出力してトークン節約）
+  // 3. 第2家族共用カレンダーのイベント取得（完全読み取り専用・♪付き および プレフィックスなし＝家族全体を抽出）
+  if (config.householdCalendarId && config.householdCalendarId !== config.familyCalendarId) {
+    try {
+      const householdCal = CalendarApp.getCalendarById(config.householdCalendarId);
+      if (householdCal) {
+        const hEvents = householdCal.getEvents(startTime, endTime);
+        const matchedHouseholdEvents = [];
+        hEvents.forEach(ev => {
+          const evalRes = evaluateHouseholdEvent(ev.getTitle());
+          if (evalRes.include) {
+            matchedHouseholdEvents.push({ ev: ev, category: evalRes.category });
+          }
+        });
+        if (matchedHouseholdEvents.length > 0) {
+          calendarText += `\n=== 第2家族共用カレンダー（本人関与 ＆ 家族全体） ===\n`;
+          matchedHouseholdEvents.forEach(item => {
+            const ev = item.ev;
+            const title = ev.getTitle();
+            const cat = item.category;
+            if (ev.isAllDayEvent()) {
+              const dateStr = Utilities.formatDate(ev.getStartTime(), 'Asia/Tokyo', 'yyyy-MM-dd(E)');
+              calendarText += `・[${cat}・終日] ${dateStr}: ${title}\n`;
+            } else {
+              const startStr = Utilities.formatDate(ev.getStartTime(), 'Asia/Tokyo', 'yyyy-MM-dd(E) HH:mm');
+              const endStr = Utilities.formatDate(ev.getEndTime(), 'Asia/Tokyo', 'HH:mm');
+              calendarText += `・[${cat}] ${startStr}〜${endStr}: ${title}\n`;
+            }
+          });
+        }
+      }
+    } catch (hErr) {
+      calendarText += `・第2家族共用カレンダー取得エラー: ${hErr.message}\n`;
+    }
+  }
+
+  // 4. 日本の祝日カレンダーのイベント取得（期間内に祝日が存在する場合のみ出力してトークン節約）
   try {
     const holidayCal = CalendarApp.getCalendarById(SYSTEM_CONSTANTS.JAPAN_HOLIDAY_CALENDAR_ID);
     if (holidayCal) {
@@ -108,12 +167,13 @@ function getCalendarAndHolidayContext() {
 }
 
 /**
- * 本日の予定一覧を高密度サマリー配列として取得（デイリーブリーフィング用）
- * メインカレンダー ＋ 家族共用カレンダー（♪付きのみ）
+ * 本日の予定一覧を高密度サマリー配列として取得（デイリーブリーフィング・Liteコンテキスト用）
+ * メインカレンダー ＋ 第1家族共用カレンダー（♪付きのみ） ＋ 第2家族共用カレンダー（♪付き＆プレフィックスなし）
+ * @param {Date=} simulatedNowDate
  * @return {Array<string>} 今日の予定文字列一覧
  */
-function getTodayEventsList() {
-  const now = new Date();
+function getTodayEventsList(simulatedNowDate) {
+  const now = simulatedNowDate || new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
   const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
 
@@ -140,7 +200,7 @@ function getTodayEventsList() {
     Logger.log('メインカレンダー本日予定取得失敗: ' + e.message);
   }
 
-  // 2. 家族共用カレンダー（♪付きのみ）
+  // 2. 第1家族共用カレンダー（♪付きのみ）
   if (config.familyCalendarId) {
     try {
       const familyCal = CalendarApp.getCalendarById(config.familyCalendarId);
@@ -162,7 +222,160 @@ function getTodayEventsList() {
     }
   }
 
+  // 3. 第2家族共用カレンダー（♪付き＆プレフィックスなし）
+  if (config.householdCalendarId && config.householdCalendarId !== config.familyCalendarId) {
+    try {
+      const householdCal = CalendarApp.getCalendarById(config.householdCalendarId);
+      if (householdCal) {
+        const hEvents = householdCal.getEvents(todayStart, todayEnd);
+        hEvents.forEach(ev => {
+          const title = ev.getTitle();
+          const evalRes = evaluateHouseholdEvent(title);
+          if (evalRes.include) {
+            if (ev.isAllDayEvent()) {
+              eventStrings.push(`[${evalRes.category}・終日] ${title}`);
+            } else {
+              const s = Utilities.formatDate(ev.getStartTime(), 'Asia/Tokyo', 'HH:mm');
+              const e = Utilities.formatDate(ev.getEndTime(), 'Asia/Tokyo', 'HH:mm');
+              eventStrings.push(`[${evalRes.category}] ${s}〜${e} ${title}`);
+            }
+          }
+        });
+      }
+    } catch (e) {
+      Logger.log('第2家族カレンダー本日予定取得失敗: ' + e.message);
+    }
+  }
+
   return eventStrings;
+}
+
+/**
+ * 現在のカレンダー予定の有無と、次の境界（直近予定または23:00就寝目安）までの残り分数を機械的に算出
+ * （Flash-LiteおよびFlashに暗算させず、正確な時間の鏡を提供するためのGAS前処理関数）
+ * @param {Date=} simulatedNowDate
+ * @return {{isDuringEvent: boolean, minutesUntilNext: number, summaryText: string}}
+ */
+function getNextBoundaryInfo(simulatedNowDate) {
+  const now = simulatedNowDate || new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+  const config = getConfig();
+
+  const timedEvents = [];
+
+  // 1. メインカレンダーの時間指定予定
+  try {
+    const defaultCal = CalendarApp.getDefaultCalendar();
+    if (defaultCal) {
+      defaultCal.getEvents(todayStart, todayEnd).forEach(ev => {
+        if (!ev.isAllDayEvent()) {
+          timedEvents.push({ title: ev.getTitle(), start: ev.getStartTime(), end: ev.getEndTime() });
+        }
+      });
+    }
+  } catch (e) {}
+
+  // 2. 第1家族共用カレンダー（♪付き）の時間指定予定
+  if (config.familyCalendarId) {
+    try {
+      const familyCal = CalendarApp.getCalendarById(config.familyCalendarId);
+      if (familyCal) {
+        familyCal.getEvents(todayStart, todayEnd).forEach(ev => {
+          if (!ev.isAllDayEvent() && ev.getTitle().includes('♪')) {
+            timedEvents.push({ title: ev.getTitle(), start: ev.getStartTime(), end: ev.getEndTime() });
+          }
+        });
+      }
+    } catch (e) {}
+  }
+
+  // 3. 第2家族共用カレンダー（本人関与のみ時間拘束としてカウント）の時間指定予定
+  if (config.householdCalendarId && config.householdCalendarId !== config.familyCalendarId) {
+    try {
+      const householdCal = CalendarApp.getCalendarById(config.householdCalendarId);
+      if (householdCal) {
+        householdCal.getEvents(todayStart, todayEnd).forEach(ev => {
+          if (!ev.isAllDayEvent()) {
+            const evalRes = evaluateHouseholdEvent(ev.getTitle());
+            if (evalRes.include) {
+              timedEvents.push({ title: `[${evalRes.category}] ${ev.getTitle()}`, start: ev.getStartTime(), end: ev.getEndTime() });
+            }
+          }
+        });
+      }
+    } catch (e) {}
+  }
+
+  timedEvents.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+  const nowMs = now.getTime();
+  const activeEvents = [];
+  let nextEvent = null;
+
+  for (let i = 0; i < timedEvents.length; i++) {
+    const ev = timedEvents[i];
+    const sMs = ev.start.getTime();
+    const eMs = ev.end.getTime();
+    if (sMs <= nowMs && nowMs < eMs) {
+      activeEvents.push(ev);
+    } else if (sMs > nowMs && !nextEvent) {
+      nextEvent = ev;
+    }
+  }
+
+  const formatMins = (mins) => {
+    if (mins < 60) return `${mins}分`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m > 0 ? `${h}時間${m}分（計${mins}分）` : `${h}時間（計${mins}分）`;
+  };
+
+  if (activeEvents.length > 0) {
+    const cur = activeEvents[0];
+    const remMins = Math.max(1, Math.round((cur.end.getTime() - nowMs) / 60000));
+    const sStr = Utilities.formatDate(cur.start, 'Asia/Tokyo', 'HH:mm');
+    const eStr = Utilities.formatDate(cur.end, 'Asia/Tokyo', 'HH:mm');
+    let text = `現在予定の最中: 「${cur.title}」(${sStr}〜${eStr} / 終了まで残り${formatMins(remMins)})`;
+    if (nextEvent) {
+      const nsStr = Utilities.formatDate(nextEvent.start, 'Asia/Tokyo', 'HH:mm');
+      const minsToNext = Math.max(1, Math.round((nextEvent.start.getTime() - nowMs) / 60000));
+      text += ` ｜ 次の予定: 「${nextEvent.title}」(${nsStr}〜 / 開始まであと${formatMins(minsToNext)})`;
+    }
+    return {
+      isDuringEvent: true,
+      minutesUntilNext: 0,
+      summaryText: text
+    };
+  }
+
+  if (nextEvent) {
+    const minsUntilNext = Math.max(1, Math.round((nextEvent.start.getTime() - nowMs) / 60000));
+    const sStr = Utilities.formatDate(nextEvent.start, 'Asia/Tokyo', 'HH:mm');
+    const eStr = Utilities.formatDate(nextEvent.end, 'Asia/Tokyo', 'HH:mm');
+    return {
+      isDuringEvent: false,
+      minutesUntilNext: minsUntilNext,
+      summaryText: `次の予定「${nextEvent.title} (${sStr}〜${eStr})」まで残り ${formatMins(minsUntilNext)}`
+    };
+  }
+
+  // 本日これ以降のカレンダー時間指定予定がない場合、23:00就寝目安までの残り時間を計算
+  const bedtime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 0, 0);
+  const minsUntilBed = Math.round((bedtime.getTime() - nowMs) / 60000);
+  if (minsUntilBed > 0) {
+    return {
+      isDuringEvent: false,
+      minutesUntilNext: minsUntilBed,
+      summaryText: `本日のこれ以降のカレンダー固定予定なし（23:00就寝目安まで残り ${formatMins(minsUntilBed)}）`
+    };
+  } else {
+    return {
+      isDuringEvent: false,
+      minutesUntilNext: 0,
+      summaryText: `本日の固定予定なし（23:00就寝目安時刻を過ぎています）`
+    };
+  }
 }
 
 /**

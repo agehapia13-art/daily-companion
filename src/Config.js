@@ -22,11 +22,14 @@ const REQUIRED_PROPERTIES = [
 const SYSTEM_CONSTANTS = {
   GEMINI_MODEL: 'gemini-3.8-flash',
   GEMINI_ENDPOINT_BASE: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
+  GEMINI_LITE_MODEL: 'gemini-2.5-flash-lite',
+  GEMINI_LITE_ENDPOINT_BASE: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent',
   LINE_REPLY_ENDPOINT: 'https://api.line.me/v2/bot/message/reply',
   LINE_CONTENT_ENDPOINT_BASE: 'https://api-data.line.me/v2/bot/message',
   NOTION_API_BASE: 'https://api.notion.com/v1',
   NOTION_VERSION: '2022-06-28',
   JAPAN_HOLIDAY_CALENDAR_ID: 'ja.japanese#holiday@group.v.calendar.google.com',
+  DEFAULT_HOUSEHOLD_CALENDAR_ID: '8790a51c6413d18fecb9b205b369457de35817ae84d8e4860cefa6ff35488f4b@group.calendar.google.com',
   OPEN_METEO_BASE: 'https://api.open-meteo.com/v1/forecast',
   IMAGE_BUFFER_PROP_KEY: 'BUFFERED_IMAGE_METAS',
   IMAGE_BUFFER_TTL_MS: 30 * 60 * 1000, // 30分
@@ -98,6 +101,7 @@ function getConfig() {
       longitude: workLon,
       name: '職場(渋谷)'
     },
-    familyCalendarId: props.FAMILY_CALENDAR_ID ? props.FAMILY_CALENDAR_ID.trim() : ''
+    familyCalendarId: props.FAMILY_CALENDAR_ID ? props.FAMILY_CALENDAR_ID.trim() : '',
+    householdCalendarId: props.HOUSEHOLD_CALENDAR_ID ? props.HOUSEHOLD_CALENDAR_ID.trim() : SYSTEM_CONSTANTS.DEFAULT_HOUSEHOLD_CALENDAR_ID
   };
 }

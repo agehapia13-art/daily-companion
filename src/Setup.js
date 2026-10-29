@@ -273,6 +273,19 @@ function testListGeminiModels() {
   } else {
     Logger.log('エラーまたはモデル取得失敗: ' + JSON.stringify(data));
   }
+
+  // 404の理由を特定するための直接テスト
+  const testModels = ['gemini-2.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'];
+  for (const m of testModels) {
+    const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${config.geminiApiKey}`;
+    const testRes = UrlFetchApp.fetch(testUrl, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ contents: [{ parts: [{ text: 'ping' }] }] }),
+      muteHttpExceptions: true
+    });
+    Logger.log(`[テスト ${m}]: status=${testRes.getResponseCode()} body=${testRes.getContentText().substring(0, 150)}`);
+  }
 }
 
 /**

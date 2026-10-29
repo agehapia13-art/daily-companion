@@ -22,8 +22,8 @@ const REQUIRED_PROPERTIES = [
 const SYSTEM_CONSTANTS = {
   GEMINI_MODEL: 'gemini-3.8-flash',
   GEMINI_ENDPOINT_BASE: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
-  GEMINI_LITE_MODEL: 'gemini-2.5-flash-lite',
-  GEMINI_LITE_ENDPOINT_BASE: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent',
+  GEMINI_LITE_MODEL: 'gemini-3.1-flash-lite',
+  GEMINI_LITE_ENDPOINT_BASE: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent',
   LINE_REPLY_ENDPOINT: 'https://api.line.me/v2/bot/message/reply',
   LINE_CONTENT_ENDPOINT_BASE: 'https://api-data.line.me/v2/bot/message',
   NOTION_API_BASE: 'https://api.notion.com/v1',

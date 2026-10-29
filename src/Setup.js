@@ -257,6 +257,25 @@ function runPromptScenario(scenario) {
 // =============================================================================
 
 /**
+ * 手動テスト用: APIキーで利用可能なGeminiモデル（特にFlash/Lite系）を一覧表示
+ */
+function testListGeminiModels() {
+  const config = getConfig();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${config.geminiApiKey}`;
+  const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  const data = JSON.parse(res.getContentText());
+  Logger.log('=== 利用可能なGeminiモデル一覧 ===');
+  if (data.models) {
+    const flashModels = data.models
+      .map(m => m.name.replace('models/', ''))
+      .filter(name => name.includes('flash') || name.includes('lite'));
+    Logger.log('Flash/Lite系モデル:\n' + flashModels.join('\n'));
+  } else {
+    Logger.log('エラーまたはモデル取得失敗: ' + JSON.stringify(data));
+  }
+}
+
+/**
  * 手動テスト用: デイリーブリーフィングの生成結果をログ出力して確認（ドライラン）
  */
 function testDailyBriefingOutput() {

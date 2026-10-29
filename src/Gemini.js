@@ -418,6 +418,14 @@ const LITE_RESPONSE_SCHEMA = {
       type: 'STRING',
       enum: ['継続中', '完了済み', '該当なし']
     },
+    need_db_action: {
+      type: 'BOOLEAN',
+      description: 'タスク・予定・買物・インプットの追加/完了/更新/削除などのDB操作が実際に必要か'
+    },
+    future_schedule_inquiry: {
+      type: 'BOOLEAN',
+      description: '明日以降の予定、週末スケジュール、来週などの確認・照会が含まれているか'
+    },
     location: {
       type: 'STRING',
       enum: ['自宅', '職場', '移動中', '外出先']
@@ -433,7 +441,7 @@ const LITE_RESPONSE_SCHEMA = {
       type: 'STRING'
     }
   },
-  required: ['tags', 'previous_action_status', 'location', 'health_status', 'weather_relevance', 'matched_habit_topic']
+  required: ['tags', 'previous_action_status', 'need_db_action', 'future_schedule_inquiry', 'location', 'health_status', 'weather_relevance', 'matched_habit_topic']
 };
 
 /**
@@ -448,29 +456,36 @@ function getDefaultPromptLite() {
 1. tags（発言の要素分類・複数該当可）:
    - "DB依頼": タスク、カレンダー予定、買い物メモ、インプットストック、定期ルーティンの追加・変更・削除・記録の依頼。
    - "事実質問": 世の中の事実、店舗・施設情報、イベント期日、天気、仕様などの調査・確認を求める質問。
-   - "単発行動の開始": これから直ちに行う単発の物理行動・移動・家事・準備・作業等の開始宣言（「〜してくる」「〜始める」「〜行ってくる」等）。
-   - "活動目標の表明": 今日や週末など、これからの時間枠でやりたいこと・目標の表明。
-   - "完了報告": 行動やタスク、日課を終えたという報告（「〜終わった」「〜完了」「〜したよ」等）。
+   - "単発行動の開始": これから直ちに行う単発の物理行動・移動・家事・準備・作業等の開始宣言（「〜してくる」「〜始める」「〜行ってくる」「〜風呂入る」等）。
+   - "活動目標の表明": 今日や週末、夜など、これからの時間枠でやりたいこと・目標の表明（「〜したい」「〜する」「〜やろうかな」等）。
+   - "完了報告": 行動やタスク、日課を終えたという報告（「〜終わった」「〜完了」「〜したよ」「〜見終えた」等）。
    - "体調・疲労の訴え": 眠気、だるさ、痛み、重さ、疲れ、寝不足などの心身シグナルの言及。
-   - "過ごし方相談": 空き時間や余白に何をして過ごすか、段取りや選択肢を求める相談。
+   - "過ごし方相談": 空き時間や余白に何をして過ごすか、段取りや選択肢を求める相談（「次何しよう」「暇だな」等）。
    - "雑談": 日常の出来事の共有、感想、挨拶、フリートーク。
 
 2. previous_action_status（直前行動の完了・継続推論）:
    - 直前の会話履歴でユーザーが何らかの行動開始を宣言していた場合、そこからの経過時間（Δt）と最新発言の内容から推論する：
-     * "継続中": 経過時間Δtが短くその行動や後続の本番行動がまだ終わっていない、または作業・外出の最中と推察される場合（例: 準備や行動開始から数分〜十数分しか経っておらず、完了の言及もない場合）。
+     * "継続中": 経過時間Δtが短くその行動や後続の本番行動がまだ終わっていない、または作業・外出の最中と推察される場合。
      * "完了済み": 最新発言で完了が報告された、または十分な時間が経過し一段落したと推察される場合。
      * "該当なし": 直前に行動開始の宣言がない、または本日初回の発言である場合。
 
-3. location（現在地の特定）:
+3. need_db_action（実データベース操作の要否）:
+   - ユーザーがタスクの追加・完了・更新・削除、カレンダー予定の登録・変更、買い物メモの追加・購入済チェック、インプット作品の記録などを実際に求めている場合は true。
+   - 単なる日常行動の報告（「夕飯食べた」「ニュース見終えた」「風呂入る」など）でDB更新が伴わない場合は false。
+
+4. future_schedule_inquiry（未来日程・カレンダー照会の有無）:
+   - 明日以降の予定、週末スケジュール、来週などの確認・照会、または未来のスケジュールを意識した相談が含まれている場合は true。当日のやり取りのみなら false。
+
+5. location（現在地の特定）:
    - 会話文脈、カレンダー予定、時間帯から現在地を推論し、"自宅" / "職場" / "移動中" / "外出先" のいずれかを出力。
 
-4. health_status（当日の心身シグナル抽出）:
+6. health_status（当日の心身シグナル抽出）:
    - 当日ログおよび最新発言の事実から、"通常" / "低調"（眠気・軽い疲れ等） / "不調"（痛み・強いだるさ・体調不良等）を判定。
 
-5. weather_relevance（屋外・天気の関与判定）:
+7. weather_relevance（屋外・天気の関与判定）:
    - 外出・移動の言及、天気・気温・気圧の質問、または屋外活動（散歩・買い物等）の可能性がある場合は true、室内完結のやり取りなら false。
 
-6. matched_habit_topic（関連生活習慣トピックの動的キー照合）:
+8. matched_habit_topic（関連生活習慣トピックの動的キー照合）:
    - コンテキストで提示された【登録済み生活習慣トピック一覧】の中で、今回の発言または直前の継続中行動に直接関連するトピック名があればそのトピック名を1つ出力。無関係であれば "none" を出力。`;
 }
 
@@ -533,20 +548,18 @@ function getDefaultPromptPhaseB() {
  * @return {string}
  */
 function getDefaultPromptPhaseC() {
-  return `【現在の行動フェーズ: フェーズC（余白時間の輪郭化 ＆ 触媒カード提示）】
-- 行動の一区切りや余白時間、または過ごし方の相談が発生しています。
-- 「何か進めますか？それとも休みますか？」といった丸投げの質問は行わず、以下のステップで『鏡（リフレクション）× 触媒（カタリスト）』として伴走してください：
+  return `【現在の行動フェーズ: フェーズC（余白時間・活動目標の伴走 ＆ 触媒リフレクション）】
+- 行動の一区切りや余白時間、または活動目標や過ごし方の相談が発生しています。
+- 以下の2つの分岐に応じて、対等で頼れる大人の伴走者として応答してください：
 
-1. 時間の輪郭化（状況の鏡）:
-   - コンテキストの【時間の鏡（次の境界までの残り時間）】を踏まえ、次の予定や就寝（23:00目安）、または生活準備に必要な時間を差し引いた「今使えるリアルな余白時間」の見通しを簡潔に示す。
-2. 具体的選択肢カード（2〜3枚）の提示:
-   - 現在の心身状態・時間帯・場所・余白時間の長さにフィットする具体的な行動選択肢を、以下の5領域から偏りなく2〜3枚組み合わせて手元に差し出す（同日中にすでに提案済みの項目は重複提案しない）：
-     ① 実務・生活課題（未完了タスク、買物、日常の手入れ。※タスクの「リマインド目安」が現在の時刻・状況に合致するものや期限が近いものを優先。「あ、今リマインドしてと言われていたタイミングだな」と判断したものは自然に織り交ぜる）
-     ② 創造・専門スキル（コンテキストの skill_options や cycle_stamps のご無沙汰・未着手項目から、空き時間の粒度に合う音楽制作・練習またはビジネス・思考スキル）
-     ③ 文化・娯楽インプット（ゲーム、読書、未消化の input_stock 作品など。趣味・ゲーム時間は尊重しつつ、当日すでに十分満喫した後は別領域も爽やかに混ぜる）
-     ④ 身体・回復（長時間作業後の1分ストレッチ、3分軽運動、3〜4日外歩きが空いた時や好天候時の15分散歩・外気浴、無音での耳休め、純粋な休息）
-     ⑤ 社会・対人（家族との団らん・会話、連絡、外出など）
-   - ※21:30以降は就寝に向けたクールダウン時間帯とし、高負荷・高覚醒な提案は避けて低負荷な選択肢や休息を中心にする。`;
+1. ユーザーが自発的に活動目標（「〜したい」「〜する」「〜やろうかな」）を表明している場合:
+   - 別の選択肢や多肢選択メニューを押し付けず、ユーザー自身の意志を全面的に支持・尊重する。
+   - コンテキストの【時間の鏡】（就寝23:00目安や次の予定までの残り時間）を踏まえ、生活前提（入浴・食事・休養）を崩さない「無理のない引き際・タイムボックス（例: ○○頃を目安にひと区切りつける）」をスマートに見立てて伴走する。
+   - ※もし本日期限や直近に迫った未完了タスクがある場合は、「それもいいですが、先に○○だけ15分で済ませませんか？」と愛のある健全な懐疑・優先度チェックを自然に添える。
+
+2. 何をすべきか迷っている・余白を持て余している場合（「暇だな」「次何しよう」「過ごし方相談」等）:
+   - 残り時間の見通しを示した上で、手元の未完了タスク（リマインド目安や期限が近いもの優先）、スキルメニュー（音楽・思考）、文化・娯楽、身体ケア（散歩・ストレッチ・無音休息）から、今の状況にフィットする具体的な選択肢（2〜3枚）を手元に差し出す。
+   - ※同日中にすでに提案済みの項目は重複提案しない。21:30以降は就寝に向けた低負荷な選択肢や休息を中心にする。`;
 }
 
 /**
@@ -672,6 +685,8 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed)
       result: {
         tags: Array.isArray(parsed.tags) ? parsed.tags : ['雑談'],
         previous_action_status: parsed.previous_action_status || '該当なし',
+        need_db_action: Boolean(parsed.need_db_action),
+        future_schedule_inquiry: Boolean(parsed.future_schedule_inquiry),
         location: parsed.location || '自宅',
         health_status: parsed.health_status || '通常',
         weather_relevance: Boolean(parsed.weather_relevance),
@@ -685,6 +700,8 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed)
       result: {
         tags: ['DB依頼', '過ごし方相談', '雑談'],
         previous_action_status: '該当なし',
+        need_db_action: false,
+        future_schedule_inquiry: false,
         location: '自宅',
         health_status: '通常',
         weather_relevance: false,
@@ -705,28 +722,22 @@ function determineActionPhase(liteResult, boundaryInfo) {
   const tags = (liteResult && Array.isArray(liteResult.tags)) ? liteResult.tags : [];
   const prevStatus = (liteResult && liteResult.previous_action_status) ? liteResult.previous_action_status : '該当なし';
 
-  // 2-1. [単発行動の開始]（〜してくる/〜始める）がある？ -> 最優先でフェーズB（即時送り出し）
+  // 2-1. [単発行動の開始]（〜してくる/〜始める/〜行く/〜風呂入る）がある？ -> 最優先でフェーズB（即時送り出し）
   if (tags.indexOf('単発行動の開始') !== -1) {
     return 'PHASE_B';
   }
 
-  // 2-2. [活動目標の表明] または [過ごし方相談] がある？ -> フェーズC（余白・段取り・触媒カード提示）
-  if (tags.indexOf('活動目標の表明') !== -1 || tags.indexOf('過ごし方相談') !== -1) {
-    return 'PHASE_C';
-  }
-
-  // 2-3. 直前行動の推論結果が『継続中』である？ -> フェーズA（進行中の保護・受託専念）
+  // 2-2. 直前行動の推論結果が『継続中』である？ -> フェーズA（進行中の保護・受託専念）
   if (prevStatus === '継続中') {
     return 'PHASE_A';
   }
 
-  // 2-4. [完了報告] がある？ または『完了済み』で次の予定まで余白（30分以上）がある？ -> フェーズC
-  const hasFreeMargin = boundaryInfo && !boundaryInfo.isDuringEvent && boundaryInfo.minutesUntilNext >= 30;
-  if (tags.indexOf('完了報告') !== -1 || (prevStatus === '完了済み' && hasFreeMargin)) {
+  // 2-3. [活動目標の表明] または [過ごし方相談] がある？ -> フェーズC（目標伴走・余白時間の輪郭化）
+  if (tags.indexOf('活動目標の表明') !== -1 || tags.indexOf('過ごし方相談') !== -1) {
     return 'PHASE_C';
   }
 
-  // それ以外 -> フェーズD（通常応答・雑談・状況連動リマインド）
+  // それ以外（単なる完了報告、雑談、DB依頼、事実質問など） -> フェーズD（通常応答・完了受諾・状況連動）
   return 'PHASE_D';
 }
 
@@ -745,7 +756,10 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   const tags = Array.isArray(liteResult.tags) ? liteResult.tags : [];
   const hasImages = Boolean(imageBlobs && imageBlobs.length > 0);
   const isRelief = (liteResult.health_status === '低調' || liteResult.health_status === '不調');
-  const needDbModule = (tags.indexOf('DB依頼') !== -1 || tags.indexOf('完了報告') !== -1 || hasImages || isRelief);
+  const needDbModule = Boolean(liteResult.need_db_action) ||
+    (tags.indexOf('DB依頼') !== -1) ||
+    hasImages ||
+    /(✅|タスク追加|タスク更新|タスク完了|タスク削除|予定追加|予定変更|カレンダー登録|買物追加|メモして)/.test(userText);
   const needSearch = (tags.indexOf('事実質問') !== -1);
   const needWeather = (Boolean(liteResult.weather_relevance) || phase === 'PHASE_C' || isRelief);
 
@@ -833,9 +847,16 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   }
 
   // タスク・買物・インプット・カレンダー・ありたい姿の条件付き注入
-  const uncompletedTasks = (phase === 'PHASE_C' || phase === 'PHASE_D' || needDbModule) ? getTasks('未完了') : [];
-  const pendingInput = (phase === 'PHASE_C' || needDbModule) ? getInputStockList('未') : [];
-  const unboughtShopping = (phase === 'PHASE_C' || needDbModule) ? getShoppingList('未買') : [];
+  const needTasks = (phase === 'PHASE_C' || phase === 'PHASE_D' || needDbModule);
+  const uncompletedTasks = needTasks ? getTasks('未完了') : [];
+
+  const needShopping = /(買|買い|日用品|スーパー|ドラッグストア)/.test(userText) ||
+    (phase === 'PHASE_C' && tags.indexOf('過ごし方相談') !== -1);
+  const unboughtShopping = needShopping ? getShoppingList('未買') : [];
+
+  const needInput = /(映画|本|漫画|アニメ|音楽|ゲーム|見るもの|読むもの|消化)/.test(userText) ||
+    (phase === 'PHASE_C' && tags.indexOf('過ごし方相談') !== -1);
+  const pendingInput = needInput ? getInputStockList('未') : [];
 
   // 用語辞書（出現キーワードのみオンデマンド抽出）
   if (memory.dictionary && memory.dictionary.trim() !== '') {
@@ -854,27 +875,34 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
       if (memory.ideal_self && memory.ideal_self.trim() !== '') {
         contextLines.push(`【ありたい人間像・生活指針（判断の羅針盤）】: ${memory.ideal_self.trim()}`);
       }
-      if (memory.skill_options && memory.skill_options.trim() !== '') {
-        contextLines.push(`【能動的スキルアップメニュー (skill_options)】:\n${memory.skill_options.trim()}`);
-      }
-      if (memory.cycle_stamps && memory.cycle_stamps.trim() !== '') {
-        contextLines.push(`【活動・メンテナンス最終記録 (cycle_stamps)】:\n${memory.cycle_stamps.trim()}`);
+      // ユーザーが明確な活動目標を表明していない時（過ごし方相談や余白時）のみ、スキルメニューと周期記録を提示候補として注入
+      const hasDeclaredGoal = (tags.indexOf('活動目標の表明') !== -1);
+      if (!hasDeclaredGoal) {
+        if (memory.skill_options && memory.skill_options.trim() !== '') {
+          contextLines.push(`【能動的スキルアップメニュー (skill_options)】:\n${memory.skill_options.trim()}`);
+        }
+        if (memory.cycle_stamps && memory.cycle_stamps.trim() !== '') {
+          contextLines.push(`【活動・メンテナンス最終記録 (cycle_stamps)】:\n${memory.cycle_stamps.trim()}`);
+        }
       }
       if (memory.weekly_summary && memory.weekly_summary.trim() !== '') {
         contextLines.push(`【直近1〜2週間の生活・活動サマリー】: ${memory.weekly_summary.trim()}`);
       }
     }
-    const calCtx = getCalendarAndHolidayContext(precomputed.now);
-    contextLines.push(calCtx);
-  } else if (needDbModule && userText && /(予定|カレンダー|スケジュール|出社|休み|休日|土曜|日曜|来週|明後日|明日)/.test(userText)) {
+  }
+
+  // 7日分カレンダーの注入条件: 明日以降の予定・週末・来週等の未来日程照会がある場合のみ
+  const needFutureCalendar = Boolean(liteResult.future_schedule_inquiry) ||
+    /(明日|明後日|週末|土曜|日曜|来週|週間|スケジュール)/.test(userText);
+  if (needFutureCalendar) {
     const calCtx = getCalendarAndHolidayContext(precomputed.now);
     contextLines.push(calCtx);
   } else if (precomputed.todayEvents && precomputed.todayEvents.length > 0) {
     contextLines.push(`【本日のカレンダー予定】: ${precomputed.todayEvents.join(' / ')}`);
   }
 
-  // 未完了タスク一覧（フェーズC、フェーズDのリマインド目安照合、DB操作・Relief時のみ注入）
-  if (phase === 'PHASE_C' || phase === 'PHASE_D' || needDbModule) {
+  // 未完了タスク一覧（フェーズC、フェーズD、またはDB操作時のみ注入）
+  if (needTasks && uncompletedTasks.length > 0) {
     contextLines.push(`【未完了タスク一覧】: ${formatUncompletedTasksForContext(uncompletedTasks, precomputed.todayDate)}`);
   }
 

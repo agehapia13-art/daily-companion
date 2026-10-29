@@ -418,9 +418,24 @@ const LITE_RESPONSE_SCHEMA = {
       type: 'STRING',
       enum: ['継続中', '完了済み', '該当なし']
     },
+    action_intent: {
+      type: 'STRING',
+      enum: ['immediate_sendoff', 'support_stated_goal', 'proactive_proposal', 'db_operation', 'general_dialogue'],
+      description: '対話の主目的・演出スタンス'
+    },
+    focused_task_ids: {
+      type: 'ARRAY',
+      items: { type: 'STRING' },
+      description: '今着目・提案・操作すべきタスクのID（最大2件。該当なしは空配列）'
+    },
     need_db_action: {
       type: 'BOOLEAN',
       description: 'タスク・予定・買物・インプットの追加/完了/更新/削除などのDB操作が実際に必要か'
+    },
+    db_target_type: {
+      type: 'STRING',
+      enum: ['none', 'task_complete', 'task_add', 'task_update', 'task_delete', 'calendar', 'shopping', 'input_stock', 'other'],
+      description: '必要なDB操作の種別'
     },
     future_schedule_inquiry: {
       type: 'BOOLEAN',
@@ -441,7 +456,7 @@ const LITE_RESPONSE_SCHEMA = {
       type: 'STRING'
     }
   },
-  required: ['tags', 'previous_action_status', 'need_db_action', 'future_schedule_inquiry', 'location', 'health_status', 'weather_relevance', 'matched_habit_topic']
+  required: ['tags', 'previous_action_status', 'action_intent', 'focused_task_ids', 'need_db_action', 'db_target_type', 'future_schedule_inquiry', 'location', 'health_status', 'weather_relevance', 'matched_habit_topic']
 };
 
 /**
@@ -449,8 +464,8 @@ const LITE_RESPONSE_SCHEMA = {
  * @return {string}
  */
 function getDefaultPromptLite() {
-  return `あなたは生活伴走システムの状況分析・ルーティング専任AIです。
-返信文の作成は行わず、与えられた「客観的時刻・経過時間データ」「本日の会話履歴」「ユーザーの最新発言」から、現在の状況を正確に分類・推論して指定のJSONスキーマで出力してください。
+  return `あなたは生活伴走システムの状況分析・キュレーション・ルーティング専任AIです。
+返信文の作成は行わず、与えられた「客観的時刻データ」「未完了タスク一覧」「本日の会話履歴」「ユーザーの最新発言」から、現在の状況を正確に分析・キュレーションして指定のJSONスキーマで出力してください。
 
 【各フィールドの判定基準】
 1. tags（発言の要素分類・複数該当可）:
@@ -469,23 +484,36 @@ function getDefaultPromptLite() {
      * "完了済み": 最新発言で完了が報告された、または十分な時間が経過し一段落したと推察される場合。
      * "該当なし": 直前に行動開始の宣言がない、または本日初回の発言である場合。
 
-3. need_db_action（実データベース操作の要否）:
+3. action_intent（対話の主目的・演出スタンス）:
+   - "immediate_sendoff": 風呂・食事・睡眠・移動・作業開始など、直ちに物理行動に向かう場合（提案を挟まず気持ちよく送り出す）。
+   - "support_stated_goal": ユーザーが自発的にやりたいことや目標を決めている場合（別の選択肢を押し付けず、その意志を尊重し就寝・健康と両立する引き際を見立てる）。
+   - "proactive_proposal": 一段落して余白が発生した、または何をして過ごすか相談している場合（放置タスクやスキルの自発提案を行う）。
+   - "db_operation": タスク完了や追加、カレンダー登録などDB操作が主目的の場合。
+   - "general_dialogue": 日常の雑談、感想、状況報告。
+
+4. focused_task_ids（今着目・提案・操作すべきタスクの選別）:
+   - コンテキストの【現在の未完了タスク一覧】から、今回の文脈（完了報告の対象、または提案すべき隙間・放置タスク）に合致するタスクIDを最大2件選んで配列で出力（例: ["T_20261013_204001_470"]）。不要または該当なしの場合は空配列 []。
+
+5. need_db_action（実データベース操作の要否）:
    - ユーザーがタスクの追加・完了・更新・削除、カレンダー予定の登録・変更、買い物メモの追加・購入済チェック、インプット作品の記録などを実際に求めている場合は true。
    - 単なる日常行動の報告（「夕飯食べた」「ニュース見終えた」「風呂入る」など）でDB更新が伴わない場合は false。
 
-4. future_schedule_inquiry（未来日程・カレンダー照会の有無）:
+6. db_target_type（必要なDB操作の種別）:
+   - "none"（操作不要）、"task_complete"（タスク完了）、"task_add"（タスク追加）、"task_update"（タスク更新）、"task_delete"（タスク削除）、"calendar"（予定登録/変更）、"shopping"（買物）、"input_stock"（作品ストック）、"other"（その他）。
+
+7. future_schedule_inquiry（未来日程・カレンダー照会の有無）:
    - 明日以降の予定、週末スケジュール、来週などの確認・照会、または未来のスケジュールを意識した相談が含まれている場合は true。当日のやり取りのみなら false。
 
-5. location（現在地の特定）:
+8. location（現在地の特定）:
    - 会話文脈、カレンダー予定、時間帯から現在地を推論し、"自宅" / "職場" / "移動中" / "外出先" のいずれかを出力。
 
-6. health_status（当日の心身シグナル抽出）:
+9. health_status（当日の心身シグナル抽出）:
    - 当日ログおよび最新発言の事実から、"通常" / "低調"（眠気・軽い疲れ等） / "不調"（痛み・強いだるさ・体調不良等）を判定。
 
-7. weather_relevance（屋外・天気の関与判定）:
+10. weather_relevance（屋外・天気の関与判定）:
    - 外出・移動の言及、天気・気温・気圧の質問、または屋外活動（散歩・買い物等）の可能性がある場合は true、室内完結のやり取りなら false。
 
-8. matched_habit_topic（関連生活習慣トピックの動的キー照合）:
+11. matched_habit_topic（関連生活習慣トピックの動的キー照合）:
    - コンテキストで提示された【登録済み生活習慣トピック一覧】の中で、今回の発言または直前の継続中行動に直接関連するトピック名があればそのトピック名を1つ出力。無関係であれば "none" を出力。`;
 }
 
@@ -500,7 +528,7 @@ function getDefaultPromptCore() {
 【生活伴走システムの提供能力と支援手段】
 あなたが直接実行できる機能・支援手段は、以下の4つのみです：
 1. 対話とリフレクション（状況の鏡）:
-   LINEメッセージへの返答、思考の整理、共感、および客観的な状況（現在時刻、直前からの経過時間Δt、次の予定までの残り時間）の提示。
+   LINEメッセージへの返答、思考の整理、共感。なお、現在時刻や就寝・境界までの残り時間は、あなたが引き際や活動量を適切に見守るための「内的な判断材料」です。毎回の返答で機械的に時報のように読み上げることは厳禁です（時間を口にするのは、引き際を促す時や相手から尋ねられた時だけ）。
 2. 行動選択肢の提示（カタリスト）:
    余白時間や状況に合わせ、5領域から今すぐ着手できる具体的な行動カード（2〜3枚）の提案。
 3. データ・予定の管理（JSONアクション）:
@@ -514,6 +542,7 @@ function getDefaultPromptCore() {
 - 監視用語の排除: 「予定通り」「計画通り」「スケジュール通り」といった管理・監視的な表現は使わず、時間や予定は心地よい目安として扱う。
 - 準備行動と本番行動の分離: 機器の稼働や下準備などの「準備・トリガー行動」を「本番の行動」そのものと混同しない。準備中は手元が空いている（または進行中である）ことを前提に文脈を捉える。
 - 独自用語の厳守: コンテキストの【用語辞書】にある定義・属性を正確に守り、一般名詞や別作品と混同しない。
+- 時間の鏡の自然な扱い（時報アナウンスの厳禁）: 現在時刻や就寝（23:00）・境界までの残り時間は、あなたの「内的な状況把握・引き際の判断材料」として心の中で使用してください。返信の冒頭などで機械的に「現在〇〇時ですので〜」「現在〇〇時で、残り〇〇分です」と時報のようにオウム返し・読み上げすることは厳禁です。時間を言葉にするのは、「22:45を目安にひと区切りつけましょう」「そろそろ寝る準備に入りましょう」など、引き際を爽やかに見守る時や、相手から時間を尋ねられた時だけに絞り、自然な対話として溶け込ませてください。
 - 月報通知: コンテキストの【月報通知フラグ】が TRUE の場合は、返信の末尾に「先月の振り返りまとめをNotionにまとめておきました！」と添える。
 
 【出力形式】
@@ -550,15 +579,16 @@ function getDefaultPromptPhaseB() {
 function getDefaultPromptPhaseC() {
   return `【現在の行動フェーズ: フェーズC（余白時間・活動目標の伴走 ＆ 触媒リフレクション）】
 - 行動の一区切りや余白時間、または活動目標や過ごし方の相談が発生しています。
+- ※冒頭で「現在〇〇時で、残り〇〇分です」と機械的に時報アナウンスを行うことは厳禁です。時間は内的な判断材料として把握し、自然な対話で寄り添ってください。
 - 以下の2つの分岐に応じて、対等で頼れる大人の伴走者として応答してください：
 
 1. ユーザーが自発的に活動目標（「〜したい」「〜する」「〜やろうかな」）を表明している場合:
    - 別の選択肢や多肢選択メニューを押し付けず、ユーザー自身の意志を全面的に支持・尊重する。
-   - コンテキストの【時間の鏡】（就寝23:00目安や次の予定までの残り時間）を踏まえ、生活前提（入浴・食事・休養）を崩さない「無理のない引き際・タイムボックス（例: ○○頃を目安にひと区切りつける）」をスマートに見立てて伴走する。
-   - ※もし本日期限や直近に迫った未完了タスクがある場合は、「それもいいですが、先に○○だけ15分で済ませませんか？」と愛のある健全な懐疑・優先度チェックを自然に添える。
+   - コンテキストの【時間の鏡】（就寝23:00目安）を踏まえ、生活前提（入浴・食事・休養）を崩さない「無理のない引き際・タイムボックス（例: ○○頃を目安にひと区切りつける）」をスマートに見立てて伴走する。
+   - ※もし本日期限や直近に迫った着目タスクがある場合は、「それもいいですが、先に○○だけ15分で済ませませんか？」と愛のある健全な懐疑・優先度チェックを自然に添える。
 
 2. 何をすべきか迷っている・余白を持て余している場合（「暇だな」「次何しよう」「過ごし方相談」等）:
-   - 残り時間の見通しを示した上で、手元の未完了タスク（リマインド目安や期限が近いもの優先）、スキルメニュー（音楽・思考）、文化・娯楽、身体ケア（散歩・ストレッチ・無音休息）から、今の状況にフィットする具体的な選択肢（2〜3枚）を手元に差し出す。
+   - 手元の着目タスク（リマインド目安や期限が近いもの）やスキルメニュー、文化・娯楽、身体ケア（散歩・ストレッチ・無音休息）から、今の状況にフィットする具体的な選択肢（2〜3枚）を手元に差し出す。
    - ※同日中にすでに提案済みの項目は重複提案しない。21:30以降は就寝に向けた低負荷な選択肢や休息を中心にする。`;
 }
 
@@ -569,8 +599,9 @@ function getDefaultPromptPhaseC() {
 function getDefaultPromptPhaseD() {
   return `【現在の行動フェーズ: フェーズD（通常対話・状況連動リフレクション）】
 - ユーザーの発言に対して、対等な大人の伴走者として自然に共感・応答してください。
-- もし現在の時刻や会話の状況（帰宅した、夜になった、自室にいる、一息ついている等）が、未完了タスクの『リマインド目安』や期日とちょうど合致しているものがあれば、「あ、今リマインドしてと言われていたタイミングだな」と判断し、機転を利かせて自然に声をかけてください。
-- 特別な予定やタスクの合致がない純粋な雑談・報告の場合は、無理にタスク提案へ誘導せず、心地よい対話と必要に応じた時間の鏡（次の予定までの目安）のみを添えてください。`;
+- 返信の冒頭で「現在〇〇時ですので〜」等の時報読み上げは行わず、自然な対話をしてください。
+- もし手元に着目タスクがあり、現在の時刻や会話の状況（帰宅した、夜になった、自室にいる、一息ついている等）がその『リマインド目安』や期日と合致している場合のみ、「あ、今リマインドしてと言われていたタイミングだな」と機転を利かせて自然に声をかけてください。
+- 特別な予定やタスクの合致がない純粋な雑談・報告の場合は、無理にタスク提案へ誘導せず、心地よい対話のみでスッキリと返答してください。`;
 }
 
 /**
@@ -625,6 +656,96 @@ function getDefaultPromptDb() {
 }
 
 /**
+ * DB操作種別に応じた最小限のJSONスキーマ・仕様モジュールを返す（Flashの入力トークン節約）
+ * @param {string} dbTargetType 'task_complete' | 'task_add' | 'task_update' | 'task_delete' | 'calendar' | 'shopping' | 'input_stock' | 'other'
+ * @param {string=} customDbPrompt カスタムDBプロンプト（設定されていれば'other'時に優先）
+ * @return {string}
+ * @private
+ */
+function getMicroDbSchema_(dbTargetType, customDbPrompt) {
+  if (dbTargetType === 'task_complete') {
+    return `【データベース操作仕様: タスク完了】
+タスクを完了した場合は、以下のJSONキーを出力してください：
+{
+  "reply_text": "【必須】ユーザーへの返信文",
+  "task_actions": [
+    { "action": "complete", "task_id": "T_...", "title": "完了タスク名" }
+  ]
+}`;
+  }
+  if (dbTargetType === 'task_add') {
+    return `【データベース操作仕様: タスク追加】
+タスクを新規追加する場合は、以下のJSONキーを出力してください：
+- 命名規則: 指示語を補い「対象/プロジェクト：具体的な内容」の形式。時間指定がある場合は末尾に「（〜HH:mmまで）」を明記。
+- リマインド目安 (remind_context): そのタスクを提案すべき最適なタイミング・状況（例: 「夜・自室」「休日PC」等）を文脈から推論して必ず設定。
+{
+  "reply_text": "【必須】ユーザーへの返信文",
+  "task_actions": [
+    { "action": "add", "title": "対象：具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" }
+  ]
+}`;
+  }
+  if (dbTargetType === 'task_update') {
+    return `【データベース操作仕様: タスク更新】
+タスクを更新・延期する場合は、以下のJSONキーを出力してください：
+{
+  "reply_text": "【必須】ユーザーへの返信文",
+  "task_actions": [
+    { "action": "update", "task_id": "T_...", "target_title": "対象名", "new_title": "新タイトル", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" }
+  ]
+}`;
+  }
+  if (dbTargetType === 'task_delete') {
+    return `【データベース操作仕様: タスク破棄】
+タスクを破棄・削除する場合は、以下のJSONキーを出力してください：
+{
+  "reply_text": "【必須】ユーザーへの返信文",
+  "task_actions": [
+    { "action": "delete", "task_id": "T_...", "title": "破棄タスク名" }
+  ]
+}`;
+  }
+  if (dbTargetType === 'calendar') {
+    return `【データベース操作仕様: カレンダー予定】
+カレンダーの予定を追加・変更・削除する場合は、以下のJSONキーを出力してください：
+- 個人メインカレンダーのみ操作可能。変更時は旧予定の delete と新予定の add をセットで出力。
+{
+  "reply_text": "【必須】ユーザーへの返信文",
+  "calendar_actions": [
+    { "action": "add", "title": "予定名", "start_time": "YYYY-MM-DDTHH:mm:ss", "end_time": "YYYY-MM-DDTHH:mm:ss", "is_all_day": false, "recurrence_days": [] },
+    { "action": "delete", "title": "予定名", "date": "YYYY-MM-DD", "delete_series": false }
+  ]
+}`;
+  }
+  if (dbTargetType === 'shopping') {
+    return `【データベース操作仕様: 買物メモ】
+買物リストを操作する場合は、以下のJSONキーを出力してください：
+{
+  "reply_text": "【必須】ユーザーへの返信文",
+  "shopping_actions": [
+    { "action": "add", "item": "品名", "category": "カテゴリ" },
+    { "action": "complete", "item": "品名" },
+    { "action": "delete", "item": "品名" }
+  ]
+}`;
+  }
+  if (dbTargetType === 'input_stock') {
+    return `【データベース操作仕様: インプット作品】
+作品ストックを操作する場合は、以下のJSONキーを出力してください：
+{
+  "reply_text": "【必須】ユーザーへの返信文",
+  "input_stock_actions": [
+    { "action": "add", "type": "映画/音楽/本/ゲーム/その他", "title": "タイトル", "memo": "メモ" },
+    { "action": "complete", "title": "タイトル" },
+    { "action": "delete", "title": "タイトル" }
+  ]
+}`;
+  }
+
+  return (customDbPrompt && customDbPrompt.trim() !== '') ? customDbPrompt.trim() : getDefaultPromptDb();
+}
+
+/**
  * デフォルトの引き算・回復優先モジュール (prompt_relief)
  * @return {string}
  */
@@ -642,9 +763,10 @@ function getDefaultPromptRelief() {
  * @param {string} todayLogsText
  * @param {Object} memory
  * @param {Object} precomputed { nowStr, elapsedStr, boundaryInfo, todayEvents, habitTopics }
+ * @param {Array<Object>=} uncompletedTasks 未完了タスク一覧（Liteによるキュレーション対象）
  * @return {{result: Object, usage: Object|null}}
  */
-function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed) {
+function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed, uncompletedTasks) {
   const systemPrompt = (memory.prompt_lite && memory.prompt_lite.trim() !== '')
     ? memory.prompt_lite.trim()
     : getDefaultPromptLite();
@@ -658,6 +780,13 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed)
   userContent += `【直前のやり取りからの経過時間(Δt)】: ${precomputed.elapsedStr}\n`;
   userContent += `【時間の鏡（現在の予定・次の境界までの残り時間）】: ${precomputed.boundaryInfo.summaryText}\n`;
   userContent += `【本日のカレンダー予定一覧】: ${precomputed.todayEvents.length > 0 ? precomputed.todayEvents.join(' / ') : '予定なし'}\n\n`;
+
+  // Liteがスマートにタスクを選別・キュレーションできるよう、未完了タスク概要を注入
+  if (uncompletedTasks && uncompletedTasks.length > 0) {
+    const taskLines = uncompletedTasks.map(t => `- [${t.id}] ${t.title}${t.dueDate ? ' (期限: ' + t.dueDate + ')' : ''}${t.remindContext ? ' 【リマインド目安: ' + t.remindContext + '】' : ''}`).join('\n');
+    userContent += `【現在の未完了タスク一覧（キュレーション対象）】:\n${taskLines}\n\n`;
+  }
+
   userContent += `=== 本日の会話履歴 (時系列) ===\n${todayLogsText || '（本日初回の発言）'}\n\n`;
   userContent += `=== ユーザーの最新発言 ===\n${userText || '（画像送信）'}${hasImages ? '\n[※画像添付あり]' : ''}`;
 
@@ -685,7 +814,10 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed)
       result: {
         tags: Array.isArray(parsed.tags) ? parsed.tags : ['雑談'],
         previous_action_status: parsed.previous_action_status || '該当なし',
+        action_intent: parsed.action_intent || 'general_dialogue',
+        focused_task_ids: Array.isArray(parsed.focused_task_ids) ? parsed.focused_task_ids : [],
         need_db_action: Boolean(parsed.need_db_action),
+        db_target_type: parsed.db_target_type || 'none',
         future_schedule_inquiry: Boolean(parsed.future_schedule_inquiry),
         location: parsed.location || '自宅',
         health_status: parsed.health_status || '通常',
@@ -700,7 +832,10 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed)
       result: {
         tags: ['DB依頼', '過ごし方相談', '雑談'],
         previous_action_status: '該当なし',
+        action_intent: 'general_dialogue',
+        focused_task_ids: [],
         need_db_action: false,
+        db_target_type: 'none',
         future_schedule_inquiry: false,
         location: '自宅',
         health_status: '通常',
@@ -721,23 +856,25 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed)
 function determineActionPhase(liteResult, boundaryInfo) {
   const tags = (liteResult && Array.isArray(liteResult.tags)) ? liteResult.tags : [];
   const prevStatus = (liteResult && liteResult.previous_action_status) ? liteResult.previous_action_status : '該当なし';
+  const intent = (liteResult && liteResult.action_intent) ? liteResult.action_intent : '';
 
-  // 2-1. [単発行動の開始]（〜してくる/〜始める/〜行く/〜風呂入る）がある？ -> 最優先でフェーズB（即時送り出し）
-  if (tags.indexOf('単発行動の開始') !== -1) {
+  // 1. 即時行動の開始（風呂入る、ご飯食べる、寝る等） -> フェーズB（即時送り出し）
+  if (intent === 'immediate_sendoff' || tags.indexOf('単発行動の開始') !== -1) {
     return 'PHASE_B';
   }
 
-  // 2-2. 直前行動の推論結果が『継続中』である？ -> フェーズA（進行中の保護・受託専念）
+  // 2. 直前行動が継続中 -> フェーズA（進行中の保護・受託専念）
   if (prevStatus === '継続中') {
     return 'PHASE_A';
   }
 
-  // 2-3. [活動目標の表明] または [過ごし方相談] がある？ -> フェーズC（目標伴走・余白時間の輪郭化）
-  if (tags.indexOf('活動目標の表明') !== -1 || tags.indexOf('過ごし方相談') !== -1) {
+  // 3. 活動目標の表明 または 過ごし方相談（余白発生） -> フェーズC（目標伴走 ＆ 余白設計）
+  if (intent === 'support_stated_goal' || intent === 'proactive_proposal' ||
+      tags.indexOf('活動目標の表明') !== -1 || tags.indexOf('過ごし方相談') !== -1) {
     return 'PHASE_C';
   }
 
-  // それ以外（単なる完了報告、雑談、DB依頼、事実質問など） -> フェーズD（通常応答・完了受諾・状況連動）
+  // それ以外（通常対話、完了受諾、DB操作等） -> フェーズD
   return 'PHASE_D';
 }
 
@@ -750,9 +887,10 @@ function determineActionPhase(liteResult, boundaryInfo) {
  * @param {Object} liteResult
  * @param {string} phase 'PHASE_A' | 'PHASE_B' | 'PHASE_C' | 'PHASE_D'
  * @param {Object} precomputed { now, nowStr, todayDate, elapsedStr, boundaryInfo, todayEvents }
+ * @param {Array<Object>=} uncompletedTasksOpt
  * @return {Object} Gemini API requestPayload
  */
-function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory, liteResult, phase, precomputed) {
+function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory, liteResult, phase, precomputed, uncompletedTasksOpt) {
   const tags = Array.isArray(liteResult.tags) ? liteResult.tags : [];
   const hasImages = Boolean(imageBlobs && imageBlobs.length > 0);
   const isRelief = (liteResult.health_status === '低調' || liteResult.health_status === '不調');
@@ -790,9 +928,13 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     promptModules.push((memory.prompt_relief && memory.prompt_relief.trim() !== '') ? memory.prompt_relief.trim() : getDefaultPromptRelief());
   }
 
-  // 3-3. DB操作仕様 ＆ JSONスキーマ
+  // 3-3. DB操作仕様 ＆ JSONスキーマ（ピンポイント・マイクロスキーマ適用で大幅節約）
   if (needDbModule) {
-    promptModules.push((memory.prompt_db && memory.prompt_db.trim() !== '') ? memory.prompt_db.trim() : getDefaultPromptDb());
+    if (liteResult && liteResult.db_target_type && liteResult.db_target_type !== 'none' && liteResult.db_target_type !== 'other' && !hasImages) {
+      promptModules.push(getMicroDbSchema_(liteResult.db_target_type, memory.prompt_db));
+    } else {
+      promptModules.push((memory.prompt_db && memory.prompt_db.trim() !== '') ? memory.prompt_db.trim() : getDefaultPromptDb());
+    }
   } else {
     promptModules.push(`【出力JSONスキーマ】\n{ "reply_text": "【必須】ユーザーへの返信文" }`);
   }
@@ -846,21 +988,40 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     contextLines.push(`【気圧急降下】: ${pressureAlertVal === 'TRUE' ? '急降下中(注意)' : '安定'}`);
   }
 
-  // タスク・買物・インプット・カレンダー・ありたい姿の条件付き注入
-  const needTasks = (phase === 'PHASE_C' || phase === 'PHASE_D' || needDbModule);
-  const uncompletedTasks = needTasks ? getTasks('未完了') : [];
+  // タスク・買物・インプット・カレンダー・ありたい姿の条件付き選別
+  const allUncompletedTasks = uncompletedTasksOpt || getTasks('未完了');
 
-  const needShopping = /(買|買い|日用品|スーパー|ドラッグストア)/.test(userText) ||
-    (phase === 'PHASE_C' && tags.indexOf('過ごし方相談') !== -1);
+  // タスクの選別注入（Flashへの入力トークンを劇的に削減）
+  let tasksToInject = [];
+  if (phase === 'PHASE_A' || phase === 'PHASE_B') {
+    // 進行中保護 or 即時送り出し: 既存タスクの提案・提示は一切不要
+    tasksToInject = [];
+  } else if (liteResult && liteResult.focused_task_ids && liteResult.focused_task_ids.length > 0) {
+    // Liteが状況に合わせてキュレーションした着目・操作タスク（最大2件）
+    tasksToInject = (allUncompletedTasks || []).filter(t => liteResult.focused_task_ids.indexOf(t.id) !== -1);
+  } else if (phase === 'PHASE_C' && liteResult && liteResult.action_intent === 'proactive_proposal') {
+    // 余白発生かつ自発提案フェーズで特定IDがない場合: 直近優先の2件のみを候補として渡す
+    tasksToInject = (allUncompletedTasks || []).slice(0, 2);
+  } else if (liteResult && (liteResult.db_target_type === 'task_complete' || liteResult.db_target_type === 'task_update' || liteResult.db_target_type === 'task_delete')) {
+    // タスク操作対象だがLiteがIDを返さなかった場合のフォールバック（発言キーワード合致タスクを抽出）
+    const matched = (allUncompletedTasks || []).filter(t => userText && userText.includes(t.title));
+    tasksToInject = matched.length > 0 ? matched.slice(0, 2) : (allUncompletedTasks || []).slice(0, 2);
+  }
+
+  // 買物リスト・インプットストックの条件付き注入
+  const needShopping = (phase === 'PHASE_C' && tags.indexOf('過ごし方相談') !== -1) ||
+    (liteResult && liteResult.db_target_type === 'shopping') ||
+    /(買|買い|日用品|スーパー|ドラッグストア)/.test(userText);
   const unboughtShopping = needShopping ? getShoppingList('未買') : [];
 
-  const needInput = /(映画|本|漫画|アニメ|音楽|ゲーム|見るもの|読むもの|消化)/.test(userText) ||
-    (phase === 'PHASE_C' && tags.indexOf('過ごし方相談') !== -1);
+  const needInput = (phase === 'PHASE_C' && tags.indexOf('過ごし方相談') !== -1) ||
+    (liteResult && liteResult.db_target_type === 'input_stock') ||
+    /(映画|本|漫画|アニメ|音楽|ゲーム|見るもの|読むもの|消化)/.test(userText);
   const pendingInput = needInput ? getInputStockList('未') : [];
 
   // 用語辞書（出現キーワードのみオンデマンド抽出）
   if (memory.dictionary && memory.dictionary.trim() !== '') {
-    const taskTitlesText = uncompletedTasks.map(t => t.title).join(' ');
+    const taskTitlesText = tasksToInject.map(t => t.title).join(' ');
     const inputTitlesText = pendingInput.map(inp => inp.title).join(' ');
     const searchTarget = `${userText || ''}\n${todayLogsText || ''}\n${taskTitlesText}\n${inputTitlesText}`;
     const relevantDict = filterRelevantDictionaryEntries(memory.dictionary, searchTarget);
@@ -901,19 +1062,17 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     contextLines.push(`【本日のカレンダー予定】: ${precomputed.todayEvents.join(' / ')}`);
   }
 
-  // 未完了タスク一覧（フェーズC、フェーズD、またはDB操作時のみ注入）
-  if (needTasks && uncompletedTasks.length > 0) {
-    contextLines.push(`【未完了タスク一覧】: ${formatUncompletedTasksForContext(uncompletedTasks, precomputed.todayDate)}`);
+  // 着目・関連タスク一覧（選別された最大2件のみピンポイント注入）
+  if (tasksToInject.length > 0) {
+    contextLines.push(`【着目・関連タスク】: ${formatUncompletedTasksForContext(tasksToInject, precomputed.todayDate)}`);
   }
 
-  if (phase === 'PHASE_C' || needDbModule) {
-    if (unboughtShopping.length > 0) {
-      contextLines.push(`【買物リスト(未買)】: ${unboughtShopping.map(s => s.item).join(', ')}`);
-    }
-    if (pendingInput.length > 0) {
-      const inputItems = pendingInput.map(inp => `[${inp.type}]${inp.title}${inp.memo ? '(' + inp.memo + ')' : ''}`);
-      contextLines.push(`【インプット未消化】: ${inputItems.join(', ')}`);
-    }
+  if (unboughtShopping.length > 0) {
+    contextLines.push(`【買物リスト(未買)】: ${unboughtShopping.map(s => s.item).join(', ')}`);
+  }
+  if (pendingInput.length > 0) {
+    const inputItems = pendingInput.map(inp => `[${inp.type}]${inp.title}${inp.memo ? '(' + inp.memo + ')' : ''}`);
+    contextLines.push(`【インプット未消化】: ${inputItems.join(', ')}`);
   }
 
   if (needDbModule && userText && /(ルーティン|定期|習慣)/.test(userText)) {
@@ -1124,6 +1283,7 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
   const boundaryInfo = getNextBoundaryInfo(now);
   const todayEvents = getTodayEventsList(now);
   const habitTopics = extractHabitTopicsList(memory.lifestyle_habits);
+  const allUncompletedTasks = getTasks('未完了');
 
   const precomputed = {
     now: now,
@@ -1139,7 +1299,7 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
   // C. 1. 前段 Flash-Lite 実行
   // ----------------------------------------------------
   const hasImages = Boolean(imageBlobs && imageBlobs.length > 0);
-  const liteCall = callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed);
+  const liteCall = callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed, allUncompletedTasks);
   const liteResult = liteCall.result;
   const liteUsage = liteCall.usage || {};
 
@@ -1167,7 +1327,7 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
   // ----------------------------------------------------
   // E. 3. 新システムのリクエスト構築
   // ----------------------------------------------------
-  const newPayload = buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory, liteResult, phase, precomputed);
+  const newPayload = buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory, liteResult, phase, precomputed, allUncompletedTasks);
 
   // ----------------------------------------------------
   // F. 4. 後段 Flash の実行 (NEW 単独 vs AB_TEST 並列)

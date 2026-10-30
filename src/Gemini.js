@@ -430,11 +430,11 @@ const LITE_RESPONSE_SCHEMA = {
     },
     need_db_action: {
       type: 'BOOLEAN',
-      description: 'タスク・予定・買物・インプットの追加/完了/更新/削除などのDB操作が実際に必要か'
+      description: 'タスク・予定・買物・インプット・メモリーの追加/完了/更新/削除などのDB操作が実際に必要か'
     },
     db_target_type: {
       type: 'STRING',
-      enum: ['none', 'task_complete', 'task_add', 'task_update', 'task_delete', 'calendar', 'shopping', 'input_stock', 'other'],
+      enum: ['none', 'task_complete', 'task_add', 'task_update', 'task_delete', 'calendar', 'shopping', 'input_stock', 'memory', 'other'],
       description: '必要なDB操作の種別'
     },
     future_schedule_inquiry: {
@@ -494,12 +494,13 @@ function getDefaultPromptLite() {
 4. focused_task_ids（今着目・提案・操作すべきタスクの選別）:
    - コンテキストの【現在の未完了タスク一覧】から、今回の文脈（完了報告の対象、または提案すべき隙間・放置タスク）に合致するタスクIDを最大2件選んで配列で出力（例: ["T_20261013_204001_470"]）。不要または該当なしの場合は空配列 []。
 
-5. need_db_action（実データベース操作の要否）:
-   - ユーザーがタスクの追加・完了・更新・削除、カレンダー予定の登録・変更、買い物メモの追加・購入済チェック、インプット作品の記録などを実際に求めている場合は true。
-   - 単なる日常行動の報告（「夕飯食べた」「ニュース見終えた」「風呂入る」など）でDB更新が伴わない場合は false。
+5. need_db_action（実データベース・メモリー操作の要否）:
+   - ユーザーがタスクの追加・完了・更新・削除、カレンダー予定の登録・変更、買い物メモの追加・購入済チェック、インプット作品の記録、生活習慣やプロファイル等のメモリー更新を求めている場合は true。
+   - ★重要【目標の自発タスク化】: ユーザーが翌日や週末など、今後の時間枠でやりたいこと・行動予定を具体的に口にした場合（「活動目標の表明」）も、伴走タスクとして自動登録するため true とする。
+   - 単なる日常行動の報告（「夕飯食べた」「ニュース見終えた」「風呂入る」など）でDB・メモリー更新が伴わない場合は false。
 
 6. db_target_type（必要なDB操作の種別）:
-   - "none"（操作不要）、"task_complete"（タスク完了）、"task_add"（タスク追加）、"task_update"（タスク更新）、"task_delete"（タスク削除）、"calendar"（予定登録/変更）、"shopping"（買物）、"input_stock"（作品ストック）、"other"（その他）。
+   - "none"（操作不要）、"task_complete"（タスク完了）、"task_add"（タスク追加・目標のタスク化）、"task_update"（タスク更新）、"task_delete"（タスク削除）、"calendar"（予定登録/変更）、"shopping"（買物）、"input_stock"（作品ストック）、"memory"（生活習慣・プロファイル・辞書更新）、"other"（その他）。
 
 7. future_schedule_inquiry（未来日程・カレンダー照会の有無）:
    - 明日以降の予定、週末スケジュール、来週などの確認・照会、または未来のスケジュールを意識した相談が含まれている場合は true。当日のやり取りのみなら false。
@@ -586,6 +587,7 @@ function getDefaultPromptPhaseC() {
    - 別の選択肢や多肢選択メニューを押し付けず、ユーザー自身の意志を全面的に支持・尊重する。
    - コンテキストの【時間の鏡】（就寝23:00目安）を踏まえ、生活前提（入浴・食事・休養）を崩さない「無理のない引き際・タイムボックス（例: ○○頃を目安にひと区切りつける）」をスマートに見立てて伴走する。
    - ※もし本日期限や直近に迫った着目タスクがある場合は、「それもいいですが、先に○○だけ15分で済ませませんか？」と愛のある健全な懐疑・優先度チェックを自然に添える。
+   - 【目標の自然なタスク化】ユーザーが明日や週末など今後のやりたいこと・行動予定を口にした場合は、ただ会話で同意・応援するだけでなく、本人が忘れないよう自然にタスク（翌日期限・適切なリマインド目安付き）として登録し、返信文で「明日のタスクに『〜』を入れておきました！」と軽やかに添える。
 
 2. 何をすべきか迷っている・余白を持て余している場合（「暇だな」「次何しよう」「過ごし方相談」等）:
    - 手元の着目タスク（リマインド目安や期限が近いもの）やスキルメニュー、文化・娯楽、身体ケア（散歩・ストレッチ・無音休息）から、今の状況にフィットする具体的な選択肢（2〜3枚）を手元に差し出す。
@@ -618,8 +620,10 @@ function getDefaultPromptDb() {
 2. カレンダー操作 (calendar_actions):
    - 個人メインカレンダーのみ操作可能（家族共用カレンダーは読み取り専用）。
    - 既存予定の変更時は、旧予定の \`delete\` と新予定の \`add\` をセットで出力する。
-3. 周期記録・辞書・プロファイル更新 (memory_updates):
+3. 周期記録・生活習慣・辞書・プロファイル更新 (memory_updates):
    - ユーザーが \`cycle_stamps\` の対象活動（爪切り、外歩き・散歩、読書（本・漫画）、ピアノ演奏、ギター練習、楽曲制作、ビジネスインプット等）を実施した報告があった場合は、\`cycle_stamps_updates\` に \`"項目名: YYYY-MM-DD"\` を出力して当日日付へ更新する。
+   - ユーザーから食事・入浴・睡眠・余白や趣味などの生活リズムやこだわりについて変更・追加の指定があった場合は、\`lifestyle_habits\` に \`"[トピック名]: 更新後の内容"\` を出力して該当トピックを更新する。
+   - ユーザーから住居・家族構成・勤務形態・通勤時間などの恒久的生活基盤について変更が指示された場合のみ、\`profile\` に更新後のプロファイル全文を出力する。
 
 {
   "reply_text": "【必須】ユーザーへの返信文",
@@ -649,6 +653,7 @@ function getDefaultPromptDb() {
   ],
   "memory_updates": {
     "cycle_stamps_updates": "（※対象活動の実施報告時のみ）項目名: YYYY-MM-DD",
+    "lifestyle_habits": "（※生活習慣・時間リズム・余白習慣の変更時）[トピック名]: 更新後の内容",
     "dictionary": "（※新出用語の説明時のみ）単語名: 客観的な定義",
     "profile": "（※明示的なプロファイル変更指示時のみ）更新後のプロファイル全文"
   }
@@ -739,6 +744,20 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
     { "action": "complete", "title": "タイトル" },
     { "action": "delete", "title": "タイトル" }
   ]
+}`;
+  }
+  if (dbTargetType === 'memory') {
+    return `【データベース操作仕様: メモリー更新】
+生活習慣（lifestyle_habits）、用語辞書（dictionary）、プロファイル（profile）を更新する場合は、以下のJSONキーを出力してください：
+- 食事・入浴・睡眠・余白や趣味などの生活リズムやこだわりは lifestyle_habits（例: "[トピック名]: 更新後の内容"）に出力してください。
+- 住居・家族構成・勤務形態・通勤時間などの恒久基盤のみ profile に出力してください。
+{
+  "reply_text": "【必須】ユーザーへの返信文",
+  "memory_updates": {
+    "lifestyle_habits": "（※生活習慣・時間リズム・余白習慣の変更時）[トピック名]: 更新後の内容",
+    "profile": "（※住居・家族構成・勤務形態等の恒久基盤変更時のみ）更新後のプロファイル全文",
+    "dictionary": "（※新出用語の説明時のみ）単語名: 客観的な定義"
+  }
 }`;
   }
 
@@ -894,10 +913,12 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   const tags = Array.isArray(liteResult.tags) ? liteResult.tags : [];
   const hasImages = Boolean(imageBlobs && imageBlobs.length > 0);
   const isRelief = (liteResult.health_status === '低調' || liteResult.health_status === '不調');
+  const hasStatedGoal = (tags.indexOf('活動目標の表明') !== -1) || (liteResult && liteResult.action_intent === 'support_stated_goal');
   const needDbModule = Boolean(liteResult.need_db_action) ||
     (tags.indexOf('DB依頼') !== -1) ||
     hasImages ||
-    /(✅|タスク追加|タスク更新|タスク完了|タスク削除|予定追加|予定変更|カレンダー登録|買物追加|メモして)/.test(userText);
+    hasStatedGoal ||
+    /(✅|タスク追加|タスク更新|タスク完了|タスク削除|予定追加|予定変更|カレンダー登録|買物追加|メモして|覚えて|記録して|反映して)/.test(userText);
   const needSearch = (tags.indexOf('事実質問') !== -1);
   const needWeather = (Boolean(liteResult.weather_relevance) || phase === 'PHASE_C' || isRelief);
 
@@ -930,8 +951,12 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
 
   // 3-3. DB操作仕様 ＆ JSONスキーマ（ピンポイント・マイクロスキーマ適用で大幅節約）
   if (needDbModule) {
-    if (liteResult && liteResult.db_target_type && liteResult.db_target_type !== 'none' && liteResult.db_target_type !== 'other' && !hasImages) {
-      promptModules.push(getMicroDbSchema_(liteResult.db_target_type, memory.prompt_db));
+    let effectiveTargetType = (liteResult && liteResult.db_target_type) ? liteResult.db_target_type : 'none';
+    if (effectiveTargetType === 'none' && hasStatedGoal) {
+      effectiveTargetType = 'task_add';
+    }
+    if (effectiveTargetType !== 'none' && effectiveTargetType !== 'other' && !hasImages) {
+      promptModules.push(getMicroDbSchema_(effectiveTargetType, memory.prompt_db));
     } else {
       promptModules.push((memory.prompt_db && memory.prompt_db.trim() !== '') ? memory.prompt_db.trim() : getDefaultPromptDb());
     }

@@ -903,6 +903,70 @@ function updateCycleStampsSafely(updatesText) {
 }
 
 /**
+ * lifestyle_habits の特定トピックを既存の他トピックを破壊せずに安全にマージ・更新
+ * @param {string} candidate AIが提案した新しい生活習慣テキスト（単一または複数トピック）
+ */
+function updateLifestyleHabitsSafely(candidate) {
+  if (!candidate || typeof candidate !== 'string' || !candidate.trim()) return;
+  const currentMemory = getMemory();
+  const existingRaw = (currentMemory.lifestyle_habits || '').trim();
+
+  // 既存のトピックマップを構築
+  const parseHabits = (text) => {
+    const map = {};
+    const order = [];
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    let currentTopic = null;
+    let currentContent = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const match = lines[i].match(/^\[([^\]]+)\][:：\s]*(.*)$/);
+      if (match) {
+        if (currentTopic) {
+          map[currentTopic] = currentContent.join(' ').trim();
+        }
+        currentTopic = match[1].trim();
+        if (order.indexOf(currentTopic) === -1) {
+          order.push(currentTopic);
+        }
+        currentContent = match[2] ? [match[2].trim()] : [];
+      } else if (currentTopic) {
+        currentContent.push(lines[i]);
+      }
+    }
+    if (currentTopic) {
+      map[currentTopic] = currentContent.join(' ').trim();
+    }
+    return { map: map, order: order };
+  };
+
+  const existing = parseHabits(existingRaw);
+  const incoming = parseHabits(candidate);
+
+  if (incoming.order.length === 0) {
+    // もし [トピック名] の形式でなかった場合、既存末尾に追記
+    const cleanCand = candidate.trim();
+    const updated = existingRaw ? `${existingRaw}\n${cleanCand}` : cleanCand;
+    setMemoryValue('lifestyle_habits', updated);
+    Logger.log('lifestyle_habits に新規エントリーを追記しました');
+    return;
+  }
+
+  for (let i = 0; i < incoming.order.length; i++) {
+    const t = incoming.order[i];
+    if (!existing.map.hasOwnProperty(t)) {
+      existing.order.push(t);
+    }
+    existing.map[t] = incoming.map[t];
+  }
+
+  const mergedLines = existing.order.map(t => `[${t}]: ${existing.map[t]}`);
+  const finalVal = mergedLines.join('\n');
+  setMemoryValue('lifestyle_habits', finalVal);
+  Logger.log('lifestyle_habits の該当トピックを安全にマージ更新しました: ' + incoming.order.join(', '));
+}
+
+/**
  * lifestyle_habits テキストから登録済みの見出しトピック一覧（例: ['入浴', '食事', '身支度', ...]）を動的に抽出
  * @param {string} lifestyleHabitsText
  * @return {Array<string>}

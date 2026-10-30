@@ -215,31 +215,30 @@ function doPost(e) {
           const logMeta = turnOutcome ? turnOutcome.logMeta : (aiResult._usage || null);
           appendLog(nowStr, 'user', loggedUserText, imgUrlString, loggedAiReply, logMeta);
 
-          // メモリー更新
+          // メモリー更新（AIが文脈や指示から判定して出力した各領域の更新を安全関数経由で反映）
           if (aiResult.memory_updates) {
-            // cycle_stamps のオンデマンド更新（散歩・読書・楽器・爪切り等の実施報告時）
+            // 1. cycle_stamps のオンデマンド更新（散歩・読書・楽器・爪切り等の実施報告時）
             if (aiResult.memory_updates.cycle_stamps_updates) {
               updateCycleStampsSafely(aiResult.memory_updates.cycle_stamps_updates);
               Logger.log('周期スタンプ(cycle_stamps)を更新しました: ' + aiResult.memory_updates.cycle_stamps_updates);
             }
 
-            const isExplicitProfileRequest = userText && (
-              userText.includes('プロフィール') ||
-              userText.includes('プロファイル') ||
-              userText.includes('設定変更') ||
-              userText.includes('覚えておいて') ||
-              userText.includes('登録して')
-            );
-
-            if (isExplicitProfileRequest && aiResult.memory_updates.profile) {
-              updateProfileSafely(aiResult.memory_updates.profile);
-              Logger.log('ユーザー明示要求によりプロファイルを安全に更新/追記しました');
+            // 2. lifestyle_habits のオンデマンド更新（生活リズム・こだわり・余白習慣の変更時）
+            if (aiResult.memory_updates.lifestyle_habits) {
+              updateLifestyleHabitsSafely(aiResult.memory_updates.lifestyle_habits);
+              Logger.log('生活習慣メモリー(lifestyle_habits)を更新しました');
             }
 
-            // 用語辞書への追記（辞書更新や新用語の定義がある場合）
+            // 3. プロファイルの安全な新陳代謝・追記（住居・家族構成・勤務形態等の恒久基盤）
+            if (aiResult.memory_updates.profile) {
+              updateProfileSafely(aiResult.memory_updates.profile);
+              Logger.log('プロファイル(profile)を安全に更新しました');
+            }
+
+            // 4. 用語辞書への追記（新出用語の定義や説明がある時）
             if (aiResult.memory_updates.dictionary) {
               updateDictionarySafely(aiResult.memory_updates.dictionary);
-              Logger.log('用語辞書に新しい前提知識を安全に反映しました');
+              Logger.log('用語辞書(dictionary)に新しい前提知識を安全に反映しました');
             }
           }
 

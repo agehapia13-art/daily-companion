@@ -475,7 +475,7 @@ function getDefaultPromptLite() {
    - "活動目標の表明": 今日や週末、夜など、これからの時間枠でやりたいこと・目標の表明（「〜したい」「〜する」「〜やろうかな」等）。
    - "完了報告": 行動やタスク、日課を終えたという報告（「〜終わった」「〜完了」「〜したよ」「〜見終えた」等）。
    - "体調・疲労の訴え": 眠気、だるさ、痛み、重さ、疲れ、寝不足などの心身シグナルの言及。
-   - "過ごし方相談": 空き時間や余白に何をして過ごすか、段取りや選択肢を求める相談（「次何しよう」「暇だな」等）。
+   - "過ごし方相談": 空き時間や余白に何をして過ごすか、段取りや一日のタイムスケジュール・選択肢を求める相談（「次何しよう」「暇だな」「明日の予定」「タイスケ作って」等）。
    - "雑談": 日常の出来事の共有、感想、挨拶、フリートーク。
 
 2. previous_action_status（直前行動の完了・継続推論）:
@@ -487,7 +487,7 @@ function getDefaultPromptLite() {
 3. action_intent（対話の主目的・演出スタンス）:
    - "immediate_sendoff": 風呂・食事・睡眠・移動・作業開始など、直ちに物理行動に向かう場合（提案を挟まず気持ちよく送り出す）。
    - "support_stated_goal": ユーザーが自発的にやりたいことや目標を決めている場合（別の選択肢を押し付けず、その意志を尊重し就寝・健康と両立する引き際を見立てる）。
-   - "proactive_proposal": 一段落して余白が発生した、または何をして過ごすか相談している場合（放置タスクやスキルの自発提案を行う）。
+   - "proactive_proposal": 一段落して余白が発生した、または何をして過ごすか・一日の段取りを相談している場合（放置タスクやスキルの自発提案、タイムスケジュールの組み立てを行う）。
    - "db_operation": タスク完了や追加、カレンダー登録などDB操作が主目的の場合。
    - "general_dialogue": 日常の雑談、感想、状況報告。
 
@@ -591,7 +591,17 @@ function getDefaultPromptPhaseC() {
 
 2. 何をすべきか迷っている・余白を持て余している場合（「暇だな」「次何しよう」「過ごし方相談」等）:
    - 手元の着目タスク（リマインド目安や期限が近いもの）やスキルメニュー、文化・娯楽、身体ケア（散歩・ストレッチ・無音休息）から、今の状況にフィットする具体的な選択肢（2〜3枚）を手元に差し出す。
-   - ※同日中にすでに提案済みの項目は重複提案しない。21:30以降は就寝に向けた低負荷な選択肢や休息を中心にする。`;
+   - ※同日中にすでに提案済みの項目は重複提案しない。21:30以降は就寝に向けた低負荷な選択肢や休息を中心にする。
+
+3. 一日のタイムスケジュール・段取りの組み立てを求められた場合:
+   - 【だらけ・時間の融解の防止】3時間以上の巨大な空白（「自由時間・まったり休憩」等）を漫然と放置しないこと。だらだらと時間が溶けるのを防ぎ、充実感とメリハリのある一日をサポートする。
+   - 【60〜90分のタイムボックス化】生活習慣（昼食12:30〜13:30、風呂17:00〜18:00、夕飯18:00〜19:00等）を固定アンカーとして、60〜90分単位の心地よい区切りで組む。
+   - 【5領域のバランス配分】:
+     * 午前: 創造・専門スキル等の集中タイム
+     * 午後: 生活課題タスク（溜まった用事・片付け等）の解消（1コマ30〜60分） ＆ 趣味・気晴らし（お絵描き・散策・ゲーム等）
+     * 夕方・夜: 固定リズム（風呂・夕飯）、家族・対人（団らん・協力プレイ等）、就寝前のクールダウン
+   - 手元の未完了タスクがある場合は、溜まった生活課題を無理のないタイミングに1コマ組み込み、「課題も片付いてスッキリした一日」を演出する。
+   - ※【最優先セーフティ】心身状態が「低調」または「不調」の時は、上記の活動的な原則を完全停止し、引き算・撤退・完全な休息を最優先すること。`;
 }
 
 /**
@@ -1016,21 +1026,26 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   // タスク・買物・インプット・カレンダー・ありたい姿の条件付き選別
   const allUncompletedTasks = uncompletedTasksOpt || getTasks('未完了');
 
-  // タスクの選別注入（Flashへの入力トークンを劇的に削減）
+  // タスクの選別注入（Flashへの入力トークンを劇的に削減しつつ、段取り相談時は必要なタスクを確保）
   let tasksToInject = [];
+  const isPlanningOrAdvice = (phase === 'PHASE_C' && (tags.indexOf('過ごし方相談') !== -1 || (liteResult && liteResult.action_intent === 'proactive_proposal')));
+
   if (phase === 'PHASE_A' || phase === 'PHASE_B') {
     // 進行中保護 or 即時送り出し: 既存タスクの提案・提示は一切不要
     tasksToInject = [];
+  } else if (isPlanningOrAdvice) {
+    // 過ごし方相談や一日の段取り作成時: 手持ちの生活課題・優先タスクを把握できるよう直近5〜8件を注入
+    tasksToInject = (allUncompletedTasks || []).slice(0, 8);
   } else if (liteResult && liteResult.focused_task_ids && liteResult.focused_task_ids.length > 0) {
     // Liteが状況に合わせてキュレーションした着目・操作タスク（最大2件）
     tasksToInject = (allUncompletedTasks || []).filter(t => liteResult.focused_task_ids.indexOf(t.id) !== -1);
-  } else if (phase === 'PHASE_C' && liteResult && liteResult.action_intent === 'proactive_proposal') {
-    // 余白発生かつ自発提案フェーズで特定IDがない場合: 直近優先の2件のみを候補として渡す
-    tasksToInject = (allUncompletedTasks || []).slice(0, 2);
   } else if (liteResult && (liteResult.db_target_type === 'task_complete' || liteResult.db_target_type === 'task_update' || liteResult.db_target_type === 'task_delete')) {
     // タスク操作対象だがLiteがIDを返さなかった場合のフォールバック（発言キーワード合致タスクを抽出）
     const matched = (allUncompletedTasks || []).filter(t => userText && userText.includes(t.title));
     tasksToInject = matched.length > 0 ? matched.slice(0, 2) : (allUncompletedTasks || []).slice(0, 2);
+  } else if (phase === 'PHASE_C' || phase === 'PHASE_D') {
+    // 通常の余白・対話時: 直近優先の2件のみ
+    tasksToInject = (allUncompletedTasks || []).slice(0, 2);
   }
 
   // 買物リスト・インプットストックの条件付き注入

@@ -221,7 +221,20 @@ function getCondensedTodayLogs(beforeTimestamp, targetDateStr) {
         .join(' ')
         .trim();
       if (cleanedReply) {
-        lines.push(`AI: ${cleanedReply}`);
+        // 直近4ターンはAI返答も全文を維持し、それ以前（5ターン以上前）は冒頭1〜2文（最大80文字）にスリム化
+        const isRecent = (i >= validPairs.length - 4);
+        if (isRecent) {
+          lines.push(`AI: ${cleanedReply}`);
+        } else {
+          let shortReply = cleanedReply;
+          const sentenceMatch = cleanedReply.match(/^([^。！？\n]+[。！？])/);
+          if (sentenceMatch && sentenceMatch[1]) {
+            shortReply = sentenceMatch[1];
+          } else if (cleanedReply.length > 80) {
+            shortReply = cleanedReply.substring(0, 80) + '...';
+          }
+          lines.push(`AI: ${shortReply}`);
+        }
       }
     }
   }

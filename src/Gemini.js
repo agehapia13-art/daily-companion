@@ -1093,8 +1093,9 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   }
 
   // 7日分カレンダーの注入条件: 明日以降の予定・週末・来週等の未来日程照会がある場合のみ
+  const isScheduleInquiry = /(予定|空き|何時|どんなスケジュール|スケジュール確認|スケジュールどう)/.test(userText);
   const needFutureCalendar = Boolean(liteResult.future_schedule_inquiry) ||
-    /(明日|明後日|週末|土曜|日曜|来週|週間|スケジュール)/.test(userText);
+    (/(明日|明後日|週末|土曜|日曜|来週|週間)/.test(userText) && isScheduleInquiry);
   if (needFutureCalendar) {
     const calCtx = getCalendarAndHolidayContext(precomputed.now);
     contextLines.push(calCtx);

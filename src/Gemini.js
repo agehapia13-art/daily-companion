@@ -1092,10 +1092,11 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     }
   }
 
-  // 7日分カレンダーの注入条件: 明日以降の予定・週末・来週等の未来日程照会がある場合のみ
-  const isScheduleInquiry = /(予定|空き|何時|どんなスケジュール|スケジュール確認|スケジュールどう)/.test(userText);
-  const needFutureCalendar = Boolean(liteResult.future_schedule_inquiry) ||
-    (/(明日|明後日|週末|土曜|日曜|来週|週間)/.test(userText) && isScheduleInquiry);
+  // カレンダー予定の動的注入（フェーズCの余白・提案・段取り時、または未来日程照会・カレンダー操作時は直近〜週末予定を注入）
+  const needFutureCalendar = (phase === 'PHASE_C') ||
+    Boolean(liteResult.future_schedule_inquiry) ||
+    Boolean(liteResult.db_target_type === 'calendar');
+
   if (needFutureCalendar) {
     const calCtx = getCalendarAndHolidayContext(precomputed.now);
     contextLines.push(calCtx);

@@ -349,6 +349,45 @@ function clearDailyLogs() {
 // ==========================================
 
 /**
+ * 未完了タスクを緊急度順（期限超過 → 本日期限 → 直近期限 → 期限なし）にソート
+ * @param {Array<Object>} tasks
+ * @param {string=} todayStrOpt YYYY-MM-DD（省略時は現在日）
+ * @return {Array<Object>}
+ */
+function sortTasksByUrgency_(tasks, todayStrOpt) {
+  if (!tasks || !Array.isArray(tasks) || tasks.length <= 1) return tasks || [];
+  const todayStr = todayStrOpt || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+
+  return tasks.slice().sort((a, b) => {
+    const aDue = a.dueDate || '';
+    const bDue = b.dueDate || '';
+
+    // 1. 期限超過タスクの判定 (due < todayStr)
+    const aOverdue = (aDue && aDue < todayStr);
+    const bOverdue = (bDue && bDue < todayStr);
+    if (aOverdue && !bOverdue) return -1;
+    if (!aOverdue && bOverdue) return 1;
+    if (aOverdue && bOverdue) return aDue.localeCompare(bDue); // 超過タスク同士はより古い期限を優先
+
+    // 2. 本日期限タスクの判定 (due === todayStr)
+    const aToday = (aDue === todayStr);
+    const bToday = (bDue === todayStr);
+    if (aToday && !bToday) return -1;
+    if (!aToday && bToday) return 1;
+
+    // 3. 未来期限タスクの判定 (due > todayStr)
+    const aFuture = (aDue && aDue > todayStr);
+    const bFuture = (bDue && bDue > todayStr);
+    if (aFuture && !bFuture) return -1;
+    if (!aFuture && bFuture) return 1;
+    if (aFuture && bFuture) return aDue.localeCompare(bDue); // 未来期限は直近順
+
+    // 4. 期限なしタスク同士は登録順序維持
+    return (a.rowIndex || 0) - (b.rowIndex || 0);
+  });
+}
+
+/**
  * タスク一覧を取得
  * @param {string} filterStatus オプション（未完了 / 完了 / 破棄）
  * @return {Array<Object>}
@@ -373,7 +412,11 @@ function getTasks(filterStatus) {
   }));
 
   if (filterStatus) {
-    return tasks.filter(t => t.status === filterStatus);
+    const filtered = tasks.filter(t => t.status === filterStatus);
+    if (filterStatus === '未完了') {
+      return sortTasksByUrgency_(filtered);
+    }
+    return filtered;
   }
   return tasks;
 }
@@ -1031,6 +1074,8 @@ function extractHabitEntryByTopic(lifestyleHabitsText, matchedTopic) {
  */
 function formatUncompletedTasksForContext(uncompletedTasks, todayDate) {
   if (!uncompletedTasks || uncompletedTasks.length === 0) return 'なし';
+  const todayStr = todayDate ? Utilities.formatDate(todayDate, 'Asia/Tokyo', 'yyyy-MM-dd') : Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+
   const taskLines = uncompletedTasks.map(t => {
     let warningTag = '';
     if (t.createdDate && todayDate) {
@@ -1043,9 +1088,19 @@ function formatUncompletedTasksForContext(uncompletedTasks, todayDate) {
         }
       }
     }
+    let duePart = '';
+    if (t.dueDate) {
+      if (t.dueDate < todayStr) {
+        duePart = ` [⚠️期限超過:${t.dueDate}]`;
+      } else if (t.dueDate === todayStr) {
+        duePart = ` [📅本日期限:${t.dueDate}]`;
+      } else {
+        duePart = ` (期限:${t.dueDate})`;
+      }
+    }
     const remindPart = (t.remindContext && t.remindContext.trim()) ? ` [目安:${t.remindContext.trim()}]` : '';
     const memoPart = (t.memo && t.memo.trim()) ? ` (メモ:${t.memo.trim()})` : '';
-    return `[${t.id}] ${t.title}${t.dueDate ? ' (期限:' + t.dueDate + ')' : ''}${remindPart}${memoPart}${warningTag}`;
+    return `[${t.id}] ${t.title}${duePart}${remindPart}${memoPart}${warningTag}`;
   });
   return taskLines.join(' / ');
 }

@@ -614,12 +614,19 @@ function getDefaultPromptPhaseC() {
 
 4. 一日のタイムスケジュール・段取りの組み立てを求められた場合:
    - 【だらけ・時間の融解の防止】3時間以上の巨大な空白（「自由時間・まったり休憩」等）を漫然と放置しないこと。だらだらと時間が溶けるのを防ぎ、充実感とメリハリのある一日をサポートする。
-   - 【60〜90分のタイムボックス化】生活習慣（昼食12:30〜13:30、風呂17:00〜18:00、夕飯18:00〜19:00等）を固定アンカーとして、60〜90分単位の心地よい区切りで組む。
-   - 【5領域のバランス配分】:
-     * 午前: 創造・専門スキル等の集中タイム
-     * 午後: 生活課題タスク（溜まった用事・片付け等）の解消（1コマ30〜60分） ＆ 趣味・気晴らし（お絵描き・散策・ゲーム等）
-     * 夕方・夜: 固定リズム（風呂・夕飯）、家族・対人（団らん・協力プレイ等）、就寝前のクールダウン
-   - 手元の未完了タスクがある場合は、溜まった生活課題を無理のないタイミングに1コマ組み込み、「課題も片付いてスッキリした一日」を演出する。
+   - 【生活リズムの土台（第2層の堅持）】:
+     起床直後に重い活動を直行させず、朝食や低覚醒からのゆったりした立ち上げ（身支度、好きな娯楽等のウォームアップ）を生活前提として組み、健康的なリズムを支える。
+   - 【全データプールの横断活用とスケールの尊重】:
+     * ユーザーが表明した主活動に加え、コンテキストの【未消化ストック（input_stock）】や【未完了タスク】から、休日の柱となる活動を選定する。
+     * 数時間の移動や滞在を要する外出・体験（input_stock等）を組み込む場合は、小間切れに寸断せず、半日規模のまとまったタイムブロックとして大らかに設計する。
+   - 【生活習慣メモリーの柔軟な適用】:
+     * コンテキストの【生活習慣メモリー（lifestyle_habits）】にある食事や入浴の時間は「在宅時の基本リズム」として尊重する。
+     * ただし、外出やまとまった活動を行う場合は、固定枠に縛られず、外出先での食事や帰宅後の入浴など、現実の生活動線に合わせた柔軟な例外を認める。
+   - 【直近記録（疎遠度）に基づくリバランス】:
+     * 【周期スタンプ（cycle_stamps）】や会話履歴を参照し、直近数日間で身体の運動・ケアや他者・社会との接点が途絶えている場合は、主活動を圧迫しない位置にそれらを補う枠を優先的にタイスケへ織り交ぜる。
+     * 生活課題タスクは、期限が迫っているものを隙間に1コマ添える程度とし、タスクだけで枠を埋め尽くさない。
+   - 【予定タイトルのシンプル化】:
+     カレンダー予定名には注釈・小言・タスク詳細のカッコ書き（（〜に気をつけて）、（〇〇など））を一切含めず、簡潔で視認性の高い名称にする。
    - ※【低調時のペース配慮】心身状態が「低調」（軽い疲れや眠気等）の時は、重い課題を強要せず、10〜15分でサクッと片付く手元のタスクや、ゆったりした過ごし方（ストレッチ、音楽、身体ケア等）を手元に差し出し、本人の自律的なペースに寄り添うこと（活動の完全停止はせず、自律的な選択を尊重する）。`;
 }
 
@@ -959,6 +966,26 @@ function determineActionPhase(liteResult, boundaryInfo) {
 }
 
 /**
+ * cycle_stamps 文字列をパースし、各項目の経過日数ラベルを付与した文字列を生成
+ * @param {string} rawStamps
+ * @param {Date} todayDate
+ * @return {string}
+ * @private
+ */
+function formatCycleStampsWithElapsed_(rawStamps, todayDate) {
+  if (!rawStamps || !rawStamps.trim()) return '';
+  if (typeof parseCycleStamps !== 'function') return rawStamps.trim();
+  const parsed = parseCycleStamps(rawStamps, todayDate || new Date());
+  if (!parsed || parsed.length === 0) return rawStamps.trim();
+  return parsed.map(p => {
+    const elapsedText = (p.elapsedDays !== null && p.elapsedDays !== undefined)
+      ? (p.elapsedDays === 0 ? '今日' : `${p.elapsedDays}日前`)
+      : '未着手';
+    return `${p.label}: ${p.date || '未着手'} (${elapsedText})`;
+  }).join('\n');
+}
+
+/**
  * 新システムの後段 Flash 用リクエストペイロードを動的アセンブルで構築
  * @param {string} userText
  * @param {Array<GoogleAppsScript.Base.Blob>} imageBlobs
@@ -1147,14 +1174,16 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
       if (memory.ideal_self && memory.ideal_self.trim() !== '') {
         contextLines.push(`【ありたい人間像・生活指針（判断の羅針盤）】: ${memory.ideal_self.trim()}`);
       }
-      // ユーザーが明確な活動目標を表明していない時（過ごし方相談や余白時）のみ、スキルメニューと周期記録を提示候補として注入
+      // ユーザーが明確な活動目標を表明していない時、またはタイスケ・過ごし方相談時に周期記録を提示候補として注入
+      const isScheduleInquiry = (tags.indexOf('過ごし方相談') !== -1);
       const hasDeclaredGoal = (tags.indexOf('活動目標の表明') !== -1);
-      if (!hasDeclaredGoal) {
-        if (memory.skill_options && memory.skill_options.trim() !== '') {
+      if (!hasDeclaredGoal || isScheduleInquiry) {
+        if (!hasDeclaredGoal && memory.skill_options && memory.skill_options.trim() !== '') {
           contextLines.push(`【能動的スキルアップメニュー (skill_options)】:\n${memory.skill_options.trim()}`);
         }
         if (memory.cycle_stamps && memory.cycle_stamps.trim() !== '') {
-          contextLines.push(`【活動・メンテナンス最終記録 (cycle_stamps)】:\n${memory.cycle_stamps.trim()}`);
+          const formattedStamps = formatCycleStampsWithElapsed_(memory.cycle_stamps, precomputed.todayDate);
+          contextLines.push(`【活動・メンテナンス最終記録 (cycle_stamps)】:\n${formattedStamps}`);
         }
       }
       if (memory.weekly_summary && memory.weekly_summary.trim() !== '') {

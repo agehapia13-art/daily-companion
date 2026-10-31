@@ -85,7 +85,15 @@ function setupSpreadsheet() {
     memorySheet.appendRow(['weekly_summary', '睡眠時間は安定。中盤に肩こり・集中力低下の兆候あり。']);
     memorySheet.appendRow(['briefing_delivered_date', '']);
     memorySheet.appendRow(['monthly_report_ready', 'FALSE']);
-    memorySheet.appendRow(['system_prompt', '']);
+    memorySheet.appendRow(['prompt_lite', '']);
+    memorySheet.appendRow(['prompt_core', '']);
+    memorySheet.appendRow(['prompt_phase_a', '']);
+    memorySheet.appendRow(['prompt_phase_b', '']);
+    memorySheet.appendRow(['prompt_phase_c', '']);
+    memorySheet.appendRow(['prompt_phase_d', '']);
+    memorySheet.appendRow(['prompt_db', '']);
+    memorySheet.appendRow(['prompt_relief', '']);
+    memorySheet.appendRow(['custom_system_prompt', '']);
     memorySheet.appendRow(['dictionary', '・ぽこあポケモン（ぽこあ）: Nintendo Switch 2用ゲーム（2026年3月5日発売予定）。スローライフ・サンドボックス作品。※スマホの「ポケポケ」とは全くの別物。\n・ぱずぎり: パズルアクションゲーム。\n・残響フラクタル: ユーザーが執筆・制作しているオリジナルの創作作品。']);
     memorySheet.appendRow(['ideal_self', '健やかな心身と社会性のある繋がりを保ちつつ、罪悪感のない休息とメリハリのある活動を両立し、専門性（サウンドディレクション等）・創作・大切な人との繋がりを自然に前進させる生活']);
   }

@@ -773,7 +773,6 @@ function getMemory() {
     weekly_summary: '',
     briefing_delivered_date: '',
     monthly_report_ready: 'FALSE',
-    system_prompt: '',
     custom_system_prompt: '',
     rolling_memory: '',
     dictionary: '',

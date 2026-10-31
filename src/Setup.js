@@ -207,10 +207,9 @@ function testAllStandardScenarios() {
  */
 function runPromptScenario(scenario) {
   const memory = getMemory();
-  // ドライランでは強制的に AB_TEST モードとして新旧両方を並列実行して比較
-  // ※新システム側でコード内最新のデフォルトプロンプトをテストするため、スプレッドシートの個別モジュールキャッシュを空にしてフォールバックを適用
+  // 新システム単独ドライランモード（コード内最新のデフォルトプロンプトを直接評価）
   const testMemory = Object.assign({}, memory, {
-    system_mode: 'AB_TEST',
+    system_mode: 'NEW',
     prompt_phase_c: '', // コード最新の getDefaultPromptPhaseC() を確実に評価
     _testCalendarExcludeDate: scenario.excludeCalendarDate || ''
   });
@@ -218,7 +217,7 @@ function runPromptScenario(scenario) {
   let runningLogs = scenario.initialLogs || '';
 
   Logger.log('============================================================');
-  Logger.log(`🧪 【${scenario.name}】 (${scenario.turns.length}ターン / 新旧AB並列ドライラン)`);
+  Logger.log(`🧪 【${scenario.name}】 (${scenario.turns.length}ターン / 新システム単独ドライラン)`);
   Logger.log('============================================================');
 
   for (let i = 0; i < scenario.turns.length; i++) {
@@ -233,15 +232,10 @@ function runPromptScenario(scenario) {
     const outcome = executeCompanionTurn(turn.user, [], runningLogs, testMemory, simulatedDate);
     const meta = outcome.logMeta || {};
     const newReply = (outcome.primaryResult && outcome.primaryResult.reply_text) || '';
-    const oldReply = (outcome.oldResult && outcome.oldResult.reply_text) || '';
 
     Logger.log(`\n🧭 [Lite判定]: ${meta.phaseAndTags || ''}`);
-    Logger.log(`📊 [トークン]: 新合計 ${meta.newTotalTokens} tok (Lite:${(meta.litePromptTokens || 0) + (meta.liteCandidatesTokens || 0)} + Flash:${(meta.flashPromptTokens || 0) + (meta.flashCandidatesTokens || 0)}) vs 旧合計 ${meta.oldTotalTokens} tok ➡️ 差分: ${meta.tokenReductionDiff}`);
-    Logger.log(`\n🆕 【新システム (${outcome.phaseLabel})】:\n${newReply}${formatActionSummary_(outcome.primaryResult)}`);
-    Logger.log(`\n🕰️ 【旧システム】:\n${oldReply}${formatActionSummary_(outcome.oldResult || {})}`);
-    if (outcome.missedActionsNote) {
-      Logger.log(`\n${outcome.missedActionsNote}`);
-    }
+    Logger.log(`📊 [トークン]: 新システム合計 ${meta.newTotalTokens} tok (Lite: ${(meta.litePromptTokens || 0) + (meta.liteCandidatesTokens || 0)} + Flash: ${(meta.flashPromptTokens || 0) + (meta.flashCandidatesTokens || 0)})`);
+    Logger.log(`\n🆕 【新システム応答 (${outcome.phaseLabel})】:\n${newReply}${formatActionSummary_(outcome.primaryResult)}`);
 
     const logLine = `${hhmm} User: ${turn.user}\nAI: ${newReply.replace(/\n/g, ' ')}`;
     runningLogs = runningLogs ? `${runningLogs}\n${logLine}` : logLine;

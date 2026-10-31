@@ -336,6 +336,87 @@ function testMidnightBatchSimulation() {
   dailyMidnightBatch();
 }
 
+/**
+ * 手動テスト用: 月報生成の完全ドライラン検証（Notion投稿なし・プレーンテキスト出力）
+ * - Notion日報DBから指定月（未指定時は直近月、例: 2026-10）の日報データを集約
+ * - Gemini 3.8 Flash で月間ジャーナル（Markdown）を生成
+ * - Notion APIへのPOSTは行わず、純粋なプレーンテキストとして Logger.log に出力
+ * @param {string=} targetMonthStrOpt 例: '2026-10' (省略時は直近月を自動算出)
+ */
+function testMonthlyReportDryRun(targetMonthStrOpt) {
+  const now = new Date();
+  let targetMonthStr = targetMonthStrOpt;
+  if (!targetMonthStr) {
+    // 1日なら前月、それ以外なら当月（10月31日なら2026-10、11月1日なら2026-10）
+    const d = (now.getDate() === 1)
+      ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      : new Date(now.getFullYear(), now.getMonth(), 1);
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    targetMonthStr = `${y}-${('0' + m).slice(-2)}`;
+  }
+
+  const [yearStr, monthNumStr] = targetMonthStr.split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthNumStr, 10);
+  const lastDay = new Date(year, month, 0).getDate();
+  const startDateStr = `${targetMonthStr}-01`;
+  const endDateStr = `${targetMonthStr}-${('0' + lastDay).slice(-2)}`;
+
+  Logger.log('============================================================');
+  Logger.log(`📊 【月報生成ドライラン検証】 対象月: ${targetMonthStr}`);
+  Logger.log(`・集約期間: ${startDateStr} 〜 ${endDateStr}`);
+  Logger.log('============================================================');
+
+  // 1. Notion日報DBから該当期間の日報データを集約
+  let monthlyDataText = '';
+  try {
+    Logger.log('📥 Notion日報DBから日報データを取得中...');
+    monthlyDataText = queryMonthlyReports(startDateStr, endDateStr);
+    const charCount = monthlyDataText ? monthlyDataText.length : 0;
+    Logger.log(`✅ Notion日報集約完了: 約 ${charCount.toLocaleString()} 文字`);
+  } catch (err) {
+    Logger.log(`⚠️ Notion日報取得エラー: ${err.message}`);
+  }
+
+  // もしNotionから取得できなかった場合のフォールバック（テスト用サンプル日報）
+  if (!monthlyDataText || monthlyDataText.trim() === '') {
+    Logger.log('ℹ️ Notionから該当月の日報が取得できなかったため、テスト用サンプル日報を使用して生成をテストします。');
+    monthlyDataText = `【2026-10-15】
+## 今日のハイライト
+- 生活伴走システムの新アーキテクチャ設計に着手
+- Reaperでのサウンドトラック制作を進めた
+## 完了タスク
+- [x] 年末調整書類の確認
+## 秘書からのひとこと
+制作作業お疲れさまでした！
+
+【2026-10-31】
+## 今日のハイライト
+- システムの大掃除と2段階ハイブリッド構成への一本化を完了
+- 家族とモンストの深淵クエストをクリア
+## 完了タスク
+- [x] 生活伴走システム：Gemini 3.1 Flash-Lite & 3.8 Flash ハイブリッド化
+## 秘書からのひとこと
+大改修本当にお疲れさまでした！`;
+  }
+
+  // 2. スプレッドシート memory から用語辞書を取得
+  const memory = getMemory();
+
+  // 3. Gemini 3.8 Flash で月報ジャーナルMarkdownを生成
+  Logger.log('\n🤖 Gemini 3.8 Flash で月間ジャーナルを生成中...');
+  const startTime = new Date().getTime();
+  const monthlyJournalMarkdown = generateMonthlyJournalMarkdown(monthlyDataText, targetMonthStr, memory.dictionary);
+  const elapsedSec = ((new Date().getTime() - startTime) / 1000).toFixed(1);
+
+  Logger.log(`✅ 月報生成完了 (${elapsedSec}秒)\n`);
+  Logger.log('==================== 【生成された月報（プレーンテキスト）】 ====================\n');
+  Logger.log(monthlyJournalMarkdown);
+  Logger.log('\n================================================================================');
+  Logger.log('💡 完全ドライランのため、Notion APIへの送信およびスプレッドシートの更新は一切行っていません。');
+}
+
 // =============================================================================
 // 内部ヘルパー関数（プライベート）
 // =============================================================================

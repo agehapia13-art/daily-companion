@@ -264,4 +264,5 @@ Googleアカウントの権限設定・スコープ承認が必要となるた�
   - `testCustomScenario`: 過去の会話ログや指定時刻（ターン）をシミュレートし、2段階アーキテクチャの推論・トークン消費・アクション出力を安全にドライラン検証
   - `testGeminiConnection`: LiteモデルとFlashモデルの両方のAPI接続・疎通確認
   - `testDailyBriefingOutput`: デイリーブリーフィング生成ドライラン
+  - `testMonthlyReportDryRun`: 月報生成の完全ドライラン検証（Notion日報集約からGemini 3.8 Flashによる月間ジャーナルMarkdown生成までをNotion投稿なしで実行し、プレーンテキストとしてログ出力）
   - `testMidnightBatchSimulation`: 深夜統合バッチの手動実行

@@ -149,12 +149,54 @@ function syncSystemPromptToSpreadsheet() {
 // =============================================================================
 
 /**
+ * メンテナンス用: チャットで仮登録された明日の予定（11/01）を一括削除してカレンダーを真っ新に戻す
+ */
+function clearTomorrowTentativeEvents() {
+  const startTime = new Date(2026, 9, 1, 0, 0, 0); // ※月は0始まりなので10月=9, 11月=10
+  const realStartTime = new Date(2026, 10, 1, 0, 0, 0); // 2026-11-01
+  const realEndTime = new Date(2026, 10, 1, 23, 59, 59);
+
+  try {
+    const defaultCal = CalendarApp.getDefaultCalendar();
+    if (!defaultCal) {
+      Logger.log('❌ デフォルトカレンダーが取得できませんでした');
+      return;
+    }
+
+    const events = defaultCal.getEvents(realStartTime, realEndTime);
+    Logger.log(`📅 2026-11-01 の既存予定: ${events.length} 件`);
+
+    const tentativeTitles = [
+      '朝食', 'ぽこポケ', 'Reaper導入・MCP連携＆テーマ設定', 'お昼ごはん',
+      'タスク消化', '趣味・余白', 'お風呂', '夕飯', '団欒・余白', 'クールダウン・就寝準備'
+    ];
+
+    let deletedCount = 0;
+    events.forEach(ev => {
+      const title = ev.getTitle();
+      if (tentativeTitles.indexOf(title) !== -1) {
+        ev.deleteEvent();
+        Logger.log(`🗑️ 削除: ${title}`);
+        deletedCount++;
+      }
+    });
+
+    Logger.log(`✅ 完了: ${deletedCount} 件の仮組み予定をカレンダーからクリーンアップしました。`);
+  } catch (e) {
+    Logger.log('⚠️ カレンダー仮予定クリーンアップスキップ（権限またはカレンダー取得エラー）: ' + e.message);
+  }
+}
+
+/**
  * ★スポット検証用: 任意の単発または連続対話シナリオをテスト実行
  * プロンプト改善時はこの関数内の scenario を書き換えて実行してください。
  * - turns が1件なら単発テスト、複数件なら前のターンのAI回答を自動的に次ターンのログへ引き継ぐ連鎖テストになります。
  * - 新システム（2モデル体制: Lite + Flash）と旧システム（単一Flash 6,400文字）の応答・トークン・アクションを並列比較します。
  */
 function testCustomScenario() {
+  // 1. カレンダーに仮登録された明日の予定を自動クリーンアップ（相談直前の真っ新な状態を再現）
+  clearTomorrowTentativeEvents();
+
   const recentLogs = [
     '15:59 User: Reaperの初期設定やトラック削除の挙動を満足いくものにするためカスタムスクリプトを作ったりした。実際にMCP連携したり、テーマ変えたりまではいけなかったので続きは明日やりたい。これから30分小休憩にスケジュール調整する。REAPER操作1時間半じゃ足りないから明日は2時間以上確保した方がいいな。熱中しちゃうので途中休憩入れるようにしないと',
     'AI: 初期設定やトラック削除のカスタムスクリプト作成、お疲れさまでした！続きのMCP連携やテーマ変更については明日のタスクに登録しておきました。画面から目を離してゆっくり頭を休めてくださいね。',

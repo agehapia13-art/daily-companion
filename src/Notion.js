@@ -199,7 +199,33 @@ function markdownToNotionBlocks(markdown) {
     }
 
     // 2000文字上限ガード
-    const safeContent = line.length > 1900 ? line.substring(0, 1900) + '...' : line;
+    let safeContent = line.length > 1900 ? line.substring(0, 1900) + '...' : line;
+
+    // ハイフン結合見出し（- ## 見出し）の自動救済
+    if (/^[-*]\s+###\s+/.test(safeContent)) {
+      safeContent = safeContent.replace(/^[-*]\s+/, '');
+    } else if (/^[-*]\s+##\s+/.test(safeContent)) {
+      safeContent = safeContent.replace(/^[-*]\s+/, '');
+    } else if (/^[-*]\s+#\s+/.test(safeContent)) {
+      safeContent = safeContent.replace(/^[-*]\s+/, '');
+    }
+
+    // チェックボックス (- [x] または - [ ]) の Notion to_do ブロック変換
+    const todoMatch = safeContent.match(/^[-*]\s+\[([ xX])\]\s+(.*)$/);
+    if (todoMatch) {
+      const isChecked = todoMatch[1].toLowerCase() === 'x';
+      const todoText = todoMatch[2].trim();
+      blocks.push({
+        object: 'block',
+        type: 'to_do',
+        to_do: {
+          rich_text: parseRichTextWithAnnotations(todoText),
+          checked: isChecked
+        }
+      });
+      if (blocks.length >= 95) break;
+      continue;
+    }
 
     if (safeContent.startsWith('### ')) {
       blocks.push({

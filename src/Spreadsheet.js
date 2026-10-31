@@ -780,7 +780,6 @@ function getMemory() {
     ideal_self: '',
     lifestyle_habits: '',
     skill_options: '',
-    system_mode: 'AB_TEST',
     prompt_lite: '',
     prompt_core: '',
     prompt_phase_a: '',
@@ -809,15 +808,6 @@ function getMemory() {
       if (key === 'pressure_alert' || key === 'monthly_report_ready') {
         // 真偽値の文字列表現を大文字 'TRUE' / 'FALSE' に正規化
         memoryObj[key] = val.toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE';
-      } else if (key === 'system_mode' || key === 'ab_test_mode') {
-        const upper = val.toUpperCase();
-        if (upper === 'OLD') {
-          memoryObj.system_mode = 'OLD';
-        } else if (upper === 'NEW' || upper === 'FALSE') {
-          memoryObj.system_mode = 'NEW';
-        } else {
-          memoryObj.system_mode = 'AB_TEST';
-        }
       } else {
         memoryObj[key] = val;
       }

@@ -128,11 +128,9 @@ function setupLineRichMenuFromSetup() {
 }
 
 /**
- * 手動実行用: コード上の最新システムプロンプト（旧システム用）および
- * 2モデル体制の全モジュールプロンプト群をスプレッドシートの memory シートに一括反映
+ * 手動実行用: コード上の2モデル体制の全モジュールプロンプト群をスプレッドシートの memory シートに一括反映
  */
-function syncSystemPromptToSpreadsheet() {
-  setMemoryValue('system_prompt', getDefaultSystemPrompt());
+function syncDefaultPromptsToSpreadsheet() {
   setMemoryValue('prompt_lite', getDefaultPromptLite());
   setMemoryValue('prompt_core', getDefaultPromptCore());
   setMemoryValue('prompt_phase_a', getDefaultPromptPhaseA());
@@ -142,6 +140,13 @@ function syncSystemPromptToSpreadsheet() {
   setMemoryValue('prompt_db', getDefaultPromptDb());
   setMemoryValue('prompt_relief', getDefaultPromptRelief());
   Logger.log('✅ スプレッドシートの memory シートに全プロンプトモジュールを保存しました！');
+}
+
+/**
+ * 互換エイリアス
+ */
+function syncSystemPromptToSpreadsheet() {
+  syncDefaultPromptsToSpreadsheet();
 }
 
 // =============================================================================
@@ -209,7 +214,6 @@ function runPromptScenario(scenario) {
   const memory = getMemory();
   // 新システム単独ドライランモード（コード内最新のデフォルトプロンプトを直接評価）
   const testMemory = Object.assign({}, memory, {
-    system_mode: 'NEW',
     prompt_phase_c: '', // コード最新の getDefaultPromptPhaseC() を確実に評価
     _testCalendarExcludeDate: scenario.excludeCalendarDate || ''
   });

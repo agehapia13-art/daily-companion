@@ -1,184 +1,8 @@
 /**
- * Gemini.js - Gemini 3.8 Flash API連携モジュール
- * 低レイテンシ（thinkingBudget: 0）、Web検索グラウンディング、JSONスキーマ、マルチターン会話対応
+ * Gemini.js - Gemini 3.1 Flash-Lite ＆ Gemini 3.8 Flash 2段階ハイブリッド連携モジュール
+ * 前段 Flash-Lite ルーティング ＋ 後段 Flash 動的アセンブル実行
+ * 低レイテンシ（thinkingBudget: 0）、Web検索グラウンディング、JSONスキーマ
  */
-
-/**
- * 生活伴走システムの基本システムプロンプトを取得
- * スプレッドシートの memory シート (system_prompt) に値があれば最優先で使用し、空ならコード内デフォルトを使用
- * @return {string}
- */
-function getSystemPrompt() {
-  const memory = getMemory();
-
-  // スプレッドシートの memory シートに system_prompt が設定されている場合は最優先で使用
-  // （プロンプト改善時にGASの再デプロイを不要にし、シート編集のみで即時反映可能にするため）
-  let prompt = '';
-  if (memory.system_prompt && memory.system_prompt.trim() !== '') {
-    prompt = memory.system_prompt.trim();
-  } else {
-    prompt = getDefaultSystemPrompt();
-  }
-
-  // スプレッドシートの custom_system_prompt がある場合は基本プロンプトを上書きせず末尾に追加指示として結合
-  if (memory.custom_system_prompt && memory.custom_system_prompt.trim() !== '') {
-    prompt += `\n\n【追加カスタム指示（最優先フォーマット・ルール）】\n${memory.custom_system_prompt.trim()}`;
-  }
-
-  return prompt;
-}
-
-/**
- * デフォルトの最新システムプロンプト全文
- * @return {string}
- */
-function getDefaultSystemPrompt() {
-  return `あなたは、ユーザー（サウンドディレクター）専用の『生活伴走システム』の対話エージェント（生活伴走アシスタント）です。
-最高憲章（GRAND_DESIGN.md）に基づき、ユーザーの「ありたい人間像（北極星）」への自然な前進を支える触媒（カタリスト）として、親身かつ客観的に伴走してください。
-自身のシステム基盤（スプレッドシートのタスク・買物・インプット・ルーティン・3層記憶、Googleカレンダー連携、天気・気圧急降下検知、深夜Notion日報・月報バッチ）を熟知し、適切なDB操作と対話を両立します。
-
-==================================================
-1. 基本姿勢・対話トーン・境界ルール（第1層）
-==================================================
-- 【口調と文量】: 敬体（です・ます調）をベースに、落ち着いた頼れる伴走者として簡潔に応答する。単なる直前の物理行動宣言や日常報告には1〜2文で軽快に返し、不要な文字数の水増しは行わない（※まとまった空き時間の段取り提案や相談時は必要な見通しを明瞭に提示する）。
-- 【主語・視点の厳密な分離】: あなたは行動の当事者ではなく「伴走者（第三者・聞き手）」である。ユーザーの行動報告に対して当事者本人が発する立場の挨拶・表現を用いることや、ユーザー自身のセルフケアに対してAI側からお礼を述べる主客転倒は厳禁。
-- 【対等な自律性の尊重】: ユーザーの年齢・属性に相応しい対等な大人としての距離感を保つ。日常の生活行動や家事に対して、安全・怪我・体調に関する予防的気遣いや小言（「〜に気をつけて」等）は添えない。
-- 【管理・監視用語の完全排除】: 「予定通り」「計画通り」「スケジュール通り」といった言葉は監視員的な響きを与えるため使用しない。予定や時間は生活の大枠の目安として扱う。
-- 【生活導線と独自用語の厳守】: コンテキストの【用語辞書】にある定義・プラットフォームを厳守し、一般名詞や別作品と混同しない。物理的な生活動線に反する提案は行わない。
-
-==================================================
-2. 生活リズム基準と時間帯・環境フィルタ（第2層）
-==================================================
-- 【健康の標準軸】: 「07:00起床・23:00就寝（7〜8時間睡眠）」を健康リズムの標準とする。
-- 【低覚醒・休息からのウォームアップ】: 起床直後や長時間の休息直後は、いきなり高負荷・長時間の主活動へ直行させず、負荷極小のウォームアップ行動（水分補給、身の回りの調整等）を促して自然な覚醒を支援する。
-- 【夜間クールダウン（21:30以降）】: 23:00就寝に向け、脳や身体を興奮させる高覚醒アクションを提案候補から除外する（※短時間・低負荷・低覚醒で完結する手入れ等は可）。
-- 【勤務中・移動中】: 勤務時間中はプライベートな話題を控えめにし、移動中は移動環境に適した配慮を行う。
-
-==================================================
-3. 思考ステップと意図分類（第3層: Thinking Steps）
-==================================================
-応答を生成する際は、必ず以下の4つの思考ステップを順に辿ること：
-
-【思考ステップ1: 時間軸・状態・モメンタムの認識】
-1. コンテキスト末尾の【現在日時】および【直前のやり取りからの経過時間】を確認する。
-2. 直前の会話履歴を確認し、現在ユーザーがどのような状態にあるかを把握する：
-   - 直前に行動宣言（入浴、移動、調理、片付け等）をしてから経過時間が短い（例: 15〜20分未満など物理的に完了していない）場合、その行動は「現在進行中」とみなす。勝手に完了認定したり、別の生活フェーズ（夕飯等）へ先回りして脱線させないこと。
-   - 直前のターンですでに次の行動（準備や作業等）を提示・合意している場合は、同じ提案やアドバイスをゼロから繰り返さない。
-3. 体調言及のインターバル: 直近（目安1時間以内）ですでに身体ケア提案や体調言及を行っている場合、連続してリピートしない。
-
-【思考ステップ2: ユーザー発言の主意図の確実な処理】
-発言の主意図に応じ、まず必要な処理を第一義として実行する：
-- A. 自発的なタスク追加・予定登録:
-  指示されたタスクや予定を即座に登録（task_actions / calendar_actions）し、簡潔に受託・完了報告する（余計なお伺いや脱線した提案は挟まない）。
-- B. 直前の単発物理行動の開始宣言（「〜してくる」「〜始める」等）:
-  時間軸をその行動そのものに限定し、「了解と送り出し」の1文のみで即座に完結する（先読みや条件付き後続フェーズへの言及、気遣いフレーズの付加はしない）。
-- C. 完了報告（「〜終わった」「〜完了」等）:
-  達成への共感・労い（1〜2文）。該当タスクがあれば complete アクションを実行する。
-- D. 事実確認・期日や仕様の質問:
-  Web検索等で正確な事実・期日を回答する。質問ターン時点では勝手にタスク追加せず、必要に応じて確認を添える。
-- E. 雑談・近況共有・息抜き宣言:
-  親身に受け止め、通常会話では memory_updates を出力しない（深夜バッチに任せる）。
-
-【思考ステップ3: 介入（提案・段取り）の適否判定】
-今、新たな行動提案や見通しを提示すべき状況かどうかを判断する：
-- ⭕ 提示すべき状況:
-  - ユーザーから過ごし方の相談があった時
-  - 次の固定予定（仕事・外出・就寝等）までにまとまった可処分時間（余白）があり、活動目標の表明や空き時間が発生した時
-  - 完了報告の後、次に何をするかが宙に浮いている（未定の）時
-- ❌ 提示を控え、主意図への応答に専念すべき状況:
-  - 直前の単発行動宣言直後（送り出しに専念）
-  - タスク追加や買い物メモ等の個別事務処理（受託報告に専念）
-  - ユーザーがすでに何かに着手している・集中している最中（モメンタムを断絶させない）
-
-【思考ステップ4: 触媒（カタリスト）型提案の生成（提案が必要な場合のみ）】
-提案が必要な場合は、セクション4の提案エンジンに従い、北極星【ありたい人間像・生活指針】を暗黙のコンパスとしながら、着手摩擦の少ない選択肢をサッと手渡す。
-
-==================================================
-4. 行動提案 ＆ 見通し・段取り設計エンジン（第4層）
-==================================================
-提案を行う際は、以下の原則に従って時間配分と候補選定を行う。
-
-【機能1: まとまった空き時間の見通し・段取り設計】
-まとまった可処分時間がある場合、生活に必要な準備や休息の時間を考慮した上で、無理のない現実的な時間配分（大枠の段取り）を見立てて提案する。
-
-【機能2: 5領域横断の候補選定（5領域 × 4属性 × 分散）】
-提案候補は特定の定番行動に偏らず、以下の5つの活動領域をバランスよく横断して選定する：
-1. [実務・家事（tasks / shopping）]:
-   - ★最優先【期限超過タスクの救済】: 未完了タスクの中に期限超過タスク（⚠️期限超過）が存在する場合は、他のタスクや余白提案に先立って、まずそのタスクの現状確認・着手やリスケジュールを最優先でリフレクションする。
-   - 当日期限、前倒し可能な未完了タスク、放置タスク（⚠️7日以上経過）、日用品補充など。
-   - ※特定日限定タスク（ゴミ出しや発売日当日等）の前倒し提案は厳禁。
-2. [創造・専門スキル（tasks / memory）]:
-   - サウンド制作、耳コピ、分析、執筆、専門スキルの研鑽など、ユーザーの北極星に直結する前進。
-3. [文化・教養・娯楽（input_stock / cycle_stamps）]:
-   - ゲーム、音楽鑑賞、映画、読書など。
-   - ※ゲーム優先とバランス: 趣味・ゲーム時間は最優先で尊重。ただし当日すでに十分ゲームを満喫したログがある場合は、30〜60分の空き枠で短時間のスキルアップやご無沙汰の活動も爽やかに織り交ぜる。
-4. [身体ケア・休息・日常手入れ（cycle_stamps）]:
-   - ストレッチ、外気浴、爪切りや道具の手入れ、無音での耳休め、罪悪感のない純粋な休息。
-5. [社会的・対外的行動]:
-   - 家族との団らん、連絡・返信、外出など、社会性のある繋がり。
-
-【属性照合とポートフォリオ分散】
-- 現在のユーザー状態（所要時間・負荷・覚醒度・姿勢）に合致するものをフィルタリングする。
-- 複数案（2〜3個）を提示する場合は、必ず異なる領域・異なる負荷から組み合わせ、選択肢の幅を持たせる。
-- 【同日内の重複提案禁止】: 本日の会話履歴で一度提案した具体的な作品や行動は、同日中に再提案しない。
-- 【積極的な引き算の肯定】: 疲弊や不調がある場合は、無理な消化を煽らず「今日は休む」「リスケする」ことを前向きに提案する。
-
-==================================================
-5. データベース・カレンダー操作の厳密仕様
-==================================================
-- 【タスク命名規則（文脈プレフィックス ＆ 締切時刻付与）】:
-  * 指示語（「これ」「あれ」）を補い、一目で対象と内容がわかるよう \`対象/プロジェクト：具体的なタスク内容\` の形式で命名する（例: \`家事：シーツ洗濯\`、\`残響フラクタル：第3章プロット執筆\`）。
-  * 時間指定がある場合は末尾に \`（〜HH:mmまで）\` または \`（HH:mm締切）\` を必ず明記する（例: \`モンスト：未開の大地クリア（〜12:00まで）\`）。
-- 【Googleカレンダー操作（calendar_actions）】:
-  * 家族共用カレンダー（♪付き予定）は【完全読み取り専用】であり変更・削除は不可。
-  * 既存予定の時間変更・日程変更・改名を行う場合は、必ず旧予定の \`delete\` と新予定の \`add\` をセットで出力する（addのみで旧予定を残さない）。
-  * 毎週の曜日繰り返し予定は \`recurrence_days\` に \`["MON", "THU", "FRI"]\` のように指定し、単発予定は \`[]\` とする。
-- 【定期ルーティン操作（routine_actions）】:
-  * 毎日、毎週などの「定期的なタスク化」「日課への追加」を依頼された場合に出力する。
-  * 毎日繰り返すタスクは \`type: "interval_days", value: "1"\` とし、特定曜日の繰り返しは \`type: "day_of_week", value: "MON"\` 等とする。
-  * 「今日はまだやってない」等、本日分の着手がまだの場合は、明日以降の \`routine_actions\` に加えて【本日分の単発タスク（task_actions: add）】も同時に出力する。
-- 【月報通知フラグ】:
-  * コンテキストの「月報通知フラグ」が \`TRUE\` の場合、reply_text の最末尾に必ず「先月の振り返りまとめをNotionにまとめておきました！」と添える。
-
-==================================================
-6. 出力JSONスキーマ（トークン節約・空キー省略ルール）
-==================================================
-必ず純粋なJSON文字列のみを出力すること（Markdownコードブロックや解説文は一切含めない）。
-- 必須キーは "reply_text" のみ。
-- "reply_text" 以外のキー（image_summary, task_actions, calendar_actions, shopping_actions, input_stock_actions, routine_actions, memory_updates）は、実際に実行・記録すべき値が存在する時だけ出力し、空文字・空配列・null の場合はキーごと完全に省略すること。
-
-{
-  "reply_text": "【必須】ユーザーへの返信文",
-  "image_summary": "（※画像添付時のみ）画像の客観的な内容要約",
-  "task_actions": [
-    { "action": "add", "title": "対象/プロジェクト：具体的なタスク内容", "due_date": "YYYY-MM-DD", "memo": "補足メモ(任意)" },
-    { "action": "update", "task_id": "T_...", "target_title": "対象タスク名", "new_title": "変更後タイトル", "due_date": "YYYY-MM-DD", "memo": "補足メモ" },
-    { "action": "complete", "task_id": "T_...", "title": "完了する既存タスク名" },
-    { "action": "delete", "task_id": "T_...", "title": "破棄するタスク名" }
-  ],
-  "calendar_actions": [
-    { "action": "add", "title": "予定タイトル", "start_time": "YYYY-MM-DDTHH:mm:ss", "end_time": "YYYY-MM-DDTHH:mm:ss", "is_all_day": false, "recurrence_days": [] },
-    { "action": "delete", "title": "予定タイトル", "date": "YYYY-MM-DD", "delete_series": false }
-  ],
-  "shopping_actions": [
-    { "action": "add", "item": "品名", "category": "カテゴリ" },
-    { "action": "complete", "item": "品名" },
-    { "action": "delete", "item": "品名" }
-  ],
-  "input_stock_actions": [
-    { "action": "add", "type": "映画/音楽/本/ゲーム/その他", "title": "タイトル", "memo": "メモ" },
-    { "action": "complete", "title": "タイトル" },
-    { "action": "delete", "title": "タイトル" }
-  ],
-  "routine_actions": [
-    { "action": "add", "title": "ルール名", "type": "day_of_week/day_of_month/interval_days", "value": "設定値" }
-  ],
-  "memory_updates": {
-    "dictionary": "（※新出用語の説明があった時のみ）単語名: 客観的な定義",
-    "profile": "（※明示的にプロファイル変更を指示された時のみ）更新後のプロファイル全文"
-  }
-}`;
-}
 
 /**
  * Gemini API への共通リクエスト＆自動リトライ関数（503/429対策・思考パート除外・usageMetadata取得・エンドポイント指定対応）
@@ -331,75 +155,6 @@ function parseGeminiActionJson_(rawText, usage) {
  */
 function fetchGeminiTextWithRetry(requestPayload) {
   return fetchGeminiResultWithRetry(requestPayload).text;
-}
-
-/**
- * Gemini 3.8 Flash APIへ低レイテンシ・グラウンディング呼び出しを実行（旧システム・単一モデル互換）
- * @param {string} userText ユーザーの入力テキスト
- * @param {Array<GoogleAppsScript.Base.Blob>} imageBlobs 添付画像Blob一覧
- * @param {string} contextText スプレッドシートやカレンダー等のコンテキスト情報
- * @param {string} todayLogsText 本日の会話ログ圧縮テキスト
- * @param {string=} customSystemPrompt テスト・検証用プロンプト（省略時は通常のgetSystemPrompt()を使用）
- * @return {Object} 解析されたJSONオブジェクト
- */
-function callGeminiFlash(userText, imageBlobs, contextText, todayLogsText, customSystemPrompt) {
-  const requestPayload = buildOldSystemPayloadFromContext_(userText, imageBlobs, contextText, todayLogsText, customSystemPrompt);
-  const geminiResult = fetchGeminiResultWithRetry(requestPayload);
-  return parseGeminiActionJson_(geminiResult.text, geminiResult.usage);
-}
-
-/**
- * 旧システム用のリクエストペイロードを構築
- * @private
- */
-function buildOldSystemPayloadFromContext_(userText, imageBlobs, contextText, todayLogsText, customSystemPrompt) {
-  const currentTurnParts = [];
-
-  if (imageBlobs && Array.isArray(imageBlobs)) {
-    for (let i = 0; i < imageBlobs.length; i++) {
-      const blob = imageBlobs[i];
-      if (blob) {
-        const mimeType = blob.getContentType() || 'image/jpeg';
-        const base64Data = Utilities.base64Encode(blob.getBytes());
-        currentTurnParts.push({
-          inlineData: {
-            mimeType: mimeType,
-            data: base64Data
-          }
-        });
-      }
-    }
-  }
-
-  let promptBody = `${contextText}\n\n`;
-  if (todayLogsText && typeof todayLogsText === 'string' && todayLogsText.trim() !== '') {
-    promptBody += `=== 本日の会話履歴 (時系列) ===\n${todayLogsText}\n\n`;
-  }
-  promptBody += `=== ユーザーの最新発言 ===\n${userText || '（画像を受信しました。内容を確認してください）'}`;
-  currentTurnParts.push({ text: promptBody });
-
-  return {
-    systemInstruction: {
-      parts: [{ text: customSystemPrompt || getSystemPrompt() }]
-    },
-    contents: [
-      {
-        role: 'user',
-        parts: currentTurnParts
-      }
-    ],
-    generationConfig: {
-      temperature: 0.7,
-      thinkingConfig: {
-        thinkingBudget: 0
-      }
-    },
-    tools: [
-      {
-        googleSearch: {}
-      }
-    ]
-  };
 }
 
 // =============================================================================
@@ -1278,148 +1033,25 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
 }
 
 /**
- * 新・旧2つのGeminiリクエストペイロードを UrlFetchApp.fetchAll で完全並列実行
- * @param {Object} newPayload
- * @param {Object} oldPayload
- * @return {{newRes: {text: string, usage: Object|null}, oldRes: {text: string, usage: Object|null}}}
- * @private
- */
-function fetchNewAndOldParallel_(newPayload, oldPayload) {
-  const config = getConfig();
-  const url = `${SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE}?key=${config.geminiApiKey}`;
-
-  const reqNew = {
-    url: url,
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(newPayload),
-    muteHttpExceptions: true
-  };
-  const reqOld = {
-    url: url,
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(oldPayload),
-    muteHttpExceptions: true
-  };
-
-  const responses = UrlFetchApp.fetchAll([reqNew, reqOld]);
-  const resNewRaw = responses[0];
-  const resOldRaw = responses[1];
-
-  let newResult;
-  if (resNewRaw.getResponseCode() >= 200 && resNewRaw.getResponseCode() < 300) {
-    newResult = extractGeminiCandidateResult_(resNewRaw.getContentText());
-  } else {
-    Logger.log(`[並列実行 新システムリトライ] ステータス ${resNewRaw.getResponseCode()}`);
-    Utilities.sleep(1000);
-    newResult = fetchGeminiResultWithRetry(newPayload);
-  }
-
-  let oldResult;
-  if (resOldRaw.getResponseCode() >= 200 && resOldRaw.getResponseCode() < 300) {
-    oldResult = extractGeminiCandidateResult_(resOldRaw.getContentText());
-  } else {
-    Logger.log(`[並列実行 旧システムリトライ] ステータス ${resOldRaw.getResponseCode()}`);
-    try {
-      Utilities.sleep(1000);
-      oldResult = fetchGeminiResultWithRetry(oldPayload);
-    } catch (oldErr) {
-      oldResult = {
-        text: JSON.stringify({ reply_text: `（旧システム一時エラー: ${oldErr.message}）` }),
-        usage: { promptTokenCount: 0, candidatesTokenCount: 0, cachedContentTokenCount: 0, totalTokenCount: 0 }
-      };
-    }
-  }
-
-  return { newRes: newResult, oldRes: oldResult };
-}
-
-/**
- * 旧システム側だけが検出し、新システム側が取りこぼしたDB/カレンダーアクションがないか比較検知
- * @param {Object} newParsed
- * @param {Object} oldParsed
- * @return {string} 差分注記文字列（差分なしなら空文字）
- * @private
- */
-function detectMissedActionsFromOld_(newParsed, oldParsed) {
-  if (!oldParsed) return '';
-  const missed = [];
-
-  const newTasks = (newParsed && Array.isArray(newParsed.task_actions)) ? newParsed.task_actions : [];
-  const oldTasks = Array.isArray(oldParsed.task_actions) ? oldParsed.task_actions : [];
-  if (oldTasks.length > 0 && newTasks.length === 0) {
-    const names = oldTasks.map(t => `${t.action}:${t.title || t.target_title || ''}`).join(', ');
-    missed.push(`タスク(${names})`);
-  }
-
-  const newCals = (newParsed && Array.isArray(newParsed.calendar_actions)) ? newParsed.calendar_actions : [];
-  const oldCals = Array.isArray(oldParsed.calendar_actions) ? oldParsed.calendar_actions : [];
-  if (oldCals.length > 0 && newCals.length === 0) {
-    const names = oldCals.map(c => `${c.action}:${c.title || ''}`).join(', ');
-    missed.push(`予定(${names})`);
-  }
-
-  const newShops = (newParsed && Array.isArray(newParsed.shopping_actions)) ? newParsed.shopping_actions : [];
-  const oldShops = Array.isArray(oldParsed.shopping_actions) ? oldParsed.shopping_actions : [];
-  if (oldShops.length > 0 && newShops.length === 0) {
-    const names = oldShops.map(s => `${s.action}:${s.item || ''}`).join(', ');
-    missed.push(`買物(${names})`);
-  }
-
-  if (missed.length > 0) {
-    return `⚠️ [旧のみ検出: ${missed.join(' / ')}]`;
-  }
-  return '';
-}
-
-/**
- * 生活伴走システムの1ターン統合実行エンジン（system_mode: AB_TEST | NEW | OLD 完全対応）
+ * 生活伴走システムの1ターン統合実行エンジン（Flash-Lite 司令塔 ＋ Flash 動的アセンブル実行）
  * @param {string} userText
  * @param {Array<GoogleAppsScript.Base.Blob>} imageBlobs
  * @param {string} todayLogsText
  * @param {Object=} memoryOpt
  * @param {Date=} simulatedNowDate
  * @return {{
- *   mode: string,
  *   phase: string,
  *   phaseLabel: string,
- *   liteResult: Object|null,
+ *   liteResult: Object,
  *   primaryResult: Object,
- *   oldResult: Object|null,
- *   missedActionsNote: string,
  *   logMeta: Object
  * }}
  */
 function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, simulatedNowDate) {
   const memory = memoryOpt || getMemory();
-  const mode = memory.system_mode || 'AB_TEST';
   const now = simulatedNowDate || new Date();
 
-  // ----------------------------------------------------
-  // A. OLDモード（完全ロールバック・旧システム単独稼働）
-  // ----------------------------------------------------
-  if (mode === 'OLD') {
-    const excludeDate = (memory && memory._testCalendarExcludeDate) || '';
-    const sheetContext = getSpreadsheetContext(userText, todayLogsText, now);
-    const calendarContext = getCalendarAndHolidayContext(now, excludeDate);
-    const combinedContext = `${calendarContext}\n\n${sheetContext}`;
-    const oldRes = callGeminiFlash(userText, imageBlobs, combinedContext, todayLogsText);
-    return {
-      mode: 'OLD',
-      phase: 'OLD',
-      phaseLabel: '旧単独',
-      liteResult: null,
-      primaryResult: oldRes,
-      oldResult: oldRes,
-      missedActionsNote: '',
-      logMeta: oldRes._usage || null
-    };
-  }
-
-  // ----------------------------------------------------
-  // B. 0. GAS前処理: 客観数値の機械的算出
-  // ----------------------------------------------------
+  // 1. GAS前処理: 客観数値の機械的算出
   const nowStr = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd(E) HH:mm');
   const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const lastTimeStr = extractLastLogTime(todayLogsText);
@@ -1439,17 +1071,13 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
     habitTopics: habitTopics
   };
 
-  // ----------------------------------------------------
-  // C. 1. 前段 Flash-Lite 実行
-  // ----------------------------------------------------
+  // 2. 前段 Flash-Lite 実行（意図分類・ルーティング）
   const hasImages = Boolean(imageBlobs && imageBlobs.length > 0);
   const liteCall = callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed, allUncompletedTasks);
   const liteResult = liteCall.result;
   const liteUsage = liteCall.usage || {};
 
-  // ----------------------------------------------------
-  // D. 2. GAS ルール層: フェーズ判定
-  // ----------------------------------------------------
+  // 3. GAS ルール層: フェーズ判定
   const phase = determineActionPhase(liteResult, boundaryInfo);
   const phaseMap = {
     'PHASE_A': 'フェーズA(進行中保護)',
@@ -1468,42 +1096,15 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
   const tagsStr = (liteResult.tags || []).join(',');
   const phaseAndTags = `[${phaseFullLabel} / ${tagsStr} / 直前:${liteResult.previous_action_status} / 体調:${liteResult.health_status} / topic:${liteResult.matched_habit_topic}]`;
 
-  // ----------------------------------------------------
-  // E. 3. 新システムのリクエスト構築
-  // ----------------------------------------------------
+  // 4. 後段 Flash のリクエスト構築
   const newPayload = buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory, liteResult, phase, precomputed, allUncompletedTasks);
 
-  // ----------------------------------------------------
-  // F. 4. 後段 Flash の実行 (NEW 単独 vs AB_TEST 並列)
-  // ----------------------------------------------------
-  let newParsed;
-  let newUsage = {};
-  let oldParsed = null;
-  let oldUsage = {};
+  // 5. 後段 Flash の実行
+  const singleRes = fetchGeminiResultWithRetry(newPayload);
+  const newUsage = singleRes.usage || {};
+  const newParsed = parseGeminiActionJson_(singleRes.text, newUsage);
 
-  if (mode === 'AB_TEST') {
-    const excludeDate = (memory && memory._testCalendarExcludeDate) || '';
-    const sheetContext = getSpreadsheetContext(userText, todayLogsText, now);
-    const calendarContext = getCalendarAndHolidayContext(now, excludeDate);
-    const combinedContext = `${calendarContext}\n\n${sheetContext}`;
-    const oldPayload = buildOldSystemPayloadFromContext_(userText, imageBlobs, combinedContext, todayLogsText);
-
-    const parallelRes = fetchNewAndOldParallel_(newPayload, oldPayload);
-    newUsage = parallelRes.newRes.usage || {};
-    newParsed = parseGeminiActionJson_(parallelRes.newRes.text, newUsage);
-
-    oldUsage = parallelRes.oldRes.usage || {};
-    oldParsed = parseGeminiActionJson_(parallelRes.oldRes.text, oldUsage);
-  } else {
-    // NEW 単独稼働モード
-    const singleRes = fetchGeminiResultWithRetry(newPayload);
-    newUsage = singleRes.usage || {};
-    newParsed = parseGeminiActionJson_(singleRes.text, newUsage);
-  }
-
-  // ----------------------------------------------------
-  // G. 5. トークン集計・削減差分・取りこぼし検知
-  // ----------------------------------------------------
+  // 6. トークン集計
   const litePrompt = liteUsage.promptTokenCount || 0;
   const liteCand = liteUsage.candidatesTokenCount || 0;
   const liteCache = liteUsage.cachedContentTokenCount || 0;
@@ -1515,19 +1116,6 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
   const flashTotal = newUsage.totalTokenCount || (flashPrompt + flashCand);
 
   const newTotalTokens = liteTotal + flashTotal;
-  const oldTotalTokens = oldParsed ? (oldUsage.totalTokenCount || ((oldUsage.promptTokenCount || 0) + (oldUsage.candidatesTokenCount || 0))) : '';
-
-  let tokenReductionDiff = '';
-  if (mode === 'AB_TEST' && typeof oldTotalTokens === 'number' && oldTotalTokens > 0) {
-    const diff = newTotalTokens - oldTotalTokens;
-    const pct = ((diff / oldTotalTokens) * 100).toFixed(1);
-    const sign = diff > 0 ? '+' : '';
-    tokenReductionDiff = `${sign}${diff} tok (${sign}${pct}%)`;
-  }
-
-  const missedActionsNote = (mode === 'AB_TEST' && oldParsed)
-    ? detectMissedActionsFromOld_(newParsed, oldParsed)
-    : '';
 
   const logMeta = {
     isTwoModel: true,
@@ -1538,20 +1126,14 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
     flashCandidatesTokens: flashCand,
     flashCachedTokens: flashCache,
     newTotalTokens: newTotalTokens,
-    phaseAndTags: phaseAndTags,
-    oldAiReply: oldParsed ? (oldParsed.reply_text || '') : '',
-    oldTotalTokens: oldTotalTokens,
-    tokenReductionDiff: tokenReductionDiff
+    phaseAndTags: phaseAndTags
   };
 
   return {
-    mode: mode,
     phase: phase,
     phaseLabel: phaseLabel,
     liteResult: liteResult,
     primaryResult: newParsed,
-    oldResult: oldParsed,
-    missedActionsNote: missedActionsNote,
     logMeta: logMeta
   };
 }
@@ -1812,19 +1394,29 @@ ${relevantDict ? `\n【関連用語定義（固有名詞・作品・プロジェ
 }
 
 /**
- * 開発・デバッグ用: Gemini APIの接続テスト
+ * 開発・デバッグ用: Gemini APIの接続テスト（Lite & Flash 疎通確認）
  * GASエディタでこの関数を選択して実行すると、APIキーやエンドポイントの疎通確認が可能です。
  */
 function testGeminiConnection() {
   const config = getConfig();
   Logger.log('Gemini API Key 確認: ' + (config.geminiApiKey ? config.geminiApiKey.substring(0, 6) + '...' : '未設定'));
-  
+
+  const testPayload = {
+    contents: [{ role: 'user', parts: [{ text: 'こんにちは！テストです。' }] }]
+  };
+
   try {
-    const res = callGeminiFlash('こんにちは！テストです。', [], '【コンテキスト】\nテスト実行中', '');
-    Logger.log('Gemini API 呼び出し成功！');
-    Logger.log('AI返答: ' + JSON.stringify(res, null, 2));
+    const liteRes = fetchGeminiResultWithRetry(testPayload, SYSTEM_CONSTANTS.GEMINI_LITE_ENDPOINT_BASE);
+    Logger.log('✅ Gemini Lite API 呼び出し成功: ' + liteRes.text);
   } catch (e) {
-    Logger.log('Gemini API 呼び出し失敗: ' + e.message);
+    Logger.log('❌ Gemini Lite API 呼び出し失敗: ' + e.message);
+  }
+
+  try {
+    const flashRes = fetchGeminiResultWithRetry(testPayload, SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE);
+    Logger.log('✅ Gemini Flash API 呼び出し成功: ' + flashRes.text);
+  } catch (e) {
+    Logger.log('❌ Gemini Flash API 呼び出し失敗: ' + e.message);
   }
 }
 

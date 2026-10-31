@@ -449,7 +449,7 @@ function testDailyReportNotion() {
   const dummyMarkdown = `# ${testDateStr} デイリージャーナル（動作テスト）
 ## 今日のハイライト・総括
 - 生活管理秘書システムの初期セットアップが完了しました！
-- LINEとの双方向連携およびGemini 3.8 Flashによる思考エンジンが正常に稼働しています。
+- LINEとの双方向連携およびGemini 3.1 Flash-Lite ＆ 3.8 Flashによる2段階思考エンジンが正常に稼働しています。
 
 ## 完了タスク
 - [x] LINE Bot チャンネル作成 & Webhook設定

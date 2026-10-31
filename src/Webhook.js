@@ -82,7 +82,7 @@ function doPost(e) {
         const todayLogsCondensed = getCondensedTodayLogs();
         const memory = getMemory();
 
-        // D. 生活伴走エンジン実行（system_mode: AB_TEST | NEW | OLD 対応）
+        // D. 生活伴走エンジン実行（Flash-Lite 司令塔 ＋ Flash 動的アセンブル）
         let turnOutcome = null;
         let aiResult;
         let isGeminiSuccess = false;
@@ -163,28 +163,8 @@ function doPost(e) {
           loggedAiReply += '\n\n' + executedNotices.join('\n');
         }
 
-        // LINE 送信用の表示テキスト構築（AB_TEST モード時は1吹き出しで上下比較表示）
+        // LINE 送信用の表示テキスト構築（返信本文 ＋ DB操作通知）
         let lineDisplayText = loggedAiReply;
-        if (isGeminiSuccess && turnOutcome && turnOutcome.mode === 'AB_TEST' && turnOutcome.oldResult) {
-          const newTok = (turnOutcome.logMeta && turnOutcome.logMeta.newTotalTokens !== undefined)
-            ? Number(turnOutcome.logMeta.newTotalTokens).toLocaleString()
-            : '-';
-          const oldTok = (turnOutcome.logMeta && turnOutcome.logMeta.oldTotalTokens !== undefined)
-            ? Number(turnOutcome.logMeta.oldTotalTokens).toLocaleString()
-            : '-';
-          const oldCleanReply = stripManualNoticeLines(turnOutcome.oldResult.reply_text || '');
-
-          lineDisplayText = `🆕【新システム】(${turnOutcome.phaseLabel} / 合計 ${newTok} tok)\n${pureReplyText}\n\n`;
-          lineDisplayText += `━━━━━━━━━━━━━━\n`;
-          lineDisplayText += `🕰️【旧システム】(合計 ${oldTok} tok)\n${oldCleanReply}`;
-
-          if (turnOutcome.missedActionsNote) {
-            lineDisplayText += `\n\n${turnOutcome.missedActionsNote}`;
-          }
-          if (executedNotices.length > 0) {
-            lineDisplayText += `\n\n${executedNotices.join('\n')}`;
-          }
-        }
 
         // プログラム制御による朝ブリーフィング合流（1日1回・初回のみ確実に付加し即時配信完了記録）
         if (isFirstHello && isGeminiSuccess) {

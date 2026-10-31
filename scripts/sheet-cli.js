@@ -2,8 +2,8 @@
  * scripts/sheet-cli.js - Antigravity用スプレッドシート直接操作CLIツール
  * 
  * 使用例:
- *   node scripts/sheet-cli.js get-prompt
- *   node scripts/sheet-cli.js set-prompt <filePath>
+ *   node scripts/sheet-cli.js get-prompt [moduleKey]
+ *   node scripts/sheet-cli.js set-prompt <moduleKey> <filePath|text>
  *   node scripts/sheet-cli.js get-memory [key]
  *   node scripts/sheet-cli.js set-memory <key> <value>
  *   node scripts/sheet-cli.js get-logs [limit]
@@ -27,6 +27,17 @@ const auth = new google.auth.GoogleAuth({
 });
 
 const sheets = google.sheets({ version: 'v4', auth });
+
+const PROMPT_KEYS = [
+  'prompt_lite',
+  'prompt_core',
+  'prompt_phase_a',
+  'prompt_phase_b',
+  'prompt_phase_c',
+  'prompt_phase_d',
+  'prompt_db',
+  'prompt_relief'
+];
 
 async function getMemory() {
   const res = await sheets.spreadsheets.values.get({
@@ -91,30 +102,40 @@ async function getLogs(limit = 10) {
 }
 
 async function main() {
-  const [,, cmd, arg1, ...rest] = process.argv;
+  const [,, cmd, arg1, arg2, ...rest] = process.argv;
 
   switch (cmd) {
     case 'get-prompt': {
       const memory = await getMemory();
-      console.log(memory.system_prompt || '（system_promptは未設定です）');
+      if (arg1) {
+        console.log(`=== [${arg1}] ===\n` + (memory[arg1] || '（未設定・コードデフォルトが使用されます）'));
+      } else {
+        console.log('=== 設定中のモジュールプロンプト一覧 ===');
+        for (const k of PROMPT_KEYS) {
+          const val = memory[k];
+          const status = val && val.trim() ? `設定済 (${val.length}文字)` : '未設定 (コードデフォルト使用)';
+          console.log(`- ${k}: ${status}`);
+        }
+      }
       break;
     }
     case 'set-prompt': {
-      let promptContent = '';
       if (!arg1) {
-        // 引数なしの場合: src/Gemini.js の getDefaultSystemPrompt() を自動抽出して反映
-        const vm = require('vm');
-        const code = fs.readFileSync(path.resolve(__dirname, '../src/Gemini.js'), 'utf8');
-        const ctx = {};
-        vm.runInNewContext(code, ctx);
-        promptContent = ctx.getDefaultSystemPrompt();
-        console.log('📄 src/Gemini.js から最新の getDefaultSystemPrompt() を抽出しました');
-      } else if (fs.existsSync(arg1)) {
-        promptContent = fs.readFileSync(arg1, 'utf8');
-      } else {
-        promptContent = [arg1, ...rest].join(' ');
+        console.error('使用法: node scripts/sheet-cli.js set-prompt <moduleKey> <filePath|text>');
+        console.error('対応キー:', PROMPT_KEYS.join(', '));
+        process.exit(1);
       }
-      await setMemory('system_prompt', promptContent);
+      const targetKey = arg1;
+      let promptContent = '';
+      if (arg2 && fs.existsSync(arg2)) {
+        promptContent = fs.readFileSync(arg2, 'utf8');
+      } else if (arg2) {
+        promptContent = [arg2, ...rest].join(' ');
+      } else {
+        console.error('プロンプト内容またはファイルパスを指定してください');
+        process.exit(1);
+      }
+      await setMemory(targetKey, promptContent);
       break;
     }
     case 'get-memory': {
@@ -131,7 +152,7 @@ async function main() {
         console.error('使用法: node scripts/sheet-cli.js set-memory <キー> <値>');
         process.exit(1);
       }
-      const val = rest.join(' ');
+      const val = [arg2, ...rest].filter(Boolean).join(' ');
       await setMemory(arg1, val);
       break;
     }
@@ -143,8 +164,8 @@ async function main() {
     default:
       console.log(`
 使用可能なコマンド:
-  node scripts/sheet-cli.js get-prompt
-  node scripts/sheet-cli.js set-prompt <filePath>
+  node scripts/sheet-cli.js get-prompt [moduleKey]
+  node scripts/sheet-cli.js set-prompt <moduleKey> <filePath|text>
   node scripts/sheet-cli.js get-memory [key]
   node scripts/sheet-cli.js set-memory <key> <value>
   node scripts/sheet-cli.js get-logs [limit]

@@ -132,6 +132,10 @@ function getDefaultSystemPrompt() {
   * 家族共用カレンダー（♪付き予定）は【完全読み取り専用】であり変更・削除は不可。
   * 既存予定の時間変更・日程変更・改名を行う場合は、必ず旧予定の \`delete\` と新予定の \`add\` をセットで出力する（addのみで旧予定を残さない）。
   * 毎週の曜日繰り返し予定は \`recurrence_days\` に \`["MON", "THU", "FRI"]\` のように指定し、単発予定は \`[]\` とする。
+- 【定期ルーティン操作（routine_actions）】:
+  * 毎日、毎週などの「定期的なタスク化」「日課への追加」を依頼された場合に出力する。
+  * 毎日繰り返すタスクは \`type: "interval_days", value: "1"\` とし、特定曜日の繰り返しは \`type: "day_of_week", value: "MON"\` 等とする。
+  * 「今日はまだやってない」等、本日分の着手がまだの場合は、明日以降の \`routine_actions\` に加えて【本日分の単発タスク（task_actions: add）】も同時に出力する。
 - 【月報通知フラグ】:
   * コンテキストの「月報通知フラグ」が \`TRUE\` の場合、reply_text の最末尾に必ず「先月の振り返りまとめをNotionにまとめておきました！」と添える。
 
@@ -434,7 +438,7 @@ const LITE_RESPONSE_SCHEMA = {
     },
     db_target_type: {
       type: 'STRING',
-      enum: ['none', 'task_complete', 'task_add', 'task_update', 'task_delete', 'calendar', 'shopping', 'input_stock', 'memory', 'other'],
+      enum: ['none', 'task_complete', 'task_add', 'task_update', 'task_delete', 'routine', 'calendar', 'shopping', 'input_stock', 'memory', 'other'],
       description: '必要なDB操作の種別'
     },
     future_schedule_inquiry: {
@@ -492,15 +496,18 @@ function getDefaultPromptLite() {
    - "general_dialogue": 日常の雑談、感想、状況報告。
 
 4. focused_task_ids（今着目・提案・操作すべきタスクの選別）:
-   - コンテキストの【現在の未完了タスク一覧】から、今回の文脈（完了報告の対象、または提案すべき隙間・放置タスク）に合致するタスクIDを最大2件選んで配列で出力（例: ["T_20261013_204001_470"]）。不要または該当なしの場合は空配列 []。
+   - 【完了・操作時】: ユーザー発言内に終了・完了表現（「〜終わった」「〜終えた」「〜完了」「〜した」等）があり、コンテキストの【現在の未完了タスク一覧】に該当・関連するタスクが存在する場合、必ずそのタスクIDを選出して配列で出力（例: ["T_..."]）。
+   - 【提案時】: まとまった余白時間や過ごし方相談時、現在の時間帯・場所・心身状態（疲労や覚醒度）と各タスクの「期限」「リマインド目安（例: 『夜・自室』『休日PC』）」を照合し、今着手する価値の高いタスクを最大2件選出。
+   - 不要または該当なしの場合は空配列 [] を出力。
 
 5. need_db_action（実データベース・メモリー操作の要否）:
-   - ユーザーがタスクの追加・完了・更新・削除、カレンダー予定の登録・変更、買い物メモの追加・購入済チェック、インプット作品の記録、生活習慣やプロファイル等のメモリー更新を求めている場合は true。
+   - ユーザーがタスクの追加・完了・更新・削除、定期ルーティン追加、カレンダー予定の登録・変更、買い物メモの追加・購入済チェック、インプット作品の記録、生活習慣やプロファイル等のメモリー更新を求めている場合は true。
+   - ★重要【完了報告のタスク昇格】: ユーザーが行動の完了を報告した際、未完了タスク一覧に該当するものがある場合も、タスク完了処理を実行するため true とする（食事など日常行動と混ざっていてもタスク該当があれば true）。
    - ★重要【目標の自発タスク化】: ユーザーが翌日や週末など、今後の時間枠でやりたいこと・行動予定を具体的に口にした場合（「活動目標の表明」）も、伴走タスクとして自動登録するため true とする。
-   - 単なる日常行動の報告（「夕飯食べた」「ニュース見終えた」「風呂入る」など）でDB・メモリー更新が伴わない場合は false。
+   - 単なる日常行動の報告（「夕飯食べた」「ニュース見終えた」「風呂入る」など）で未完了タスクやDB更新が伴わない場合のみ false。
 
 6. db_target_type（必要なDB操作の種別）:
-   - "none"（操作不要）、"task_complete"（タスク完了）、"task_add"（タスク追加・目標のタスク化）、"task_update"（タスク更新）、"task_delete"（タスク削除）、"calendar"（予定登録/変更）、"shopping"（買物）、"input_stock"（作品ストック）、"memory"（生活習慣・プロファイル・辞書更新）、"other"（その他）。
+   - "none"（操作不要）、"task_complete"（タスク完了）、"task_add"（単発タスク追加・目標のタスク化）、"task_update"（タスク更新）、"task_delete"（タスク削除）、"routine"（毎日のタスク化・定期ルーティン・日課追加）、"calendar"（予定登録/変更）、"shopping"（買物）、"input_stock"（作品ストック）、"memory"（生活習慣・プロファイル・辞書更新）、"other"（その他）。
 
 7. future_schedule_inquiry（未来日程・カレンダー照会の有無）:
    - 明日以降の予定、週末スケジュール、来週などの確認・照会、または未来のスケジュールを意識した相談が含まれている場合は true。当日のやり取りのみなら false。
@@ -756,6 +763,21 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
   ]
 }`;
   }
+  if (dbTargetType === 'routine') {
+    return `【データベース操作仕様: 定期ルーティン ＆ 当日タスク】
+毎日・毎週などの定期的な日課・ルーティン化を依頼された場合は、以下のJSONキーを出力してください：
+- 【明日以降の自動生成ルール】: routine_actions にルールを出力（毎日なら type: "interval_days", value: "1"、特定曜日なら type: "day_of_week", value: "MON" 等）。
+- 【本日分の未完了タスク】: 「今日はまだやってない」等、本日分のタスクがまだ実行されていない場合は、本日すぐ取り組めるよう task_actions にも本日の単発タスク（due_date: 当日日付）を出力してください。
+{
+  "reply_text": "【必須】ユーザーへの返信文",
+  "routine_actions": [
+    { "action": "add", "title": "対象/プロジェクト：具体的な内容", "type": "interval_days", "value": "1", "memo": "補足" }
+  ],
+  "task_actions": [
+    { "action": "add", "title": "対象/プロジェクト：具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" }
+  ]
+}`;
+  }
   if (dbTargetType === 'memory') {
     return `【データベース操作仕様: メモリー更新】
 生活習慣（lifestyle_habits）、用語辞書（dictionary）、プロファイル（profile）を更新する場合は、以下のJSONキーを出力してください：
@@ -924,11 +946,30 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   const hasImages = Boolean(imageBlobs && imageBlobs.length > 0);
   const isRelief = (liteResult.health_status === '低調' || liteResult.health_status === '不調');
   const hasStatedGoal = (tags.indexOf('活動目標の表明') !== -1) || (liteResult && liteResult.action_intent === 'support_stated_goal');
+
+  // 未完了タスク一覧の取得（未完了タスクの照合およびFlashへの選別注入に使用）
+  const allUncompletedTasks = uncompletedTasksOpt || getTasks('未完了');
+
+  // 完了報告のセーフティネット照合（発言に完了のニュアンスがあり、LiteがIDを抽出していなかった場合のタスク名照合）
+  const isCompletionTone = (tags.indexOf('完了報告') !== -1) || /(終|終わ|完了|できた|片付)/.test(userText || '');
+  let matchedCompletedTasks = [];
+  if (isCompletionTone && allUncompletedTasks && allUncompletedTasks.length > 0 && (!liteResult || !liteResult.focused_task_ids || liteResult.focused_task_ids.length === 0)) {
+    matchedCompletedTasks = allUncompletedTasks.filter(t => {
+      if (!t.title) return false;
+      const u = (userText || '').toLowerCase();
+      const cleanTitle = t.title.replace(/^[^：:]+[：:]\s*/, '').replace(/（[^）]+）|\([^)]+\)/g, '').trim().toLowerCase();
+      if (cleanTitle && u.includes(cleanTitle)) return true;
+      const coreWord = cleanTitle.replace(/(作成|消化|クリア|購入|確認|掃除|手入れ|読む|見る|見学|周回)/g, '').trim();
+      return (coreWord.length >= 2 && u.includes(coreWord));
+    });
+  }
+
   const needDbModule = Boolean(liteResult.need_db_action) ||
     (tags.indexOf('DB依頼') !== -1) ||
     hasImages ||
     hasStatedGoal ||
-    /(✅|タスク追加|タスク更新|タスク完了|タスク削除|予定追加|予定変更|カレンダー登録|買物追加|メモして|覚えて|記録して|反映して)/.test(userText);
+    (matchedCompletedTasks.length > 0) ||
+    /(✅|タスク追加|タスク更新|タスク完了|タスク削除|予定追加|予定変更|カレンダー登録|買物追加|ルーティン|日課|定期|メモして|覚えて|記録して|反映して)/.test(userText);
   const needSearch = (tags.indexOf('事実質問') !== -1);
   const needWeather = (Boolean(liteResult.weather_relevance) || phase === 'PHASE_C' || isRelief);
 
@@ -962,8 +1003,12 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   // 3-3. DB操作仕様 ＆ JSONスキーマ（ピンポイント・マイクロスキーマ適用で大幅節約）
   if (needDbModule) {
     let effectiveTargetType = (liteResult && liteResult.db_target_type) ? liteResult.db_target_type : 'none';
-    if (effectiveTargetType === 'none' && hasStatedGoal) {
+    if (matchedCompletedTasks.length > 0) {
+      effectiveTargetType = 'task_complete';
+    } else if (effectiveTargetType === 'none' && hasStatedGoal) {
       effectiveTargetType = 'task_add';
+    } else if (effectiveTargetType === 'none' && /(ルーティン|日課|定期)/.test(userText)) {
+      effectiveTargetType = 'routine';
     }
     if (effectiveTargetType !== 'none' && effectiveTargetType !== 'other' && !hasImages) {
       promptModules.push(getMicroDbSchema_(effectiveTargetType, memory.prompt_db));
@@ -1023,10 +1068,7 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     contextLines.push(`【気圧急降下】: ${pressureAlertVal === 'TRUE' ? '急降下中(注意)' : '安定'}`);
   }
 
-  // タスク・買物・インプット・カレンダー・ありたい姿の条件付き選別
-  const allUncompletedTasks = uncompletedTasksOpt || getTasks('未完了');
-
-  // タスクの選別注入（Flashへの入力トークンを劇的に削減しつつ、段取り相談時は必要なタスクを確保）
+  // タスクの選別注入（Liteのキュレーションまたは完了照合タスクのみ注入し、機械的注入は全廃）
   let tasksToInject = [];
   const isPlanningOrAdvice = (phase === 'PHASE_C' && (tags.indexOf('過ごし方相談') !== -1 || (liteResult && liteResult.action_intent === 'proactive_proposal')));
 
@@ -1039,13 +1081,16 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   } else if (liteResult && liteResult.focused_task_ids && liteResult.focused_task_ids.length > 0) {
     // Liteが状況に合わせてキュレーションした着目・操作タスク（最大2件）
     tasksToInject = (allUncompletedTasks || []).filter(t => liteResult.focused_task_ids.indexOf(t.id) !== -1);
+  } else if (matchedCompletedTasks.length > 0) {
+    // 完了報告でLiteがIDを返さなかった場合のセーフティネット（一致したタスクのみピンポイント注入）
+    tasksToInject = matchedCompletedTasks.slice(0, 2);
   } else if (liteResult && (liteResult.db_target_type === 'task_complete' || liteResult.db_target_type === 'task_update' || liteResult.db_target_type === 'task_delete')) {
     // タスク操作対象だがLiteがIDを返さなかった場合のフォールバック（発言キーワード合致タスクを抽出）
     const matched = (allUncompletedTasks || []).filter(t => userText && userText.includes(t.title));
-    tasksToInject = matched.length > 0 ? matched.slice(0, 2) : (allUncompletedTasks || []).slice(0, 2);
-  } else if (phase === 'PHASE_C' || phase === 'PHASE_D') {
-    // 通常の余白・対話時: 直近優先の2件のみ
-    tasksToInject = (allUncompletedTasks || []).slice(0, 2);
+    tasksToInject = matched.length > 0 ? matched.slice(0, 2) : [];
+  } else {
+    // 通常の余白・対話時: Liteがタスクを選定しなかった場合は一切注入しない（機械的な先頭2件の注入を完全廃止）
+    tasksToInject = [];
   }
 
   // 買物リスト・インプットストックの条件付き注入

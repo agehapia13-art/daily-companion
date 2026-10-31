@@ -251,10 +251,21 @@ function getTodayEventsList(simulatedNowDate) {
 }
 
 /**
+ * 予定タイトルが「タスク消化」「作業」「整理」などの包括的タスク枠（アンブレラ枠）かどうかを判定
+ * （単一の具体的行為ではなく、複数のタスクを消化・推進するための時間枠）
+ * @param {string} title
+ * @return {boolean}
+ */
+function isUmbrellaEventTitle(title) {
+  if (!title || typeof title !== 'string') return false;
+  return /(タスク|作業|整理|片付|片づけ|自由時間|フリー|予備|余白|バッファ|段取り)/i.test(title);
+}
+
+/**
  * 現在のカレンダー予定の有無と、次の境界（直近予定または23:00就寝目安）までの残り分数を機械的に算出
  * （Flash-LiteおよびFlashに暗算させず、正確な時間の鏡を提供するためのGAS前処理関数）
  * @param {Date=} simulatedNowDate
- * @return {{isDuringEvent: boolean, minutesUntilNext: number, summaryText: string}}
+ * @return {{isDuringEvent: boolean, currentEventTitle: string|null, currentEventRemainingMinutes: number, isUmbrellaEvent: boolean, minutesUntilNext: number, summaryText: string}}
  */
 function getNextBoundaryInfo(simulatedNowDate) {
   const now = simulatedNowDate || new Date();
@@ -336,7 +347,12 @@ function getNextBoundaryInfo(simulatedNowDate) {
     const remMins = Math.max(1, Math.round((cur.end.getTime() - nowMs) / 60000));
     const sStr = Utilities.formatDate(cur.start, 'Asia/Tokyo', 'HH:mm');
     const eStr = Utilities.formatDate(cur.end, 'Asia/Tokyo', 'HH:mm');
-    let text = `現在予定の最中: 「${cur.title}」(${sStr}〜${eStr} / 終了まで残り${formatMins(remMins)})`;
+    const isUmbrella = isUmbrellaEventTitle(cur.title);
+
+    let text = isUmbrella
+      ? `現在予定の最中（タスク・作業包括枠）: 「${cur.title}」(${sStr}〜${eStr} / 枠終了まで残り${formatMins(remMins)})`
+      : `現在予定の最中: 「${cur.title}」(${sStr}〜${eStr} / 終了まで残り${formatMins(remMins)})`;
+
     if (nextEvent) {
       const nsStr = Utilities.formatDate(nextEvent.start, 'Asia/Tokyo', 'HH:mm');
       const minsToNext = Math.max(1, Math.round((nextEvent.start.getTime() - nowMs) / 60000));
@@ -344,7 +360,10 @@ function getNextBoundaryInfo(simulatedNowDate) {
     }
     return {
       isDuringEvent: true,
-      minutesUntilNext: 0,
+      currentEventTitle: cur.title,
+      currentEventRemainingMinutes: remMins,
+      isUmbrellaEvent: isUmbrella,
+      minutesUntilNext: isUmbrella ? remMins : 0,
       summaryText: text
     };
   }
@@ -355,6 +374,9 @@ function getNextBoundaryInfo(simulatedNowDate) {
     const eStr = Utilities.formatDate(nextEvent.end, 'Asia/Tokyo', 'HH:mm');
     return {
       isDuringEvent: false,
+      currentEventTitle: null,
+      currentEventRemainingMinutes: 0,
+      isUmbrellaEvent: false,
       minutesUntilNext: minsUntilNext,
       summaryText: `次の予定「${nextEvent.title} (${sStr}〜${eStr})」まで残り ${formatMins(minsUntilNext)}`
     };
@@ -366,12 +388,18 @@ function getNextBoundaryInfo(simulatedNowDate) {
   if (minsUntilBed > 0) {
     return {
       isDuringEvent: false,
+      currentEventTitle: null,
+      currentEventRemainingMinutes: 0,
+      isUmbrellaEvent: false,
       minutesUntilNext: minsUntilBed,
       summaryText: `本日のこれ以降のカレンダー固定予定なし（23:00就寝目安まで残り ${formatMins(minsUntilBed)}）`
     };
   } else {
     return {
       isDuringEvent: false,
+      currentEventTitle: null,
+      currentEventRemainingMinutes: 0,
+      isUmbrellaEvent: false,
       minutesUntilNext: 0,
       summaryText: `本日の固定予定なし（23:00就寝目安時刻を過ぎています）`
     };

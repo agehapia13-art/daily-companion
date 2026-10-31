@@ -237,6 +237,7 @@ function apiGetDashboardData(authKey) {
     routines: routines,
     memory: {
       profile: memory.profile || '',
+      lifestyle_habits: memory.lifestyle_habits || '',
       dictionary: memory.dictionary || '',
       rolling_memory: memory.rolling_memory || '',
       weekly_summary: memory.weekly_summary || '',
@@ -495,7 +496,7 @@ function apiAddRoutine(authKey, payload) {
  */
 function apiUpdateMemoryField(authKey, key, value) {
   if (!verifyDashboardAccess(authKey)) throw new Error('Unauthorized');
-  const allowedKeys = ['profile', 'dictionary', 'rolling_memory', 'weekly_summary', 'cycle_stamps', 'custom_system_prompt', 'system_prompt'];
+  const allowedKeys = ['profile', 'lifestyle_habits', 'dictionary', 'rolling_memory', 'weekly_summary', 'cycle_stamps', 'custom_system_prompt', 'system_prompt'];
   if (!allowedKeys.includes(key)) {
     throw new Error('変更が許可されていないキーです');
   }
@@ -1487,19 +1488,19 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       <div id="consumedTodayContainer" style="margin-top:24px;"></div>
     </section>
 
-    <!-- 4. 周期・記憶タブ -->
+    <!-- 4. 習慣・記憶タブ -->
     <section id="tab-memory" class="tab-panel" style="display:none;">
-      <!-- 周期・活動履歴スタンプ -->
+      <!-- 活動・習慣スタンプ -->
       <div class="toolbar">
-        <div class="section-summary">🔄 周期メンテ・活動履歴</div>
-        <button class="icon-btn" onclick="openMemoryEditModal('cycle_stamps_raw', '周期メンテ・活動履歴')">✎ 編集</button>
+        <div class="section-summary">🌱 活動・習慣スタンプ</div>
+        <button class="icon-btn" onclick="openMemoryEditModal('cycle_stamps_raw', '活動・習慣スタンプ')">✎ 編集</button>
       </div>
       <div id="stampGridContainer" class="stamp-grid"></div>
 
       <div class="quick-add-box" style="margin-bottom:24px;">
-        <div class="form-label">＋ 新しい周期・活動記録を追加・更新</div>
+        <div class="form-label">＋ 新しい活動・習慣スタンプを追加</div>
         <div class="quick-add-row">
-          <input type="text" id="newStampLabel" class="organic-input" style="flex:1;" placeholder="例：読書、ギター演奏、爪切り、美容院">
+          <input type="text" id="newStampLabel" class="organic-input" style="flex:1;" placeholder="例：読書、楽曲制作・DTM、爪切り、美容院">
           <button class="btn-primary" onclick="addNewCycleStamp()">今日実施で記録</button>
         </div>
       </div>
@@ -1507,9 +1508,18 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       <!-- 定期ルーティン一覧 -->
       <div class="memory-card">
         <div class="memory-header">
-          <div class="memory-title">🌱 登録済み定期ルーティン</div>
+          <div class="memory-title">🔄 登録済み定期ルーティン</div>
         </div>
         <div id="routineListContainer"></div>
+      </div>
+
+      <!-- 生活習慣・リズム -->
+      <div class="memory-card">
+        <div class="memory-header">
+          <div class="memory-title">🌿 生活習慣・リズム</div>
+          <button class="icon-btn" onclick="openMemoryEditModal('lifestyle_habits', '生活習慣・リズム')">✎ 編集</button>
+        </div>
+        <div id="memHabits" class="memory-content"></div>
       </div>
 
       <!-- 用語辞書 -->
@@ -1530,11 +1540,11 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
         <div id="memProfile" class="memory-content"></div>
       </div>
 
-      <!-- 最近の関心・ログ -->
+      <!-- 最近の関心・トピック -->
       <div class="memory-card">
         <div class="memory-header">
-          <div class="memory-title">🌊 最近の関心・ログ</div>
-          <button class="icon-btn" onclick="openMemoryEditModal('rolling_memory', '最近の関心・ログ')">✎ 編集</button>
+          <div class="memory-title">🌊 最近の関心・トピック</div>
+          <button class="icon-btn" onclick="openMemoryEditModal('rolling_memory', '最近の関心・トピック')">✎ 編集</button>
         </div>
         <div id="memRolling" class="memory-content"></div>
       </div>
@@ -1569,7 +1579,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
     </button>
     <button class="nav-item" id="nav-memory" onclick="switchTab('memory')">
       <span class="nav-icon">📖</span>
-      <span class="nav-label">周期・記憶</span>
+      <span class="nav-label">習慣・記憶</span>
     </button>
   </nav>
 
@@ -2521,7 +2531,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
 
       const stampGrid = document.getElementById('stampGridContainer');
       if (stamps.length === 0) {
-        stampGrid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;">周期・活動スタンプはまだ記録されていません。</div>';
+        stampGrid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;">活動・習慣スタンプはまだ記録されていません。</div>';
       } else {
         stampGrid.innerHTML = stamps.map(s => {
           const daysText = (s.elapsedDays !== null && s.elapsedDays !== undefined)
@@ -2555,6 +2565,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
         ).join('') + '</div>';
       }
 
+      document.getElementById('memHabits').textContent = mem.lifestyle_habits || '（未設定）';
       document.getElementById('memDictionary').textContent = mem.dictionary || '（未設定）';
       document.getElementById('memProfile').textContent = mem.profile || '（未設定）';
       document.getElementById('memRolling').textContent = mem.rolling_memory || '（未設定）';
@@ -2563,7 +2574,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
 
     function stampToday(label) {
       showToast('✨ 「' + label + '」を今日の日付で更新中...');
-      sendLiffMessage('✨ 「' + label + '」のお手入れ・メンテナンスを実施したよ');
+      sendLiffMessage('✨ 「' + label + '」を実施したよ');
       callServerApi('apiStampCycleItem', state.authKey, label, '')
         .then(() => {
           showToast('🌿 「' + label + '」を今日に更新しました');

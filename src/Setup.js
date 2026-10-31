@@ -208,8 +208,10 @@ function testAllStandardScenarios() {
 function runPromptScenario(scenario) {
   const memory = getMemory();
   // ドライランでは強制的に AB_TEST モードとして新旧両方を並列実行して比較
+  // ※新システム側でコード内最新のデフォルトプロンプトをテストするため、スプレッドシートの個別モジュールキャッシュを空にしてフォールバックを適用
   const testMemory = Object.assign({}, memory, {
     system_mode: 'AB_TEST',
+    prompt_phase_c: '', // コード最新の getDefaultPromptPhaseC() を確実に評価
     _testCalendarExcludeDate: scenario.excludeCalendarDate || ''
   });
 

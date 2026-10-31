@@ -30,9 +30,10 @@ function evaluateHouseholdEvent(title) {
  * - 日曜 18:00以降: 今日〜翌週日曜 23:59:59 (来週1週間全体)
  * - それ以外 (月〜土、日曜18時前): 今日〜翌週月曜 23:59:59 (今週 + 直近週末 + 週明け月曜)
  * @param {Date=} simulatedNowDate オプション: シミュレーション日時
+ * @param {string=} excludeDateStr テスト用: コンテキストから除外したい特定日('YYYY-MM-DD')
  * @return {string}
  */
-function getCalendarAndHolidayContext(simulatedNowDate) {
+function getCalendarAndHolidayContext(simulatedNowDate, excludeDateStr) {
   const now = simulatedNowDate || new Date();
   const startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
 
@@ -66,6 +67,10 @@ function getCalendarAndHolidayContext(simulatedNowDate) {
       } else {
         events.forEach(ev => {
           const title = ev.getTitle();
+          const eventYmd = Utilities.formatDate(ev.getStartTime(), 'Asia/Tokyo', 'yyyy-MM-dd');
+          if (excludeDateStr && eventYmd === excludeDateStr) {
+            return; // テスト検証用: 指定日を除外
+          }
           if (ev.isAllDayEvent()) {
             const dateStr = Utilities.formatDate(ev.getStartTime(), 'Asia/Tokyo', 'yyyy-MM-dd(E)');
             calendarText += `・[メイン終日] ${dateStr}: ${title}\n`;

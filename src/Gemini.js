@@ -1198,7 +1198,8 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     Boolean(liteResult.db_target_type === 'calendar');
 
   if (needFutureCalendar) {
-    const calCtx = getCalendarAndHolidayContext(precomputed.now);
+    const excludeDate = (memory && memory._testCalendarExcludeDate) || '';
+    const calCtx = getCalendarAndHolidayContext(precomputed.now, excludeDate);
     contextLines.push(calCtx);
   } else if (precomputed.todayEvents && precomputed.todayEvents.length > 0) {
     contextLines.push(`【本日のカレンダー予定】: ${precomputed.todayEvents.join(' / ')}`);
@@ -1399,8 +1400,9 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
   // A. OLDモード（完全ロールバック・旧システム単独稼働）
   // ----------------------------------------------------
   if (mode === 'OLD') {
+    const excludeDate = (memory && memory._testCalendarExcludeDate) || '';
     const sheetContext = getSpreadsheetContext(userText, todayLogsText, now);
-    const calendarContext = getCalendarAndHolidayContext(now);
+    const calendarContext = getCalendarAndHolidayContext(now, excludeDate);
     const combinedContext = `${calendarContext}\n\n${sheetContext}`;
     const oldRes = callGeminiFlash(userText, imageBlobs, combinedContext, todayLogsText);
     return {
@@ -1480,8 +1482,9 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
   let oldUsage = {};
 
   if (mode === 'AB_TEST') {
+    const excludeDate = (memory && memory._testCalendarExcludeDate) || '';
     const sheetContext = getSpreadsheetContext(userText, todayLogsText, now);
-    const calendarContext = getCalendarAndHolidayContext(now);
+    const calendarContext = getCalendarAndHolidayContext(now, excludeDate);
     const combinedContext = `${calendarContext}\n\n${sheetContext}`;
     const oldPayload = buildOldSystemPayloadFromContext_(userText, imageBlobs, combinedContext, todayLogsText);
 

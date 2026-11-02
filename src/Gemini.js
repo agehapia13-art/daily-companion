@@ -253,12 +253,12 @@ function getDefaultPromptLite() {
    - "general_dialogue": 日常の雑談、感想、状況報告。
 
 4. focused_task_ids（今着目・提案・操作すべきタスクの選別）:
-   - 【提案・段取り時】:
-     * まとまった余白時間、過ごし方相談、「タスク消化」「作業」枠の最中では、以下の二軸でバランスよく選出（通常相談・作業枠時は最大3〜4件）：
-       ①【文脈・負荷適合タスク（2〜3件）】: ユーザーの発言で指定された条件（姿勢・場所・認知的/身体的負荷・所要時間）や現在の心身状態に合致する未完了タスク。
-       ②【期限留意タスク（1〜2件）】: 上記条件とは異なっていても、本日中に対処が必要な「本日期限（📅）」や「期限超過（⚠️）」の未完了タスク（見通し・リマインド用）。
-     * 一日のタイムスケジュール・段取り相談時は、起床から就寝までの各時間帯（午前・午後・夕方・夜）や5領域のバランスを考慮し、当日着手可能なタスクを網羅的に最大6〜8件選出。
-   - 【操作・更新・完了時】: ユーザー発言内で特定の未完了タスクについて言及（完了報告、更新依頼、優先度変更、提案順序指定「〜を優先度高めで提案してほしい」等）があった場合、タスク名のプロジェクトプレフィックス（「環境構築：」「家事：」等）や英数字の大文字小文字の差異を柔軟に吸収し、発言の中核キーワードに合致する未完了タスクのIDを必ず選出して配列で出力（例: ["T_..."]）。
+   - 【提案・段取り・見通し時】:
+     * 以下の二軸直交ルールに従って選出する：
+       ①【客観的時間制約軸（状況の鏡）】: 未完了タスク一覧のうち、「⚠️期限超過（過去日付）」および「📅本日期限（当日日付）」のタスクは、**件数上限なしで無条件に全件選出**する（見落とし・不可視化、リスケ相談や残存確認時のハルシネーションを完全根絶）。
+       ②【文脈・負荷適合軸（行動の触媒）】: 上記以外のタスク（未来期限または期限なし）の中から、ユーザーの発言条件（姿勢・場所・認知的/身体的負荷・所要時間）や現在の心身状態に合致するものを**最大2〜3件選出**する。
+     * ※一日のタイムスケジュール・段取り相談時は、起床から就寝までの各時間帯や5領域のバランスを考慮し、当日着手可能なタスクを網羅的に最大6〜8件選出。
+   - 【操作・更新・完了時】: ユーザー発言内で特定の未完了タスクについて言及（完了報告、更新依頼、優先度変更、提案順序指定「〜を優先度高めで提案してほしい」等）があった場合、タスク名のプロジェクトプレフィックス（「環境構築：」「家事：」等）や英数字の大文字小文字の差異を柔軟に吸収し、発言の中核キーワードに合致する未完了タスクのIDを必ず選出して配列で出力（例: ["T_..."]）。複数タスクへの言及があれば該当する全タスクのIDを含める。
    - 不要または該当なしの場合は空配列 [] を出力。
 
 5. need_db_action（実データベース・メモリー操作の要否）:
@@ -279,9 +279,9 @@ function getDefaultPromptLite() {
 
 9. health_status（当日の心身シグナル抽出）:
    - 当日ログおよび最新発言の事実から、"通常" / "低調" / "不調" を客観的に判定：
-     * "通常": 通常通り活動可能。日常的な空気や肌の乾燥、寒暖差、天気の感想、満腹感、一時的な軽い感覚などは「通常」として扱う。
-     * "低調": 軽い疲労感、眠気、集中力の低下など、活動自体は可能だがペース配慮（短時間・低負荷な行動）が適した状態。
-     * "不調": ★【タスクよりも休息を優先すべき体調】発熱、強い倦怠感、身体の痛み、明らかな体調不良、睡眠不足による激しい消耗など。本人が休みよりタスクやゲームを優先しようとしても、システムがセーフティとして介入し、活動を停止して休息・睡眠を最優先させるべき状態。
+     * "通常": 通常通り活動可能。日常的な空気や肌の乾燥、寒暖差、天気の感想、満腹・空腹、一時的な軽い感覚などは「通常」として扱う。
+     * "低調": ★【日常的な揺らぎ・省エネモード】寝不足、だるさ、軽い疲労感、肌や首の痒み、集中力低下など。活動自体は可能だが、負荷を下げて省エネで動くべき状態（仕事や身支度・軽食などの生活基盤は維持しつつ、余分な高負荷タスクや過密作業を控える）。
+     * "不調": ★【活動不能・緊急停止レベル】発熱、起き上がれないほどの激痛、めまい、嘔吐、危険な過労など、物理的に活動が破綻している状態。仕事を休む・受診するなど、社会生活の停止・引き算セーフティが必要な深刻な状態。
 
 10. weather_relevance（屋外・天気の関与判定）:
    - 外出・移動の言及、天気・気温・気圧の質問、または屋外活動（散歩・買い物等）の可能性がある場合は true、室内完結のやり取りなら false。
@@ -316,6 +316,7 @@ function getDefaultPromptCore() {
 - 準備行動と本番行動の分離: 機器の稼働や下準備などの「準備・トリガー行動」を「本番の行動」そのものと混同しない。準備中は手元が空いている（または進行中である）ことを前提に文脈を捉える。
 - 独自用語の厳守: コンテキストの【用語辞書】にある定義・属性を正確に守り、一般名詞や別作品と混同しない。
 - 時間の鏡の自然な扱い（時報アナウンスの厳禁）: 現在時刻や就寝（23:00）・境界までの残り時間は、あなたの「内的な状況把握・引き際の判断材料」として心の中で使用してください。返信の冒頭などで機械的に「現在〇〇時ですので〜」「現在〇〇時で、残り〇〇分です」と時報のようにオウム返し・読み上げすることは厳禁です。時間を言葉にするのは、「22:45を目安にひと区切りつけましょう」「そろそろ寝る準備に入りましょう」など、引き際を爽やかに見守る時や、相手から時間を尋ねられた時だけに絞り、自然な対話として溶け込ませてください。
+- 生活境界の移行バッファ（予定前の準備所要時間の逆算）: 固定予定（仕事・外出など）を控えている時間帯は、「予定開始時刻」そのものではなく、「朝食・身支度・PC起動・移動等に必要な準備所要時間」を差し引いた【準備開始境界】として時間を捉えてください。予定の直前（始業前など）に「予定まで休んでいて」と放置して時間の境界を融解（タイムブラインドネス）させることは厳禁であり、予定に向けた無理のない立ち上げ・身支度の着手を促してください（低調時は軽食・最低限の身支度に留めて省エネで準備するよう寄り添う）。
 - 月報通知: コンテキストの【月報通知フラグ】が TRUE の場合は、返信の末尾に「先月の振り返りまとめをNotionにまとめておきました！」と添える。
 
 【出力形式】
@@ -465,6 +466,19 @@ function getDefaultPromptDb() {
  * @private
  */
 function getMicroDbSchema_(dbTargetType, customDbPrompt) {
+  if (dbTargetType === 'task_all' || dbTargetType === 'task_mixed') {
+    return `【データベース操作仕様: タスク操作（追加・更新・完了・破棄）】
+発言内容に応じて、必要なタスク操作を task_actions に配列で出力してください（完了・更新・追加の混在も可）：
+{
+  "reply_text": "【必須】ユーザーへの返信文",
+  "task_actions": [
+    { "action": "complete", "task_id": "T_...", "title": "完了タスク名" },
+    { "action": "update", "task_id": "T_...", "target_title": "対象名", "new_title": "新タイトル", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" },
+    { "action": "add", "title": "対象：具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" },
+    { "action": "delete", "task_id": "T_...", "title": "破棄タスク名" }
+  ]
+}`;
+  }
   if (dbTargetType === 'task_complete') {
     return `【データベース操作仕様: タスク完了】
 タスクを完了した場合は、以下のJSONキーを出力してください：
@@ -585,7 +599,8 @@ function getDefaultPromptRelief() {
   return `【特別介入モード: 引き算・リスケ・心身回復の最優先（セーフティ発動）】
 - 現在、客観的に【タスクや娯楽よりも休息を優先すべき体調】（発熱、強い倦怠感、身体の痛み、体調不良、危険な過労・消耗など）と判断されています。
 - 本人が休みよりゲームやタスク、作業を優先しようとしていても、システムが愛のある「引き算のセーフティ」として毅然と介入してください。
-- タスクの消化や活動の遂行を促すことはやめ、「今日はやめておきましょう」「別日に回して、今は回復と休息を最優先にしましょう」という『引き算・撤退の意思決定』をシステム側から能動的に提案し、罪悪感のない休息を全面的に肯定してください。
+- ★引き算の対象と生活基盤の峻別: 引き算の対象は「余分な課題、過密な作業、高負荷な運動や娯楽」です。「水分補給、食事、身支度」は健康と生命維持の基盤であるため引き算の対象外です。これらを放棄させて布団に放置することは厳禁であり、「温かい水分を一口飲む」「軽食にする」「必要最低限の身支度だけ済ませる」といった省エネでの立ち上げを支えてください。
+- タスクの消化や過密な活動の遂行を促すことはやめ、「今日はやめておきましょう」「別日に回して、今は回復と休息を最優先にしましょう」という『引き算・撤退の意思決定』をシステム側から能動的に提案し、罪悪感のない休息を全面的に肯定してください。
 - もし本日期限のタスクがある場合も、無理に今日やらせず、明日以降へのリスケジュールを軽やかに促してください。`;
 }
 
@@ -821,8 +836,15 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
 
   // 3-3. DB操作仕様 ＆ JSONスキーマ（ピンポイント・マイクロスキーマ適用で大幅節約）
   if (needDbModule) {
+    const isCompletionWord = /(終|終わ|完了|できた|片付|回した|引いた|飲んだ|やった)/.test(userText || '');
+    const isUpdateWord = /(リスケ|延期|明日に|変えて|更新|優先)/.test(userText || '');
+    const isAddWord = /(タスク追加|タスク化|入れておいて|追加して)/.test(userText || '');
+    const isMultipleTaskOps = (isCompletionWord && isUpdateWord) || (isCompletionWord && isAddWord) || (isUpdateWord && isAddWord);
+
     let effectiveTargetType = (liteResult && liteResult.db_target_type) ? liteResult.db_target_type : 'none';
-    if (matchedCompletedTasks.length > 0) {
+    if (isMultipleTaskOps) {
+      effectiveTargetType = 'task_all';
+    } else if (matchedCompletedTasks.length > 0) {
       effectiveTargetType = 'task_complete';
     } else if (effectiveTargetType === 'none' && hasStatedGoal) {
       effectiveTargetType = 'task_add';
@@ -887,35 +909,66 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     contextLines.push(`【気圧急降下】: ${pressureAlertVal === 'TRUE' ? '急降下中(注意)' : '安定'}`);
   }
 
-  // タスクの選別注入（Liteのキュレーションまたは完了照合タスクのみ注入し、機械的注入・sliceは完全撤廃）
-  let tasksToInject = [];
+  // ----------------------------------------------------
+  // タスクの選別注入: 【操作対象 (Operation)】と【提案候補 (Suggestion)】の完全直交分離
+  // ----------------------------------------------------
+  let operationTasks = [];
+  let suggestionTasks = [];
 
-  if (phase === 'PHASE_A' || phase === 'PHASE_B') {
-    // 進行中保護 or 即時送り出し: 既存タスクの提案・提示は一切不要
-    tasksToInject = [];
-  } else if (liteResult && liteResult.focused_task_ids && liteResult.focused_task_ids.length > 0) {
-    // Liteが状況・緊急度に合わせてキュレーションした着目・提案・操作タスク（Liteに一本化）
-    tasksToInject = (allUncompletedTasks || []).filter(t => liteResult.focused_task_ids.indexOf(t.id) !== -1);
-  } else if (matchedCompletedTasks.length > 0) {
-    // 完了報告でLiteがIDを返さなかった場合のセーフティネット（一致したタスクのみピンポイント注入）
-    tasksToInject = matchedCompletedTasks.slice(0, 2);
-  } else if (liteResult && (liteResult.db_target_type === 'task_complete' || liteResult.db_target_type === 'task_update' || liteResult.db_target_type === 'task_delete')) {
-    // タスク操作対象だがLiteがIDを返さなかった場合のフォールバック（発言キーワード合致タスクをファジー抽出）
-    const matched = (allUncompletedTasks || []).filter(t => {
-      if (!t.title || !userText) return false;
-      const u = userText.toLowerCase();
-      const rawTitle = t.title.toLowerCase();
-      if (u.includes(rawTitle)) return true;
-      const cleanTitle = rawTitle.replace(/^[^：:]+[：:]\s*/, '').replace(/（[^）]+）|\([^)]+\)/g, '').trim();
-      if (cleanTitle && u.includes(cleanTitle)) return true;
-      const coreWord = cleanTitle.replace(/(の導入|の検討|の対応|の作成|の消化|のクリア|の購入|の確認|の掃除|の手入れ|を読む|を見る|の見学|の周回)/g, '').trim();
-      return (coreWord.length >= 2 && u.includes(coreWord));
-    });
-    tasksToInject = matched.length > 0 ? matched.slice(0, 2) : [];
-  } else {
-    // 通常の余白・対話時: Liteがタスクを選定しなかった場合は一切注入しない（機械的な注入は全廃）
-    tasksToInject = [];
+  // ① 【操作対象タスク (Operation Target)】: フェーズに関係なく、DB操作・完了・更新要求があれば100%抽出
+  if (needDbModule) {
+    if (liteResult && liteResult.focused_task_ids && liteResult.focused_task_ids.length > 0) {
+      const mentioned = (allUncompletedTasks || []).filter(t => {
+        if (liteResult.focused_task_ids.indexOf(t.id) === -1) return false;
+        if (!userText) return true;
+        const u = userText.toLowerCase();
+        const cleanTitle = (t.title || '').replace(/^[^：:]+[：:]\s*/, '').replace(/（[^）]+）|\([^)]+\)/g, '').trim().toLowerCase();
+        if (cleanTitle && (u.includes(cleanTitle) || cleanTitle.includes(u))) return true;
+        const coreWord = cleanTitle.replace(/(の導入|の検討|の対応|の作成|の消化|のクリア|の購入|の確認|の掃除|の手入れ|を読む|を見る|の見学|の周回)/g, '').trim();
+        return (coreWord.length >= 2 && u.includes(coreWord));
+      });
+      if (mentioned.length > 0) {
+        operationTasks = mentioned;
+      } else if (tags.indexOf('DB依頼') !== -1 || (liteResult && liteResult.need_db_action)) {
+        operationTasks = (allUncompletedTasks || []).filter(t => liteResult.focused_task_ids.indexOf(t.id) !== -1);
+      }
+    }
+    if (operationTasks.length === 0) {
+      if (matchedCompletedTasks.length > 0) {
+        operationTasks = matchedCompletedTasks;
+      } else {
+        const fuzzyMatched = (allUncompletedTasks || []).filter(t => {
+          if (!t.title || !userText) return false;
+          const u = userText.toLowerCase();
+          const rawTitle = t.title.toLowerCase();
+          if (u.includes(rawTitle)) return true;
+          const cleanTitle = rawTitle.replace(/^[^：:]+[：:]\s*/, '').replace(/（[^）]+）|\([^)]+\)/g, '').trim();
+          if (cleanTitle && u.includes(cleanTitle)) return true;
+          const coreWord = cleanTitle.replace(/(の導入|の検討|の対応|の作成|の消化|のクリア|の購入|の確認|の掃除|の手入れ|を読む|を見る|の見学|の周回)/g, '').trim();
+          return (coreWord.length >= 2 && u.includes(coreWord));
+        });
+        if (fuzzyMatched.length > 0) {
+          operationTasks = fuzzyMatched;
+        }
+      }
+    }
   }
+
+  // ② 【提案候補タスク (Suggestion Cards)】: 余白・相談・通常対話（PHASE_C / PHASE_D）の時のみ注入
+  // ※PHASE_A（進行中保護）や PHASE_B（即時送り出し）では、モメンタムを邪魔しないため新規提案カードは0件
+  if (phase === 'PHASE_C' || phase === 'PHASE_D') {
+    if (liteResult && liteResult.focused_task_ids && liteResult.focused_task_ids.length > 0) {
+      suggestionTasks = (allUncompletedTasks || []).filter(t => liteResult.focused_task_ids.indexOf(t.id) !== -1);
+    }
+  } else {
+    suggestionTasks = [];
+  }
+
+  // ③ マージ（重複排除）
+  const taskMap = {};
+  operationTasks.forEach(t => { if (t && t.id) taskMap[t.id] = t; });
+  suggestionTasks.forEach(t => { if (t && t.id) taskMap[t.id] = t; });
+  const tasksToInject = Object.keys(taskMap).map(id => taskMap[id]);
 
   // 買物リスト・インプットストックの条件付き注入
   const needShopping = (phase === 'PHASE_C' && tags.indexOf('過ごし方相談') !== -1) ||

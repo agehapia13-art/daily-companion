@@ -7,6 +7,7 @@
  *   node scripts/sheet-cli.js get-memory [key]
  *   node scripts/sheet-cli.js set-memory <key> <value>
  *   node scripts/sheet-cli.js get-logs [limit]
+  node scripts/sheet-cli.js get-tasks [filterStatus]
  */
 
 const fs = require('fs');
@@ -87,17 +88,38 @@ async function setMemory(key, value) {
   }
 }
 
-async function getLogs(limit = 10) {
+async function getTasks(filterStatus) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'logs!A2:E'
+    range: 'tasks!A2:H100'
   });
   const rows = res.data.values || [];
-  const latest = rows.slice(-limit);
-  console.log(`=== 最新会話ログ (${latest.length}件) ===`);
+  console.log(`=== タスク一覧 (全${rows.length}件${filterStatus ? '・フィルタ: ' + filterStatus : ''}) ===`);
+  rows.forEach((r, i) => {
+    const [id, title, dueDate, status, createdDate, completedDate, memo, remindContext] = r;
+    if (!filterStatus || status === filterStatus) {
+      console.log(`[Row ${i + 2}] [${id || ''}] ${title || ''} | 期限: ${dueDate || 'なし'} | 状態: ${status || ''} | 作成: ${createdDate || ''} | 完了: ${completedDate || ''} | メモ: ${memo || ''} | 目安: ${remindContext || ''}`);
+    }
+  });
+}
+
+async function getLogs(limit = 10, searchKeyword = '') {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'logs!A2:I'
+  });
+  const rows = res.data.values || [];
+  let filtered = rows;
+  if (searchKeyword) {
+    filtered = rows.filter(r => (r[2] || '').includes(searchKeyword) || (r[4] || '').includes(searchKeyword));
+  }
+  const latest = filtered.slice(-limit);
+  console.log(`=== 会話ログ詳細 (${latest.length}件) ===`);
   for (const r of latest) {
+    console.log(`----------------------------------------`);
     console.log(`[${r[0] || ''}] User: ${r[2] || ''}`);
-    if (r[4]) console.log(`       AI: ${r[4].replace(/\n/g, ' ')}`);
+    console.log(`AI: ${r[4] || ''}`);
+    console.log(`Tokens: prompt=${r[5] || ''}, cand=${r[6] || ''}, cache=${r[7] || ''}, total=${r[8] || ''}`);
   }
 }
 
@@ -158,7 +180,12 @@ async function main() {
     }
     case 'get-logs': {
       const limit = parseInt(arg1 || '10', 10);
-      await getLogs(limit);
+      const search = arg2 || '';
+      await getLogs(limit, search);
+      break;
+    }
+    case 'get-tasks': {
+      await getTasks(arg1);
       break;
     }
     default:

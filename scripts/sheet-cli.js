@@ -2,7 +2,8 @@
  * scripts/sheet-cli.js - Antigravity用スプレッドシート直接操作CLIツール
  * 
  * 使用例:
- *   node scripts/sheet-cli.js get-prompt [moduleKey]
+ *   node scripts/sheet-cli.js sync-prompts
+  node scripts/sheet-cli.js get-prompt [moduleKey]
  *   node scripts/sheet-cli.js set-prompt <moduleKey> <filePath|text>
  *   node scripts/sheet-cli.js get-memory [key]
  *   node scripts/sheet-cli.js set-memory <key> <value>
@@ -161,6 +162,31 @@ async function main() {
       await setMemory(targetKey, promptContent);
       break;
     }
+    case 'sync-prompts': {
+      console.log('🔄 コード上の最新デフォルトプロンプトを読み込み中...');
+      const vm = require('vm');
+      const geminiCode = fs.readFileSync(path.resolve(__dirname, '../src/Gemini.js'), 'utf8');
+      const sandbox = { Logger: console, Utilities: { formatDate: () => '' } };
+      vm.createContext(sandbox);
+      vm.runInContext(geminiCode, sandbox);
+
+      const prompts = {
+        prompt_lite: sandbox.getDefaultPromptLite(),
+        prompt_core: sandbox.getDefaultPromptCore(),
+        prompt_phase_a: sandbox.getDefaultPromptPhaseA(),
+        prompt_phase_b: sandbox.getDefaultPromptPhaseB(),
+        prompt_phase_c: sandbox.getDefaultPromptPhaseC(),
+        prompt_phase_d: sandbox.getDefaultPromptPhaseD(),
+        prompt_db: sandbox.getDefaultPromptDb(),
+        prompt_relief: sandbox.getDefaultPromptRelief()
+      };
+
+      for (const [key, val] of Object.entries(prompts)) {
+        await setMemory(key, val);
+      }
+      console.log('🎉 全8モジュールのプロンプトをスプレッドシートの memory シートに同期しました！');
+      break;
+    }
     case 'get-memory': {
       const memory = await getMemory();
       if (arg1) {
@@ -192,6 +218,7 @@ async function main() {
     default:
       console.log(`
 使用可能なコマンド:
+  node scripts/sheet-cli.js sync-prompts
   node scripts/sheet-cli.js get-prompt [moduleKey]
   node scripts/sheet-cli.js set-prompt <moduleKey> <filePath|text>
   node scripts/sheet-cli.js get-memory [key]

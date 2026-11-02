@@ -257,6 +257,8 @@ Googleアカウントの権限設定・スコープ承認が必要となるた�
 
 - **Antigravity（AI）からの直接書き換え**:
   ```bash
+  # コード上の全プロンプトをスプレッドシートへ一括同期
+  node scripts/sheet-cli.js sync-prompts
   # モジュール一覧の確認
   node scripts/sheet-cli.js get-prompt
   # 特定モジュールの確認

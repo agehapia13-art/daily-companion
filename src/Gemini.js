@@ -317,6 +317,7 @@ function getDefaultPromptCore() {
 - 独自用語の厳守: コンテキストの【用語辞書】にある定義・属性を正確に守り、一般名詞や別作品と混同しない。
 - 時間の鏡の自然な扱い（時報アナウンスの厳禁）: 現在時刻や就寝（23:00）・境界までの残り時間は、あなたの「内的な状況把握・引き際の判断材料」として心の中で使用してください。返信の冒頭などで機械的に「現在〇〇時ですので〜」「現在〇〇時で、残り〇〇分です」と時報のようにオウム返し・読み上げすることは厳禁です。時間を言葉にするのは、「22:45を目安にひと区切りつけましょう」「そろそろ寝る準備に入りましょう」など、引き際を爽やかに見守る時や、相手から時間を尋ねられた時だけに絞り、自然な対話として溶け込ませてください。
 - 生活境界の移行バッファ（予定前の準備所要時間の逆算）: 固定予定（仕事・外出など）を控えている時間帯は、「予定開始時刻」そのものではなく、「朝食・身支度・PC起動・移動等に必要な準備所要時間」を差し引いた【準備開始境界】として時間を捉えてください。予定の直前（始業前など）に「予定まで休んでいて」と放置して時間の境界を融解（タイムブラインドネス）させることは厳禁であり、予定に向けた無理のない立ち上げ・身支度の着手を促してください（低調時は軽食・最低限の身支度に留めて省エネで準備するよう寄り添う）。
+- 操作結果の二重復唱防止（トークン節約）: カレンダー登録やタスク操作（リスケ・完了等）を行った際は、システム通知行が末尾に自動表示されるため、返信本文（reply_text）で全予定や全タスクを箇条書きで二重に復唱しないこと。「タイスケをカレンダーに登録しました！」「〜件のタスクをリスケしました」など、要点を1〜2文でスッキリ完結させること。
 - 月報通知: コンテキストの【月報通知フラグ】が TRUE の場合は、返信の末尾に「先月の振り返りまとめをNotionにまとめておきました！」と添える。
 
 【出力形式】
@@ -414,27 +415,32 @@ function getDefaultPromptDb() {
 1. タスク操作 (task_actions):
    - 命名規則: 指示語を補い \`対象/プロジェクト：具体的な内容\` の形式で命名する。時間指定がある場合は末尾に \`（〜HH:mmまで）\` を明記する。
    - リマインド目安 (remind_context): 新規追加(add)や更新(update)の際、そのタスクを提案すべき最適なタイミング・状況（例: \`隙間15分・自室\`, \`夜・帰宅後\`, \`休日まとまった時間・PC\`, \`19時以降\` 等）を文脈から推論して必ず付与する。特に昼頃までの日中締切（\`〜11:59まで\` 等）があるタスクには \`締切前日夜 または 当日朝\` を設定する。
-   - ★タスク更新 (update): 期限やタイトルの変更だけでなく、ユーザーから「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の提案方針・優先度指定があった場合も、口頭の了解だけで済ませず必ず update を出力する。\`remind_context\` に優先度を反映した状況（例: \`直近の空き枠・最優先\`, \`休日PC・最優先\` 等）を設定し、\`memo\` に指定された背景・理由（例: \`昨今の情勢を考慮し優先度高め\` 等）を追記・更新する。
+   - ★タスク更新 (update) の差分パッチ原則: 変更するキーのみを出力してください（例: リスケなら \`task_id\` と \`due_date\` のみ出力）。指定のないキーはGAS側で既存値がそのまま保持されます。
+   - ★優先度・方針指定: ユーザーから「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の提案方針・優先度指定があった場合も、口頭の了解だけで済ませず必ず update を出力する。\`remind_context\` に優先度を反映した状況（例: \`直近の空き枠・最優先\`, \`休日PC・最優先\` 等）を設定し、\`memo\` に指定された背景・理由（例: \`昨今の情勢を考慮し優先度高め\` 等）を追記・更新する。
+   - タスク完了(complete)・破棄(delete): \`task_id\` を指定すれば \`title\` は省略可能。
 2. カレンダー操作 (calendar_actions):
    - 個人メインカレンダーのみ操作可能（家族共用カレンダーは読み取り専用）。
+   - 【出力最小化原則】: \`is_all_day: false\` や \`recurrence_days: []\` などのデフォルト値は省略する。同日の予定の場合、\`end_time\` は \`"HH:mm"\` 形式で出力してトークンを節約する。
    - 既存予定の変更時は、旧予定の \`delete\` と新予定の \`add\` をセットで出力する。
 3. 周期記録・生活習慣・辞書・プロファイル更新 (memory_updates):
    - ユーザーが \`cycle_stamps\` の登録活動（爪切り、外歩き・散歩、室内運動・フィットネス、読書、ピアノ、ギター、楽曲制作・DTM、ビジネスインプット等）を実施した報告があった場合は、\`cycle_stamps_updates\` に \`"項目名: YYYY-MM-DD"\` を出力して当日日付へ更新する。
    - ユーザーから食事・入浴・睡眠・余白や趣味などの生活リズムやこだわりについて変更・追加の指定があった場合は、\`lifestyle_habits\` に \`"[トピック名]: 更新後の内容"\` を出力して該当トピックを更新する。
    - ユーザーから住居・家族構成・勤務形態・通勤時間などの恒久的生活基盤について変更が指示された場合のみ、\`profile\` に更新後のプロファイル全文を出力する。
+4. 操作結果の二重復唱防止（トークン節約）:
+   - カレンダー登録やタスク操作（更新・完了等）を行った際は、システム通知が自動表示されるため、返信本文（\`reply_text\`）内で全予定や全タスクを箇条書きで二重復唱しないこと（「カレンダーに反映しました！」「〜件のタスクをリスケしました」等、要点を1〜2文でスッキリ完結させる）。
 
 {
-  "reply_text": "【必須】ユーザーへの返信文",
+  "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "image_summary": "（※画像添付時のみ）画像の客観的な内容要約",
   "task_actions": [
     { "action": "add", "title": "対象：具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安（例: 夜・自室 / 休日PC 等）" },
-    { "action": "update", "task_id": "T_...", "target_title": "対象名", "new_title": "新タイトル", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" },
-    { "action": "complete", "task_id": "T_...", "title": "完了タスク名" },
-    { "action": "delete", "task_id": "T_...", "title": "破棄タスク名" }
+    { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" },
+    { "action": "complete", "task_id": "T_..." },
+    { "action": "delete", "task_id": "T_..." }
   ],
   "calendar_actions": [
-    { "action": "add", "title": "予定名", "start_time": "YYYY-MM-DDTHH:mm:ss", "end_time": "YYYY-MM-DDTHH:mm:ss", "is_all_day": false, "recurrence_days": [] },
-    { "action": "delete", "title": "予定名", "date": "YYYY-MM-DD", "delete_series": false }
+    { "action": "add", "title": "予定名", "start_time": "YYYY-MM-DDTHH:mm:ss", "end_time": "HH:mm" },
+    { "action": "delete", "title": "予定名", "date": "YYYY-MM-DD" }
   ],
   "shopping_actions": [
     { "action": "add", "item": "品名", "category": "カテゴリ" },
@@ -469,23 +475,29 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
   if (dbTargetType === 'task_all' || dbTargetType === 'task_mixed') {
     return `【データベース操作仕様: タスク操作（追加・更新・完了・破棄）】
 発言内容に応じて、必要なタスク操作を task_actions に配列で出力してください（完了・更新・追加の混在も可）：
+- 【出力最小化・差分パッチ原則】:
+  * 完了(complete)・破棄(delete): task_id が分かっている場合は title を省略し、{ "action": "complete", "task_id": "T_..." } のみ出力。
+  * 更新(update): 変更するキーのみを出力（差分パッチ）。変更のない項目は出力しないこと（GAS側で指定のない項目は保持されます）。
+    - 例（リスケのみ）: { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }
+    - 例（優先度・リマインド変更）: { "action": "update", "task_id": "T_...", "remind_context": "直近の空き枠・最優先", "memo": "..." }
+    - 例（タイトル変更）: { "action": "update", "task_id": "T_...", "new_title": "新タイトル" }
 {
-  "reply_text": "【必須】ユーザーへの返信文",
+  "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "task_actions": [
-    { "action": "complete", "task_id": "T_...", "title": "完了タスク名" },
-    { "action": "update", "task_id": "T_...", "target_title": "対象名", "new_title": "新タイトル", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" },
+    { "action": "complete", "task_id": "T_..." },
+    { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" },
     { "action": "add", "title": "対象：具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" },
-    { "action": "delete", "task_id": "T_...", "title": "破棄タスク名" }
+    { "action": "delete", "task_id": "T_..." }
   ]
 }`;
   }
   if (dbTargetType === 'task_complete') {
     return `【データベース操作仕様: タスク完了】
-タスクを完了した場合は、以下のJSONキーを出力してください：
+タスクを完了した場合は、以下のJSONキーを出力してください（task_id がある場合は title 省略可）：
 {
   "reply_text": "【必須】ユーザーへの返信文",
   "task_actions": [
-    { "action": "complete", "task_id": "T_...", "title": "完了タスク名" }
+    { "action": "complete", "task_id": "T_..." }
   ]
 }`;
   }
@@ -504,21 +516,25 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
   if (dbTargetType === 'task_update') {
     return `【データベース操作仕様: タスク更新】
 タスクの更新・延期・優先度変更を行う場合は、以下のJSONキーを出力してください：
+- 【完全差分パッチ原則】: 変更するキーのみを出力してください。変更のない項目はキー自体を省略すること（GAS側で指定のない項目は保持されます）。
+  * 例（リスケのみ）: { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }
+  * 例（優先度・リマインド変更）: { "action": "update", "task_id": "T_...", "remind_context": "直近の空き枠・最優先", "memo": "..." }
+  * 例（タイトル変更）: { "action": "update", "task_id": "T_...", "new_title": "新タイトル" }
 - 「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の指定があった場合も、口頭の了解だけで済ませず必ず update を出力し、remind_context（例: 「直近の空き枠・最優先」「休日PC・最優先」等）と memo（背景・理由）を更新してください。
 {
-  "reply_text": "【必須】ユーザーへの返信文",
+  "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "task_actions": [
-    { "action": "update", "task_id": "T_...", "target_title": "対象名", "new_title": "新タイトル", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" }
+    { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }
   ]
 }`;
   }
   if (dbTargetType === 'task_delete') {
     return `【データベース操作仕様: タスク破棄】
-タスクを破棄・削除する場合は、以下のJSONキーを出力してください：
+タスクを破棄・削除する場合は、以下のJSONキーを出力してください（task_id がある場合は title 省略可）：
 {
   "reply_text": "【必須】ユーザーへの返信文",
   "task_actions": [
-    { "action": "delete", "task_id": "T_...", "title": "破棄タスク名" }
+    { "action": "delete", "task_id": "T_..." }
   ]
 }`;
   }
@@ -526,11 +542,15 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
     return `【データベース操作仕様: カレンダー予定】
 カレンダーの予定を追加・変更・削除する場合は、以下のJSONキーを出力してください：
 - 個人メインカレンダーのみ操作可能。変更時は旧予定の delete と新予定の add をセットで出力。
+- 【出力最小化原則】:
+  * is_all_day: false や recurrence_days: [] などのデフォルト値はキー自体を省略すること。
+  * 同日の予定の場合、end_time は "HH:mm" 形式（例: "14:00"）で出力してトークンを節約すること。
+  * 削除時、delete_series: false は省略可。
 {
-  "reply_text": "【必須】ユーザーへの返信文",
+  "reply_text": "【必須】ユーザーへの返信文（※登録した予定一覧の箇条書き復唱は不要。『カレンダーに反映しました！』等1〜2文で簡潔に完結）",
   "calendar_actions": [
-    { "action": "add", "title": "予定名", "start_time": "YYYY-MM-DDTHH:mm:ss", "end_time": "YYYY-MM-DDTHH:mm:ss", "is_all_day": false, "recurrence_days": [] },
-    { "action": "delete", "title": "予定名", "date": "YYYY-MM-DD", "delete_series": false }
+    { "action": "add", "title": "予定名", "start_time": "YYYY-MM-DDTHH:mm:ss", "end_time": "HH:mm" },
+    { "action": "delete", "title": "予定名", "date": "YYYY-MM-DD" }
   ]
 }`;
   }

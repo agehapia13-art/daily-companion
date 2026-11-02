@@ -106,7 +106,7 @@ async function getTasks(filterStatus) {
 async function getLogs(limit = 10, searchKeyword = '') {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'logs!A2:I'
+    range: 'logs!A2:M'
   });
   const rows = res.data.values || [];
   let filtered = rows;
@@ -119,7 +119,8 @@ async function getLogs(limit = 10, searchKeyword = '') {
     console.log(`----------------------------------------`);
     console.log(`[${r[0] || ''}] User: ${r[2] || ''}`);
     console.log(`AI: ${r[4] || ''}`);
-    console.log(`Tokens: prompt=${r[5] || ''}, cand=${r[6] || ''}, cache=${r[7] || ''}, total=${r[8] || ''}`);
+    console.log(`【Lite】Prompt: ${r[5] || 0}, Cand: ${r[6] || 0} | 【Flash】Prompt: ${r[8] || 0}, Cand(出力): ${r[9] || 0} | Total: ${r[11] || 0}`);
+    console.log(`Phase: ${r[12] || ''}`);
   }
 }
 

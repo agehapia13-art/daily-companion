@@ -421,6 +421,36 @@ function hasOfficeEventToday() {
 }
 
 /**
+ * イベント日時文字列を Date オブジェクトに変換
+ * "HH:mm" 形式（例: "14:00"）の場合は baseDate の年月日を補完
+ * @param {string|Date} timeStr
+ * @param {Date=} baseDate 補完用の基準日（省略時は今日）
+ * @return {Date}
+ * @private
+ */
+function parseEventDateTime_(timeStr, baseDate) {
+  if (!timeStr) return new Date();
+  if (timeStr instanceof Date) return timeStr;
+
+  const base = baseDate || new Date();
+  const str = String(timeStr).trim();
+
+  // "HH:mm" または "H:mm" 形式
+  const timeOnlyMatch = str.match(/^(\d{1,2}):(\d{2})$/);
+  if (timeOnlyMatch) {
+    return new Date(base.getFullYear(), base.getMonth(), base.getDate(), parseInt(timeOnlyMatch[1], 10), parseInt(timeOnlyMatch[2], 10), 0);
+  }
+
+  // "YYYY-MM-DD HH:mm" や ISO形式
+  const normalizedStr = (str.includes(' ') && !str.includes('T')) ? str.replace(' ', 'T') : str;
+  const parsed = new Date(normalizedStr);
+  if (!isNaN(parsed.getTime())) {
+    return parsed;
+  }
+  return new Date(str);
+}
+
+/**
  * カレンダー操作アクションを適用（メインカレンダーのみ対象。家族カレンダーは絶対に変更しない）
  * 単発予定（createEvent）および毎週の曜日指定定期予定（createEventSeries）に対応
  * @param {Array<Object>} actions
@@ -487,7 +517,7 @@ function applyCalendarActions(actions) {
         if (weekdayEnums.length > 0) {
           // 毎週の定期予定（EventSeries）として登録
           const recurrence = CalendarApp.newRecurrence().addWeeklyRule().onlyOnWeekdays(weekdayEnums);
-          const sDate = act.start_time ? new Date(act.start_time) : new Date();
+          const sDate = act.start_time ? parseEventDateTime_(act.start_time, new Date()) : new Date();
 
           // 既存の単発重複予定（同タイトル）が直近14日内にあれば事前クリーンアップして二重登録を防止
           const cleanupStart = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate(), 0, 0, 0);
@@ -499,25 +529,40 @@ function applyCalendarActions(actions) {
             }
           }
 
-          if (act.is_all_day) {
+          if (act.is_all_day === true || act.is_all_day === 'true') {
             defaultCal.createAllDayEventSeries(act.title, sDate, recurrence);
             results.push(`📅 カレンダー定期追加: ${act.title} (毎週${weekdayLabels.join('・')} / 終日)`);
           } else {
-            const eDate = act.end_time ? new Date(act.end_time) : new Date(sDate.getTime() + 60 * 60 * 1000);
+            let eDate;
+            if (act.end_time) {
+              eDate = parseEventDateTime_(act.end_time, sDate);
+              if (eDate.getTime() <= sDate.getTime()) {
+                eDate.setDate(eDate.getDate() + 1);
+              }
+            } else {
+              eDate = new Date(sDate.getTime() + 60 * 60 * 1000);
+            }
             defaultCal.createEventSeries(act.title, sDate, eDate, recurrence);
             const sTimeStr = Utilities.formatDate(sDate, 'Asia/Tokyo', 'HH:mm');
             const eTimeStr = Utilities.formatDate(eDate, 'Asia/Tokyo', 'HH:mm');
             results.push(`📅 カレンダー定期追加: ${act.title} (毎週${weekdayLabels.join('・')} ${sTimeStr}〜${eTimeStr})`);
           }
-        } else if (act.is_all_day) {
-          const d = act.start_time ? new Date(act.start_time) : new Date();
+        } else if (act.is_all_day === true || act.is_all_day === 'true') {
+          const d = act.start_time ? parseEventDateTime_(act.start_time, new Date()) : new Date();
           defaultCal.createAllDayEvent(act.title, d);
           const dateStr = Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd');
           results.push(`📅 カレンダー終日追加: ${act.title} (${dateStr})`);
         } else {
-          const sDate = act.start_time ? new Date(act.start_time) : new Date();
-          // end_timeが指定されていない場合は1時間後に設定
-          const eDate = act.end_time ? new Date(act.end_time) : new Date(sDate.getTime() + 60 * 60 * 1000);
+          const sDate = act.start_time ? parseEventDateTime_(act.start_time, new Date()) : new Date();
+          let eDate;
+          if (act.end_time) {
+            eDate = parseEventDateTime_(act.end_time, sDate);
+            if (eDate.getTime() <= sDate.getTime()) {
+              eDate.setDate(eDate.getDate() + 1);
+            }
+          } else {
+            eDate = new Date(sDate.getTime() + 60 * 60 * 1000);
+          }
           defaultCal.createEvent(act.title, sDate, eDate);
           const sStr = Utilities.formatDate(sDate, 'Asia/Tokyo', 'MM/dd HH:mm');
           const eStr = Utilities.formatDate(eDate, 'Asia/Tokyo', 'HH:mm');

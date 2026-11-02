@@ -490,25 +490,36 @@ function applyTaskActions(actions) {
       results.push(`📝 タスク追加: ${formattedTitle}${dueDate ? ` (期限: ${dueDate})` : ''}`);
     } else if (act.action === 'update') {
       const tasks = getTasks();
-      const searchTitle = act.target_title || act.title || '';
+      const searchTitle = act.target_title || (!act.new_title ? act.title : '') || '';
       for (let j = 0; j < tasks.length; j++) {
         const t = tasks[j];
         if (t.status === '未完了') {
           const matchById = act.task_id && t.id === act.task_id;
           const matchByTitle = searchTitle && (t.title.includes(searchTitle) || searchTitle.includes(t.title));
           if (matchById || matchByTitle) {
-            const newTitle = (act.new_title || act.title || t.title).trim();
-            const newDue = act.due_date !== undefined ? String(act.due_date || '').trim() : t.dueDate;
-            const newMemo = act.memo !== undefined ? String(act.memo || '').trim() : t.memo;
-            sheet.getRange(t.rowIndex, 2).setValue(newTitle);
-            sheet.getRange(t.rowIndex, 3).setValue(newDue);
-            sheet.getRange(t.rowIndex, 7).setValue(newMemo);
+            let updatedTitle = t.title;
+            // new_title が指定されている場合のみタイトル列（列2）を更新
+            if (act.new_title !== undefined && String(act.new_title).trim() !== '') {
+              updatedTitle = String(act.new_title).trim();
+              sheet.getRange(t.rowIndex, 2).setValue(updatedTitle);
+            }
+            // due_date が指定されている場合のみ期限列（列3）を更新
+            let updatedDue = t.dueDate;
+            if (act.due_date !== undefined) {
+              updatedDue = String(act.due_date || '').trim();
+              sheet.getRange(t.rowIndex, 3).setValue(updatedDue);
+            }
+            // memo が指定されている場合のみメモ列（列7）を更新
+            if (act.memo !== undefined) {
+              sheet.getRange(t.rowIndex, 7).setValue(String(act.memo || '').trim());
+            }
+            // remind_context が指定されている場合のみリマインド文脈（列8）を更新
             if (act.remind_context !== undefined) {
-              const newRemind = normalizeTaskRemindContext_(newTitle, act.remind_context);
+              const newRemind = normalizeTaskRemindContext_(updatedTitle, act.remind_context);
               sheet.getRange(t.rowIndex, 8).setValue(newRemind);
             }
-            const formattedTitle = formatTaskTitleWithBadge(newTitle);
-            results.push(`📝 タスク更新: ${formattedTitle}${newDue ? ` (期限: ${newDue})` : ''}`);
+            const formattedTitle = formatTaskTitleWithBadge(updatedTitle);
+            results.push(`📝 タスク更新: ${formattedTitle}${updatedDue ? ` (期限: ${updatedDue})` : ''}`);
             break;
           }
         }
@@ -519,7 +530,7 @@ function applyTaskActions(actions) {
         const t = tasks[j];
         if (t.status === '未完了') {
           const matchById = act.task_id && t.id === act.task_id;
-          const matchByTitle = act.title && t.title.includes(act.title);
+          const matchByTitle = act.title && (t.title.includes(act.title) || act.title.includes(t.title));
           if (matchById || matchByTitle) {
             sheet.getRange(t.rowIndex, 4).setValue('完了');
             sheet.getRange(t.rowIndex, 6).setValue(todayStr);
@@ -534,7 +545,7 @@ function applyTaskActions(actions) {
       for (let j = 0; j < tasks.length; j++) {
         const t = tasks[j];
         const matchById = act.task_id && t.id === act.task_id;
-        const matchByTitle = act.title && t.title.includes(act.title);
+        const matchByTitle = act.title && (t.title.includes(act.title) || act.title.includes(t.title));
         if (matchById || matchByTitle) {
           sheet.getRange(t.rowIndex, 4).setValue('破棄');
           const formattedTitle = formatTaskTitleWithBadge(t.title);

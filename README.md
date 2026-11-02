@@ -247,7 +247,7 @@ Googleアカウントの権限設定・スコープ承認が必要となるた�
    生活習慣や運動の具体肢は `lifestyle_habits` に、周期記録は `cycle_stamps` に集約し、プロンプト内へデータを癒着させない。
 
 #### 即時反映フロー
-プロンプトの調整や改善は、**GASの再デプロイを行わずに即座に本番反映**できます：
+プロンプトの調整や改善は、**GASの再デプロイを行わずに即座に本番反映**できます（※スプレッドシート `memory` タブのプロンプトがコード初期デフォルトより最優先適用されるため、コード改修時は同期が必要です）：
 
 - **Antigravity（AI）からの直接書き換え**:
   ```bash
@@ -257,10 +257,13 @@ Googleアカウントの権限設定・スコープ承認が必要となるた�
   node scripts/sheet-cli.js get-prompt prompt_phase_c
   # 特定モジュールの更新
   node scripts/sheet-cli.js set-prompt prompt_phase_c "新しいプロンプト内容"
+  # タスク一覧・ログの確認
+  node scripts/sheet-cli.js get-tasks 未完了
+  node scripts/sheet-cli.js get-logs 10 検索キーワード
   ```
 - **手動での直接編集**:
   スプレッドシートの `memory` タブを開き、対象モジュールのセルを直接編集しても即時反映されます。
-- **コードからの初期同期**:
+- **コードからの初期同期 / 本番昇格**:
   コード上の最新デフォルトプロンプト群をスプレッドシートへ一括同期したい場合は、GASエディタで `syncDefaultPromptsToSpreadsheet` を実行します。
 
 ### 4. 初期設定・検証テスト関数（`Setup.gs`）
@@ -271,7 +274,7 @@ Googleアカウントの権限設定・スコープ承認が必要となるた�
   - `setupLineRichMenuFromSetup`: LINEトーク画面下部にリッチメニューを登録・有効化
   - `syncDefaultPromptsToSpreadsheet`: コード上の最新全モジュールプロンプトをスプレッドシートの `memory` シートに一括同期
 - **検証テスト（完全ドライラン）**:
-  - `testCustomScenario`: 過去の会話ログや指定時刻（ターン）をシミュレートし、2段階アーキテクチャの推論・トークン消費・アクション出力を安全にドライラン検証
+  - `testCustomScenario`: 過去の会話ログ、指定時刻、および当時の未完了タスク一覧（`mockTasks`）をシミュレートし、本番データを汚さずに2段階アーキテクチャの推論・トークン消費・アクション出力を安全にドライラン検証
   - `testGeminiConnection`: LiteモデルとFlashモデルの両方のAPI接続・疎通確認
   - `testDailyBriefingOutput`: デイリーブリーフィング生成ドライラン
   - `testMonthlyReportDryRun`: 月報生成の完全ドライラン検証（Notion日報集約からGemini 3.8 Flashによる月間ジャーナルMarkdown生成までをNotion投稿なしで実行し、プレーンテキストとしてログ出力）

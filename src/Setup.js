@@ -168,6 +168,35 @@ function syncSystemPromptToSpreadsheet() {
  * - 新システム（2モデル体制: Lite + Flash）と旧システム（単一Flash 6,400文字）の応答・トークン・アクションを並列比較します。
  */
 function testCustomScenario() {
+  // 11/1当時の未完了タスク一覧を正確に再現（実スプレッドシートの現在データを汚さずに非破壊テスト）
+  const tasksAtNov1Noon = [
+    { id: 'T_20261031_155916_187', title: 'Reaper：MCP連携＆テーマ変更の続き（2時間以上・途中休憩あり）', dueDate: '2026-11-01', status: '未完了', memo: '', remindContext: '' },
+    { id: 'T_20261101_103644_129', title: 'モンスト：黄泉のツガイコラボガチャを引く（〜21:00）', dueDate: '2026-11-01', status: '未完了', memo: '', remindContext: '夜・団欒・余白（21:00頃）' },
+    { id: 'T_20261031_000521_979', title: '家事：洗濯物を畳む', dueDate: '2026-11-01', status: '未完了', memo: '', remindContext: '' },
+    { id: 'T_20261031_002956_580', title: '生活伴走システム：日報のトークン量検討', dueDate: '2026-10-31', status: '未完了', memo: '日報のトークン消費量の検証と検討', remindContext: '休日PC・作業時間' },
+    { id: 'T_20261015_224230_389', title: 'コスメ：メイクボックスの要件定義', dueDate: '2026-10-31', status: '未完了', memo: '', remindContext: '休日まとまった時間・自室' },
+    { id: 'T_20261101_085254_52', title: '生活伴走システム：月報の大袈裟な表現を抑制・調整', dueDate: '2026-11-01', status: '未完了', memo: 'プロンプト・文面調整', remindContext: '休日PC・作業時間' },
+    { id: 'T_20261101_001708_122', title: '乳液ボトル：洗浄・廃棄', dueDate: '2026-11-01', status: '未完了', memo: '空になったボトルの水洗いと分別廃棄', remindContext: 'タスク消化枠・昼' },
+    { id: 'T_20261014_222210_621', title: '個人事業主転向時の生命保険・保障の検討', dueDate: '2027-04-01', status: '未完了', memo: '', remindContext: '休日まとまった時間・PC' },
+    { id: 'T_20261013_204001_470', title: 'ヘアブラシの掃除', dueDate: '', status: '未完了', memo: '', remindContext: '隙間15分・自室' }
+  ];
+
+  const tasksAtNov1Night = [
+    { id: 'T_20261031_000521_979', title: '家事：洗濯物を畳む', dueDate: '2026-11-01', status: '未完了', memo: '', remindContext: '' },
+    { id: 'T_20261031_002956_580', title: '生活伴走システム：日報のトークン量検討', dueDate: '2026-10-31', status: '未完了', memo: '日報のトークン消費量の検証と検討', remindContext: '休日PC・作業時間' },
+    { id: 'T_20261015_224230_389', title: 'コスメ：メイクボックスの要件定義', dueDate: '2026-10-31', status: '未完了', memo: '', remindContext: '休日まとまった時間・自室' },
+    { id: 'T_20261101_085254_52', title: '生活伴走システム：月報の大袈裟な表現を抑制・調整', dueDate: '2026-11-01', status: '未完了', memo: 'プロンプト・文面調整', remindContext: '休日PC・作業時間' },
+    { id: 'T_20261031_155916_187', title: 'Reaper：MCP連携＆テーマ変更の続き（2時間以上・途中休憩あり）', dueDate: '2026-11-01', status: '未完了', memo: '', remindContext: '' },
+    { id: 'T_20261101_103644_129', title: 'モンスト：黄泉のツガイコラボガチャを引く（〜21:00）', dueDate: '2026-11-01', status: '未完了', memo: '', remindContext: '夜・団欒・余白（21:00頃）' },
+    { id: 'T_20261014_222210_621', title: '個人事業主転向時の生命保険・保障の検討', dueDate: '2027-04-01', status: '未完了', memo: '', remindContext: '休日まとまった時間・PC' }
+  ];
+
+  const tasksAtNov2Morning = [
+    { id: 'T_20261031_155916_187', title: 'Reaper：MCP連携＆テーマ変更の続き（2時間以上・途中休憩あり）', dueDate: '2026-11-01', status: '未完了', memo: '', remindContext: '' },
+    { id: 'T_20261101_103644_129', title: 'モンスト：黄泉のツガイコラボガチャを引く（〜21:00）', dueDate: '2026-11-01', status: '未完了', memo: '', remindContext: '夜・団欒・余白（21:00頃）' },
+    { id: 'T_20261031_000521_979', title: '家事：洗濯物を畳む', dueDate: '2026-11-02', status: '未完了', memo: '', remindContext: '平日の隙間・家事' }
+  ];
+
   const scenario = {
     name: '実測検証: 複合完了送り出し ＆ 期限タスク網羅リスケ ＆ 寝不足始業前トランジション',
     initialLogs: [
@@ -179,19 +208,23 @@ function testCustomScenario() {
     turns: [
       {
         time: '2026-11-01 12:54:17',
-        user: 'お昼前にReaper満喫したのでタスク完了にしといて　ちょっと13:00~13:30は昼寝してきます　カレンダー反映済み'
+        user: 'お昼前にReaper満喫したのでタスク完了にしといて　ちょっと13:00~13:30は昼寝してきます　カレンダー反映済み',
+        mockTasks: tasksAtNov1Noon
       },
       {
         time: '2026-11-01 22:52:47',
-        user: '洗濯物少し畳んだけどちょっと家族に1Passwordの使い方教えたりしてたので終わらなかった。期日超過してるタスクや本日中だった未完了タスクのリスケを提案して'
+        user: '洗濯物少し畳んだけどちょっと家族に1Passwordの使い方教えたりしてたので終わらなかった。期日超過してるタスクや本日中だった未完了タスクのリスケを提案して',
+        mockTasks: tasksAtNov1Night
       },
       {
         time: '2026-11-01 22:53:56',
-        user: '他に期日超過タスクや本日中タスクはもう無いね？'
+        user: '他に期日超過タスクや本日中タスクはもう無いね？',
+        mockTasks: tasksAtNov1Night
       },
       {
         time: '2026-11-02 09:08:40',
-        user: 'おはよう、寝坊しました。まだお布団です。あの後も痒くなって目が覚めたりして寝不足です'
+        user: 'おはよう、寝坊しました。まだお布団です。あの後も痒くなって目が覚めたりして寝不足です',
+        mockTasks: tasksAtNov2Morning
       }
     ]
   };
@@ -249,7 +282,12 @@ function runPromptScenario(scenario) {
     Logger.log(`\n--- 💬 Turn ${i + 1} [${timeLabel}] ---`);
     Logger.log(`User: ${turn.user}`);
 
-    const outcome = executeCompanionTurn(turn.user, [], runningLogs, testMemory, simulatedDate);
+    const turnMemory = Object.assign({}, testMemory);
+    if (turn.mockTasks || scenario.mockTasks) {
+      turnMemory._testMockTasks = turn.mockTasks || scenario.mockTasks;
+    }
+
+    const outcome = executeCompanionTurn(turn.user, [], runningLogs, turnMemory, simulatedDate);
     const meta = outcome.logMeta || {};
     const newReply = (outcome.primaryResult && outcome.primaryResult.reply_text) || '';
 

@@ -1128,7 +1128,9 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
   const boundaryInfo = getNextBoundaryInfo(now);
   const todayEvents = getTodayEventsList(now);
   const habitTopics = extractHabitTopicsList(memory.lifestyle_habits);
-  const allUncompletedTasks = getTasks('未完了');
+  const allUncompletedTasks = (memory && memory._testMockTasks && Array.isArray(memory._testMockTasks))
+    ? memory._testMockTasks
+    : getTasks('未完了');
 
   const precomputed = {
     now: now,

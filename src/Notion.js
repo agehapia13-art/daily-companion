@@ -38,15 +38,18 @@ function callNotionApi(endpoint, method, payload) {
 }
 
 /**
- * データベースのプロパティ定義から title型 および date型 のプロパティ名を動的特定
+ * データベースのプロパティ定義から title型、date型、rich_text型、multi_select型、select型のプロパティ名を動的特定
  * @param {string} databaseId
- * @return {Object} { titleKey: string, dateKey: string|null }
+ * @return {Object} { titleKey: string, dateKey: string|null, summaryKey: string|null, areasKey: string|null, toneKey: string|null }
  */
 function getDatabaseSchemaKeys(databaseId) {
   try {
     const dbInfo = callNotionApi(`/databases/${databaseId}`, 'get');
-    let titleKey = 'Name';
+    let titleKey = '名前';
     let dateKey = null;
+    let summaryKey = null;
+    let areasKey = null;
+    let toneKey = null;
 
     if (dbInfo && dbInfo.properties) {
       const propKeys = Object.keys(dbInfo.properties);
@@ -57,14 +60,45 @@ function getDatabaseSchemaKeys(databaseId) {
           titleKey = k;
         } else if (prop.type === 'date' && !dateKey) {
           dateKey = k;
+        } else if (prop.type === 'rich_text' && !summaryKey) {
+          summaryKey = k;
+        } else if (prop.type === 'multi_select' && !areasKey) {
+          areasKey = k;
+        } else if (prop.type === 'select' && !toneKey) {
+          toneKey = k;
         }
       }
     }
-    return { titleKey, dateKey };
+    return { titleKey, dateKey, summaryKey, areasKey, toneKey };
   } catch (e) {
     Logger.log(`DBスキーマ取得失敗 (${databaseId}): ${e.message}。デフォルトキーを使用します。`);
-    return { titleKey: 'Name', dateKey: 'Date' };
+    return { titleKey: '名前', dateKey: '日付', summaryKey: '概要', areasKey: '主な領域', toneKey: 'トーン' };
   }
+}
+
+/**
+ * 生成テキストの冒頭からメタデータJSONブロックとMarkdown本文を分離
+ * @param {string} text
+ * @return {Object} { metadata: Object, markdown: string }
+ */
+function extractReportMetadata_(text) {
+  if (!text) return { metadata: {}, markdown: '' };
+
+  const trimmed = text.trim();
+  const match = trimmed.match(/^```json\s*([\s\S]*?)\s*```\s*([\s\S]*)$/i);
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      return {
+        metadata: parsed || {},
+        markdown: (match[2] || '').trim()
+      };
+    } catch (e) {
+      Logger.log(`メタデータJSONパース失敗: ${e.message}`);
+    }
+  }
+
+  return { metadata: {}, markdown: trimmed };
 }
 
 /**
@@ -300,7 +334,8 @@ function markdownToNotionBlocks(markdown) {
 function createDailyReport(markdownContent, dateStr) {
   const config = getConfig();
   const schema = getDatabaseSchemaKeys(config.notionDailyDbId);
-  const blocks = markdownToNotionBlocks(markdownContent);
+  const { metadata, markdown } = extractReportMetadata_(markdownContent);
+  const blocks = markdownToNotionBlocks(markdown);
 
   const titleText = `${dateStr} 日報・生活記録`;
   const properties = {};
@@ -312,6 +347,27 @@ function createDailyReport(markdownContent, dateStr) {
   if (schema.dateKey) {
     properties[schema.dateKey] = {
       date: { start: dateStr }
+    };
+  }
+
+  // 概要プロパティ (rich_text: プレフィックスなし・改行なしの1文ストレート要約)
+  if (schema.summaryKey && metadata.summary) {
+    properties[schema.summaryKey] = {
+      rich_text: [{ text: { content: String(metadata.summary).trim() } }]
+    };
+  }
+
+  // 主な領域プロパティ (multi_select: グランドデザイン5領域)
+  if (schema.areasKey && Array.isArray(metadata.areas) && metadata.areas.length > 0) {
+    properties[schema.areasKey] = {
+      multi_select: metadata.areas.map(a => ({ name: String(a).trim() }))
+    };
+  }
+
+  // トーンプロパティ (select: 心身の調子・活動ペース)
+  if (schema.toneKey && metadata.tone) {
+    properties[schema.toneKey] = {
+      select: { name: String(metadata.tone).trim() }
     };
   }
 
@@ -438,7 +494,8 @@ function queryMonthlyReports(startDateStr, endDateStr) {
 function createMonthlyReport(markdownContent, monthStr) {
   const config = getConfig();
   const schema = getDatabaseSchemaKeys(config.notionMonthlyDbId);
-  const blocks = markdownToNotionBlocks(markdownContent);
+  const { metadata, markdown } = extractReportMetadata_(markdownContent);
+  const blocks = markdownToNotionBlocks(markdown);
 
   const titleText = `${monthStr} 月間ハイライト＆思い出ジャーナル`;
   const properties = {};
@@ -450,6 +507,28 @@ function createMonthlyReport(markdownContent, monthStr) {
   if (schema.dateKey) {
     properties[schema.dateKey] = {
       date: { start: `${monthStr}-01` }
+    };
+  }
+
+  // 月間サマリー (rich_text: カテゴリプレフィックス+改行区切りの複数行サマリー)
+  if (schema.summaryKey && metadata.summary) {
+    properties[schema.summaryKey] = {
+      rich_text: [{ text: { content: String(metadata.summary).trim() } }]
+    };
+  }
+
+  // 注力領域 (multi_select: グランドデザイン5領域)
+  if (schema.areasKey && Array.isArray(metadata.areas) && metadata.areas.length > 0) {
+    properties[schema.areasKey] = {
+      multi_select: metadata.areas.map(a => ({ name: String(a).trim() }))
+    };
+  }
+
+  // 月間リズム (select)
+  const rhythmValue = metadata.rhythm || metadata.tone;
+  if (schema.toneKey && rhythmValue) {
+    properties[schema.toneKey] = {
+      select: { name: String(rhythmValue).trim() }
     };
   }
 

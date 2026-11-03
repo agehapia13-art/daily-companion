@@ -462,10 +462,13 @@ function testDailyReportDryRun(targetDateStrOpt) {
   // 日本語＋Markdownのおおよそのトークン換算（1文字あたり約1〜1.2トークン）
   const estimatedTokens = Math.round(charCount * 1.15);
 
+  const { metadata, markdown } = extractReportMetadata_(dailyReportMarkdown);
+
   Logger.log(`✅ 日報生成完了 (${elapsedSec}秒)`);
-  Logger.log(`📊 出力文字数: ${charCount.toLocaleString()} 文字（概算: 約 ${estimatedTokens} トークン）\n`);
-  Logger.log('==================== 【生成された日報（プレーンテキスト）】 ====================\n');
-  Logger.log(dailyReportMarkdown);
+  Logger.log(`📊 出力文字数: ${charCount.toLocaleString()} 文字（概算: 約 ${estimatedTokens} トークン）`);
+  Logger.log(`🏷️ 【抽出されたNotionプロパティ】:\n${JSON.stringify(metadata, null, 2)}\n`);
+  Logger.log('==================== 【生成された日報（Notion本文）】 ====================\n');
+  Logger.log(markdown);
   Logger.log('\n================================================================================');
   Logger.log('💡 完全ドライランのため、Notion APIへの送信およびスプレッドシートの更新は一切行っていません。');
 
@@ -546,9 +549,12 @@ function testMonthlyReportDryRun(targetMonthStrOpt) {
   const monthlyJournalMarkdown = generateMonthlyJournalMarkdown(monthlyDataText, targetMonthStr, memory.dictionary);
   const elapsedSec = ((new Date().getTime() - startTime) / 1000).toFixed(1);
 
+  const { metadata, markdown } = extractReportMetadata_(monthlyJournalMarkdown);
+
   Logger.log(`✅ 月報生成完了 (${elapsedSec}秒)\n`);
-  Logger.log('==================== 【生成された月報（プレーンテキスト）】 ====================\n');
-  Logger.log(monthlyJournalMarkdown);
+  Logger.log(`🏷️ 【抽出されたNotionプロパティ】:\n${JSON.stringify(metadata, null, 2)}\n`);
+  Logger.log('==================== 【生成された月報（Notion本文）】 ====================\n');
+  Logger.log(markdown);
   Logger.log('\n================================================================================');
   Logger.log('💡 完全ドライランのため、Notion APIへの送信およびスプレッドシートの更新は一切行っていません。');
 }

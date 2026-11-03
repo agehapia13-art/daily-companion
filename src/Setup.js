@@ -553,6 +553,60 @@ function testMonthlyReportDryRun(targetMonthStrOpt) {
   Logger.log('💡 完全ドライランのため、Notion APIへの送信およびスプレッドシートの更新は一切行っていません。');
 }
 
+/**
+ * 手動実行用: 指定月の月報をNotion月報DBへ再生成・新規投稿
+ * - Notion日報DBから指定月（デフォルト: '2026-10'）の日報データを集約
+ * - 新プロンプト（等身大アーカイブ）でGemini 3.8 Flashにより月報Markdownを生成
+ * - Notion月報DB（NOTION_MONTHLY_DB_ID）へ実際に新規ページとして作成
+ * @param {string=} targetMonthStrOpt 例: '2026-10' (省略時は '2026-10')
+ * @return {Object} 作成されたNotionページ情報
+ */
+function recreateMonthlyReport(targetMonthStrOpt) {
+  const targetMonthStr = targetMonthStrOpt || '2026-10';
+
+  const [yearStr, monthNumStr] = targetMonthStr.split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthNumStr, 10);
+  const lastDay = new Date(year, month, 0).getDate();
+  const startDateStr = `${targetMonthStr}-01`;
+  const endDateStr = `${targetMonthStr}-${('0' + lastDay).slice(-2)}`;
+
+  Logger.log('============================================================');
+  Logger.log(`📝 【月報再作成・Notion本番投稿】 対象月: ${targetMonthStr}`);
+  Logger.log(`・集約期間: ${startDateStr} 〜 ${endDateStr}`);
+  Logger.log('============================================================');
+
+  // 1. Notion日報DBから該当期間の日報データを集約
+  Logger.log('📥 Notion日報DBから日報データを取得中...');
+  const monthlyDataText = queryMonthlyReports(startDateStr, endDateStr);
+  const charCount = monthlyDataText ? monthlyDataText.length : 0;
+  Logger.log(`✅ Notion日報集約完了: 約 ${charCount.toLocaleString()} 文字`);
+
+  if (!monthlyDataText || monthlyDataText.trim() === '' || monthlyDataText.includes('見つかりませんでした')) {
+    throw new Error(`対象期間（${startDateStr}〜${endDateStr}）の日報データがNotionから取得できませんでした。`);
+  }
+
+  // 2. 用語辞書取得
+  const memory = getMemory();
+
+  // 3. Gemini 3.8 Flash で月報Markdown生成
+  Logger.log('🤖 新プロンプトでGemini 3.8 Flashにより月間ジャーナルを生成中...');
+  const startTime = new Date().getTime();
+  const monthlyJournalMarkdown = generateMonthlyJournalMarkdown(monthlyDataText, targetMonthStr, memory.dictionary);
+  const elapsedSec = ((new Date().getTime() - startTime) / 1000).toFixed(1);
+  Logger.log(`✅ 月報生成完了 (${elapsedSec}秒)`);
+
+  // 4. Notion月報DBへ投稿
+  Logger.log('🚀 Notion月報データベースへ作成中...');
+  const result = createMonthlyReport(monthlyJournalMarkdown, targetMonthStr);
+  Logger.log(`🎉 Notion月報作成成功！ ページID: ${result.id}`);
+  Logger.log('==================== 【作成された月報】 ====================\n');
+  Logger.log(monthlyJournalMarkdown);
+  Logger.log('\n============================================================');
+
+  return result;
+}
+
 // =============================================================================
 // 内部ヘルパー関数（プライベート）
 // =============================================================================

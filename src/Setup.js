@@ -383,6 +383,96 @@ function testMidnightBatchSimulation() {
 }
 
 /**
+ * 手動テスト用: 日報生成の完全ドライラン検証（Notion投稿なし・プレーンテキスト出力）
+ * - スプレッドシートから指定日付（デフォルト: '2026-11-01'）のログ・完了タスク・消化ストックを取得
+ * - 該当データが空の場合は、11/1のリアルな検証用サンプルログを用いてGemini 3.8 Flashで生成
+ * - Notion APIへのPOSTは行わず、生成されたMarkdown、所要時間、文字数、概算トークン数を Logger.log に出力
+ * @param {string=} targetDateStrOpt 例: '2026-11-01' (省略時は '2026-11-01')
+ */
+function testDailyReportDryRun(targetDateStrOpt) {
+  const targetDateStr = targetDateStrOpt || '2026-11-01';
+
+  // 翌日未明（03:00まで）の日付を算出
+  const targetParts = targetDateStr.split('-');
+  const targetD = new Date(parseInt(targetParts[0], 10), parseInt(targetParts[1], 10) - 1, parseInt(targetParts[2], 10));
+  const nextD = new Date(targetD.getTime() + 24 * 60 * 60 * 1000);
+  const nextDateStr = Utilities.formatDate(nextD, 'Asia/Tokyo', 'yyyy-MM-dd');
+
+  Logger.log('============================================================');
+  Logger.log(`📊 【日報生成ドライラン検証】 対象日: ${targetDateStr}`);
+  Logger.log('============================================================');
+
+  // 1. スプレッドシートから該当日のログ・タスク・消化ストックを取得
+  let logsTarget = [];
+  let completedTasks = [];
+  let consumedInputs = [];
+
+  try {
+    const logsDay = getLogs(targetDateStr);
+    const logsNextEarly = getLogs(nextDateStr).filter(l => {
+      const tStr = l.timestampStr || '';
+      return tStr.includes(' 00:') || tStr.includes(' 01:') || tStr.includes(' 02:');
+    });
+    logsTarget = logsDay.concat(logsNextEarly);
+
+    const tasks = getTasks();
+    completedTasks = tasks.filter(t => t.status === '完了' && (t.completedDate === targetDateStr || t.completedDate === nextDateStr));
+
+    const inputStock = getInputStockList();
+    consumedInputs = inputStock.filter(inp => inp.status === '完' && (inp.consumedDate === targetDateStr || inp.consumedDate === nextDateStr));
+
+    Logger.log(`📥 スプレッドシート取得結果: ログ ${logsTarget.length}件 / 完了タスク ${completedTasks.length}件 / 消化ストック ${consumedInputs.length}件`);
+  } catch (err) {
+    Logger.log(`⚠️ スプレッドシート取得エラー: ${err.message}`);
+  }
+
+  // もしスプレッドシートからログが取得できなかった場合のフォールバック（11/1のリアルな検証用サンプルログ）
+  if (logsTarget.length === 0) {
+    Logger.log('ℹ️ 該当日のログがスプレッドシートから取得できなかったため、11/1検証用サンプルデータを使用してドライランを実行します。');
+    logsTarget = [
+      { timestamp: '2026-11-01 07:15:00', sender: 'user', message: 'おはよう！今日は11月の始まりだね。月初のタスク整理と制作作業を進めたいな' },
+      { timestamp: '2026-11-01 07:45:00', sender: 'user', message: '朝ごはん食べて、昨日のチェアの高さ微調整した。腰がかなり楽' },
+      { timestamp: '2026-11-01 10:30:00', sender: 'user', message: '生活伴走システムの日報プロンプトの改修案を整理中。重要度の反映とトークン削減の方向性が固まった' },
+      { timestamp: '2026-11-01 13:00:00', sender: 'user', message: 'お昼にうどん食べた。午後はReaper立ち上げて新曲のベースライン打ち込みに入る' },
+      { timestamp: '2026-11-01 16:45:00', sender: 'user', message: 'ベースラインの仮組み完了！グルーヴ感かなり良くなった。ちょっと休憩でぱずぎりのイベント触る' },
+      { timestamp: '2026-11-01 17:30:00', sender: 'user', message: 'ぱずぎりイベントで限定報酬ゲットできた。妹からLINE来て、夕飯の買い物頼まれたのでスーパー行ってくる' },
+      { timestamp: '2026-11-01 19:15:00', sender: 'user', message: '買い物から帰宅。夕飯は家族で鍋食べた。温まる' },
+      { timestamp: '2026-11-01 21:00:00', sender: 'user', message: 'シーツ洗濯物取り込んで、ストレッチ動画15分やった。明日は制作の続きと、ギターの基礎運指をしっかりやりたい' },
+      { timestamp: '2026-11-01 23:45:00', sender: 'user', message: 'そろそろ歯磨きしてお風呂入って寝る準備するね。おやすみ！' }
+    ];
+    completedTasks = [
+      { id: 'T_20261101_01', title: '生活伴走システム：日報プロンプト改修案の策定', memo: '重要度反映とトークン半減設計' },
+      { id: 'T_20261101_02', title: '夕飯の食材買い出し', memo: '鍋の具材（妹からの頼まれもの）' }
+    ];
+    consumedInputs = [
+      { type: 'ゲーム', title: '刀剣乱舞 ぱずぎり', memo: '11月限定イベント完走・報酬獲得' }
+    ];
+  }
+
+  // 2. memory を取得
+  const memory = getMemory();
+
+  // 3. Gemini 3.8 Flash で新プロンプトによる日報Markdownを生成
+  Logger.log('\n🤖 Gemini 3.8 Flash で新設計日報（Markdown）を生成中...');
+  const startTime = new Date().getTime();
+  const dailyReportMarkdown = generateDailyReportMarkdown(logsTarget, completedTasks, memory, targetDateStr, consumedInputs);
+  const elapsedSec = ((new Date().getTime() - startTime) / 1000).toFixed(1);
+
+  const charCount = dailyReportMarkdown.length;
+  // 日本語＋Markdownのおおよそのトークン換算（1文字あたり約1〜1.2トークン）
+  const estimatedTokens = Math.round(charCount * 1.15);
+
+  Logger.log(`✅ 日報生成完了 (${elapsedSec}秒)`);
+  Logger.log(`📊 出力文字数: ${charCount.toLocaleString()} 文字（概算: 約 ${estimatedTokens} トークン）\n`);
+  Logger.log('==================== 【生成された日報（プレーンテキスト）】 ====================\n');
+  Logger.log(dailyReportMarkdown);
+  Logger.log('\n================================================================================');
+  Logger.log('💡 完全ドライランのため、Notion APIへの送信およびスプレッドシートの更新は一切行っていません。');
+
+  return dailyReportMarkdown;
+}
+
+/**
  * 手動テスト用: 月報生成の完全ドライラン検証（Notion投稿なし・プレーンテキスト出力）
  * - Notion日報DBから指定月（未指定時は直近月、例: 2026-10）の日報データを集約
  * - Gemini 3.8 Flash で月間ジャーナル（Markdown）を生成

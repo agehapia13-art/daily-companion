@@ -505,8 +505,14 @@ function createMonthlyReport(markdownContent, monthStr) {
   };
 
   if (schema.dateKey) {
+    // 月報の日付は「月末（例: 2026-10-31）」に設定（カレンダー等で月末の締めくくりとして表示）
+    const [yearStr, monthNumStr] = monthStr.split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthNumStr, 10);
+    const lastDay = new Date(year, month, 0).getDate();
+    const lastDateStr = `${monthStr}-${('0' + lastDay).slice(-2)}`;
     properties[schema.dateKey] = {
-      date: { start: `${monthStr}-01` }
+      date: { start: lastDateStr }
     };
   }
 

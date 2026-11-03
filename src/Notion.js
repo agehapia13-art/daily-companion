@@ -40,7 +40,7 @@ function callNotionApi(endpoint, method, payload) {
 /**
  * データベースのプロパティ定義から title型、date型、rich_text型、multi_select型、select型のプロパティ名を動的特定
  * @param {string} databaseId
- * @return {Object} { titleKey: string, dateKey: string|null, summaryKey: string|null, areasKey: string|null, toneKey: string|null }
+ * @return {Object} { titleKey: string, dateKey: string|null, summaryKey: string|null, areasKey: string|null, toneKey: string|null, workStyleKey: string|null }
  */
 function getDatabaseSchemaKeys(databaseId) {
   try {
@@ -50,6 +50,7 @@ function getDatabaseSchemaKeys(databaseId) {
     let summaryKey = null;
     let areasKey = null;
     let toneKey = null;
+    let workStyleKey = null;
 
     if (dbInfo && dbInfo.properties) {
       const propKeys = Object.keys(dbInfo.properties);
@@ -60,19 +61,31 @@ function getDatabaseSchemaKeys(databaseId) {
           titleKey = k;
         } else if (prop.type === 'date' && !dateKey) {
           dateKey = k;
-        } else if (prop.type === 'rich_text' && !summaryKey) {
-          summaryKey = k;
-        } else if (prop.type === 'multi_select' && !areasKey) {
-          areasKey = k;
-        } else if (prop.type === 'select' && !toneKey) {
-          toneKey = k;
+        } else if (prop.type === 'rich_text') {
+          if (!summaryKey || k.includes('サマリー') || k.includes('概要')) {
+            summaryKey = k;
+          }
+        } else if (prop.type === 'multi_select') {
+          if (!areasKey || k.includes('領域')) {
+            areasKey = k;
+          }
+        } else if (prop.type === 'select') {
+          if (k.includes('形態') || k.includes('スタイル') || k.includes('出社')) {
+            workStyleKey = k;
+          } else if (k.includes('トーン') || k.includes('リズム') || k.includes('調子')) {
+            toneKey = k;
+          } else if (!toneKey) {
+            toneKey = k;
+          } else if (!workStyleKey) {
+            workStyleKey = k;
+          }
         }
       }
     }
-    return { titleKey, dateKey, summaryKey, areasKey, toneKey };
+    return { titleKey, dateKey, summaryKey, areasKey, toneKey, workStyleKey };
   } catch (e) {
     Logger.log(`DBスキーマ取得失敗 (${databaseId}): ${e.message}。デフォルトキーを使用します。`);
-    return { titleKey: '名前', dateKey: '日付', summaryKey: '概要', areasKey: '主な領域', toneKey: 'トーン' };
+    return { titleKey: '名前', dateKey: '日付', summaryKey: '概要', areasKey: '主な領域', toneKey: 'トーン', workStyleKey: '形態' };
   }
 }
 
@@ -337,7 +350,16 @@ function createDailyReport(markdownContent, dateStr) {
   const { metadata, markdown } = extractReportMetadata_(markdownContent);
   const blocks = markdownToNotionBlocks(markdown);
 
-  const titleText = `${dateStr} 日報・生活記録`;
+  const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+  let dayOfWeek = '';
+  if (dateStr) {
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      dayOfWeek = dayNames[d.getDay()] || '';
+    }
+  }
+  const titleText = dayOfWeek ? `${dateStr}(${dayOfWeek}) 日報・生活記録` : `${dateStr} 日報・生活記録`;
   const properties = {};
 
   properties[schema.titleKey] = {
@@ -357,7 +379,7 @@ function createDailyReport(markdownContent, dateStr) {
     };
   }
 
-  // 主な領域プロパティ (multi_select: グランドデザイン5領域)
+  // 主な領域プロパティ (multi_select: 8大領域)
   if (schema.areasKey && Array.isArray(metadata.areas) && metadata.areas.length > 0) {
     properties[schema.areasKey] = {
       multi_select: metadata.areas.map(a => ({ name: String(a).trim() }))
@@ -368,6 +390,13 @@ function createDailyReport(markdownContent, dateStr) {
   if (schema.toneKey && metadata.tone) {
     properties[schema.toneKey] = {
       select: { name: String(metadata.tone).trim() }
+    };
+  }
+
+  // 形態プロパティ (select: 🏢 出社, 🏠 リモート, 🌿 休日)
+  if (schema.workStyleKey && metadata.work_style) {
+    properties[schema.workStyleKey] = {
+      select: { name: String(metadata.work_style).trim() }
     };
   }
 

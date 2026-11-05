@@ -248,7 +248,9 @@ function runPromptScenario(scenario) {
     prompt_lite: '', // コード最新の getDefaultPromptLite() を確実に評価
     prompt_core: '', // コード最新の getDefaultPromptCore() を確実に評価
     prompt_phase_c: '', // コード最新の getDefaultPromptPhaseC() を確実に評価
+    prompt_phase_d: '', // コード最新の getDefaultPromptPhaseD() を確実に評価
     prompt_relief: '', // コード最新の getDefaultPromptRelief() を確実に評価
+    prompt_db: '', // コード最新の getDefaultPromptDb() を確実に評価
     _testCalendarExcludeDate: scenario.excludeCalendarDate || ''
   });
 

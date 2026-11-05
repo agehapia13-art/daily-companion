@@ -295,25 +295,38 @@ function buildDailyBriefingText() {
     scheduleLine += 'カレンダーの登録予定なし（終日フリー）';
   }
 
-  // 5. タスク (本日期限および期限超過の未完了タスク)
+  // 5. タスク (本日期限・期限超過、および最優先・優先度高め指定の重要タスク)
   const tasks = getTasks('未完了');
   const urgentTasks = tasks
     .filter(t => t.dueDate && t.dueDate <= todayStr)
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
+  // 期限なしまたは未来期限であっても、リマインド目安やメモに「最優先」「優先度高」と指定された重要タスクを最大1〜2件合流
+  const highPriorityTasks = tasks
+    .filter(t => (!t.dueDate || t.dueDate > todayStr) && /最優先|優先度高/.test((t.remindContext || '') + (t.memo || '')))
+    .slice(0, 2);
+
+  const displayTasks = [...urgentTasks, ...highPriorityTasks];
+
   let taskLine = '';
-  if (urgentTasks.length > 0) {
-    const formatUrgentTask = (t) => {
+  if (displayTasks.length > 0) {
+    const formatTaskItem = (t) => {
       const base = formatTaskTitleWithBadge(t.title);
-      return t.dueDate < todayStr ? `⚠️[期限超過:${t.dueDate}] ${base}` : base;
+      if (t.dueDate && t.dueDate < todayStr) {
+        return `⚠️[期限超過:${t.dueDate}] ${base}`;
+      }
+      if (!t.dueDate || t.dueDate > todayStr) {
+        return `⭐[優先] ${base}`;
+      }
+      return base;
     };
-    if (urgentTasks.length === 1) {
-      taskLine = `・タスク: ${formatUrgentTask(urgentTasks[0])}`;
+    if (displayTasks.length === 1) {
+      taskLine = `・タスク: ${formatTaskItem(displayTasks[0])}`;
     } else {
-      taskLine = `・タスク (${urgentTasks.length}件):\n` + urgentTasks.map(t => `  - ${formatUrgentTask(t)}`).join('\n');
+      taskLine = `・タスク (${displayTasks.length}件):\n` + displayTasks.map(t => `  - ${formatTaskItem(t)}`).join('\n');
     }
   } else {
-    taskLine = '・タスク: 本日期限の重要タスクはありません';
+    taskLine = '・タスク: 本日期限・優先の重要タスクはありません';
   }
 
   return `━━━━━━━━━━━━━━\n☀️ 本日のデイリーブリーフィング\n${weatherLine}\n${pressureLine}\n${scheduleLine}\n${taskLine}\n━━━━━━━━━━━━━━`;

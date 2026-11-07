@@ -1672,6 +1672,9 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
         }
         var nested = sp.get('liff.state');
         if (nested) {
+          try {
+            nested = decodeURIComponent(nested);
+          } catch (e) {}
           var qIdx = nested.indexOf('?');
           if (qIdx >= 0) {
             parseQuery(nested.substring(qIdx + 1));
@@ -1727,17 +1730,32 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       }
     }
 
-    window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
+      // 1. 初回URLパース（直のURLパラメータやliff.state、localStorageから取得）
       syncParamsFromUrl();
       if (state.authKey) localStorage.setItem('companion_auth_key', state.authKey);
       if (state.apiUrl) localStorage.setItem('companion_api_url', state.apiUrl);
       if (state.liffId) localStorage.setItem('companion_liff_id', state.liffId);
 
-      const p = initLiff();
-      if (p) p.catch(() => {});
-
       switchTab(state.activeTab, true);
 
+      // 2. LIFF環境の場合、liff.init() の完了を待機
+      // （LINE SDKがliff.stateを解釈してパラメータを展開・URL復元するのを確実に待つ）
+      if (window.liff && state.liffId) {
+        try {
+          await initLiff();
+          // 初期化完了後、展開されたパラメータを再同期
+          syncParamsFromUrl();
+          if (state.authKey) localStorage.setItem('companion_auth_key', state.authKey);
+          if (state.apiUrl) localStorage.setItem('companion_api_url', state.apiUrl);
+          if (state.liffId) localStorage.setItem('companion_liff_id', state.liffId);
+        } catch (liffErr) {
+          console.warn('LIFF init warning:', liffErr);
+          // LIFF初期化に失敗しても、手元のキーやURLパラメータで表示継続を試みる
+        }
+      }
+
+      // 3. パラメータ確定後にAPI接続・データ読み込み
       const needsApiUrl = !isGasEnvironment() && !state.apiUrl;
       const needsAuthKey = !state.authKey;
 
@@ -1899,7 +1917,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       console.error('Global error:', e.error || e.message);
     });
 
-    function loadData() {
+    function loadData(isRetry) {
       document.getElementById('loadingView').style.display = 'block';
       var finished = false;
       var timeoutId = setTimeout(function() {
@@ -1916,10 +1934,21 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
           finished = true;
           clearTimeout(timeoutId);
           document.getElementById('loadingView').style.display = 'none';
+
           if (!res || !res.authorized) {
+            // 自動1回リトライ: 初回アクセス時のパラメータ遅延やキャッシュズレを救済
+            if (!isRetry) {
+              console.log('認証失敗のため、URL・localStorageを再同期して自動リトライします...');
+              syncParamsFromUrl();
+              if (state.authKey) {
+                loadData(true);
+                return;
+              }
+            }
             showAuthForm((res && res.error) ? res.error : '認証に失敗しました');
             return;
           }
+
           if (res.validKey) {
             state.authKey = res.validKey;
             localStorage.setItem('companion_auth_key', res.validKey);

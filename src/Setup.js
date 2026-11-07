@@ -216,6 +216,13 @@ function testAllStandardScenarios() {
 }
 
 /**
+ * 互換エイリアス（単数形）
+ */
+function testAllStandardScenario() {
+  testAllStandardScenarios();
+}
+
+/**
  * 汎用プロンプト検証ランナー（単発 ＆ 複数ターン動的連鎖・新旧AB比較対応）
  * スプレッドシートやLINEを一切変更せず、新システム（Lite + 動的アセンブルFlash）と
  * 旧システム（単一Flash）の出力・トークン消費・DBアクションを並列比較します。
@@ -232,6 +239,8 @@ function runPromptScenario(scenario) {
   const testMemory = Object.assign({}, memory, {
     prompt_lite: '', // コード最新の getDefaultPromptLite() を確実に評価
     prompt_core: '', // コード最新の getDefaultPromptCore() を確実に評価
+    prompt_phase_a: '', // コード最新の getDefaultPromptPhaseA() を確実に評価
+    prompt_phase_b: '', // コード最新の getDefaultPromptPhaseB() を確実に評価
     prompt_phase_c: '', // コード最新の getDefaultPromptPhaseC() を確実に評価
     prompt_phase_d: '', // コード最新の getDefaultPromptPhaseD() を確実に評価
     prompt_relief: '', // コード最新の getDefaultPromptRelief() を確実に評価

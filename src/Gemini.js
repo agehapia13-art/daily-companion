@@ -283,13 +283,13 @@ function getDefaultPromptLite() {
    - "general_dialogue": 日常の雑談、感想、状況報告。
 
 4. focused_task_ids（今着目・提案・操作すべきタスクの選別）:
-   - 【提案・段取り・見通し時】:
-     * 以下の三位一体ルールに従って選出する：
-       ①【客観的時間制約軸（緊急度）】: 未完了タスク一覧のうち、「⚠️期限超過（過去日付）」および「📅本日期限（当日日付）」のタスクは、**件数上限なしで無条件に全件選出**する（見落とし・不可視化、リスケ相談や残存確認時のハルシネーションを完全根絶）。
-       ②【重要度・優先度指定軸（重要度）】: 期限の有無に関わらず、リマインド目安やメモに「最優先」「優先度高め」「早めに」と指定された重要タスクを優先的に選出する（期限なしであっても放置・埋没させない）。
-       ③【文脈・負荷適合軸（行動の触媒）】: 上記以外のタスクの中から、ユーザーの発言条件（姿勢・場所・認知的/身体的負荷・所要時間）や現在の心身状態に合致するものを**最大2〜3件選出**する。
-     * ※一日のタイムスケジュール・段取り相談時は、起床から就寝までの各時間帯や5領域のバランスを考慮し、当日着手可能なタスクを網羅的に最大6〜8件選出。
-   - 【操作・更新・完了時】: ユーザー発言内で特定の未完了タスクについて言及（完了報告、更新依頼、検討対象の追加・更新、優先度変更、提案順序指定「〜を優先度高めで提案してほしい」等）があった場合、タスク名のプロジェクトプレフィックス（「環境構築：」「家事：」等）や英数字・表現の揺らぎを柔軟に吸収し、発言の中核キーワード・主要名詞・道具名（プラグイン、機材、ツール等）に合致する未完了タスクのIDを必ず選出して配列で出力（例: ["T_..."]）。複数タスクへの言及があれば該当する全タスクのIDを含める。
+   未完了タスク一覧の中から、ユーザーの最新発言・現在の時刻・状況・文脈を踏まえて、今まさに【完了・リスケ・更新・操作すべきタスク】または【提案・見通し・段取りの候補とすべきタスク】のIDを選出して配列で出力してください（例: ["T_..."]）。
+   - 【操作・完了・リスケ時】:
+     * ユーザーが言及・完了報告したタスク（プロジェクトプレフィックスや表現の揺らぎ、一部の単語から該当タスクを柔軟に推論）
+     * 「今日のタスク明日に回して」「残りは明日に」等の一括指示時は、当日以前（当日含む）が期限の未完了タスクをすべて選出
+     * 優先度・提案順序の指定（「〜を優先して」「早めに提案して」等）があったタスク
+   - 【提案・相談・見通し時】:
+     * 期限が迫っている重要タスク、優先度指定のあるタスク、または現在の空き時間・状況・負荷に適した選択肢を文脈に応じて柔軟に選出
    - 不要または該当なしの場合は空配列 [] を出力。
 
 5. need_db_action（実データベース・メモリー操作の要否）:
@@ -301,7 +301,8 @@ function getDefaultPromptLite() {
      * 一方、道具・機材・ソフトウェア等の『購入・導入・検討する対象』の言及: 作品ストックとは混同せず、単なる購入対象なら買物リスト（shopping）、調査・比較・導入等のプロセスを伴うものならタスク操作（task_add または task_update）として true とする。
      * 外出体験・場所・施設・見学・旅行等の言及（「〜行きたい」「〜見学したい」等）: 天候や休日可処分時間と連動させるため、お出かけタスクの追加対象として true（db_target_type: "task_add"）とする。
      * ★「買いたい物」と「検討する道具・タスク」など、2つ以上の異なるDB操作が同時に必要な場合は、必ず db_target_type: "other" を出力すること。
-   - ★重要【目標の自発タスク化】: ユーザーが翌日や週末など、今後の時間枠でやりたいこと・行動予定を具体的に口にした場合（「活動目標の表明」）も、伴走タスクとして自動登録するため true とする。
+   - ★重要【日常の行動・メンテナンス意志の自発タスク化】:
+     ユーザーが今後（今日中やすぐの合間、翌日、週末等）に自発的に行いたい作業・手入れ・用事の意志（「〜したい」「〜する」「〜やろう」等）を口にした場合は、単なる会話の相槌で流さず、本人が忘れたり着手摩擦を抱えたりしないよう、適切なリマインド目安を付与したタスクとして軽やかに自動手札化（need_db_action: true, db_target_type: "task_add"）すること。
    - ★重要【タスクの優先度・提案順序の指定】: ユーザーが既存タスクについて「優先度高めで提案してほしい」「早めに提案して」「〇〇を優先して」などと発言した場合も、タスクのメモやリマインド目安を更新するため必ず true とする。
    - 単なる日常行動の報告（「夕飯食べた」「ニュース見終えた」「風呂入る」など）で未完了タスクやDB更新が伴わない場合のみ false。
 
@@ -471,6 +472,7 @@ function getDefaultPromptDb() {
    - 命名規則: 指示語を補い \`対象/プロジェクト：具体的な内容\` の形式で命名する。時間指定がある場合は末尾に \`（〜HH:mmまで）\` を明記する。
    - リマインド目安 (remind_context): 新規追加(add)や更新(update)の際、そのタスクを提案すべき最適なタイミング・状況（例: \`隙間15分・自室\`, \`夜・帰宅後\`, \`休日まとまった時間・PC\`, \`19時以降\` 等）を文脈から推論して必ず付与する。特に昼頃までの日中締切（\`〜11:59まで\` 等）があるタスクには \`締切前日夜 または 当日朝\` を設定する。また、外出・見学・旅行等の体験タスク追加時は、外的条件と連動できるよう \`休日お出かけ・晴れ\`、\`週末日中\` などの条件を設定する。
    - ★タスク更新 (update) の差分パッチ原則: 変更するキーのみを出力してください（例: リスケなら \`task_id\` と \`due_date\` のみ出力）。指定のないキーはGAS側で既存値がそのまま保持されます。
+   - ★一括リスケ指示への対応: 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭の了解だけで済ませず、コンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（\`due_date\` を翌日日付 \`YYYY-MM-DD\` に変更）を配列で確実に出力すること。
    - ★優先度・方針指定: ユーザーから「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の提案方針・優先度指定があった場合も、口頭の了解だけで済ませず必ず update を出力する。\`remind_context\` に優先度を反映した状況（例: \`直近の空き枠・最優先\`, \`休日PC・最優先\` 等）を設定し、\`memo\` に指定された背景・理由（例: \`昨今の情勢を考慮し優先度高め\` 等）を追記・更新する。
    - タスク完了(complete)・破棄(delete): \`task_id\` を指定すれば \`title\` は省略可能。
 2. 買物メモ・インプット作品操作 (shopping_actions / input_stock_actions):
@@ -539,6 +541,7 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
     - 例（リスケのみ）: { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }
     - 例（優先度・リマインド変更）: { "action": "update", "task_id": "T_...", "remind_context": "直近の空き枠・最優先", "memo": "..." }
     - 例（タイトル変更）: { "action": "update", "task_id": "T_...", "new_title": "新タイトル" }
+- 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭了解だけでなくコンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（due_date を翌日日付 YYYY-MM-DD に変更）を配列で出力してください。
 {
   "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "task_actions": [
@@ -579,6 +582,7 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
   * 例（優先度・リマインド変更）: { "action": "update", "task_id": "T_...", "remind_context": "直近の空き枠・最優先", "memo": "..." }
   * 例（タイトル変更）: { "action": "update", "task_id": "T_...", "new_title": "新タイトル" }
 - 「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の指定があった場合も、口頭の了解だけで済ませず必ず update を出力し、remind_context（例: 「直近の空き枠・最優先」「休日PC・最優先」等）と memo（背景・理由）を更新してください。
+- 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭了解だけでなくコンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（due_date を翌日日付 YYYY-MM-DD に変更）を配列で出力してください。
 {
   "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "task_actions": [
@@ -899,10 +903,13 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   // 未完了タスク一覧の取得（未完了タスクの照合およびFlashへの選別注入に使用）
   const allUncompletedTasks = uncompletedTasksOpt || getTasks('未完了');
 
-  // 完了報告のセーフティネット照合（発言に完了のニュアンスがあり、LiteがIDを抽出していなかった場合のタスク名照合）
+  // 完了報告およびリスケ指示のセーフティネット判定
   const isCompletionTone = (tags.indexOf('完了報告') !== -1) || /(終|終わ|完了|できた|片付|達成|クリア)/.test(userText || '');
+  const isRescheduleTone = /(リスケ|延期|明日に|回して|回しといて|別日に|後日に)/.test(userText || '');
+
+  // 完了報告時のタスク名テキスト照合セーフティネット
   let matchedCompletedTasks = [];
-  if (isCompletionTone && allUncompletedTasks && allUncompletedTasks.length > 0 && (!liteResult || !liteResult.focused_task_ids || liteResult.focused_task_ids.length === 0)) {
+  if (isCompletionTone && allUncompletedTasks && allUncompletedTasks.length > 0) {
     matchedCompletedTasks = allUncompletedTasks.filter(t => isTaskMatchingUserText_(t.title, userText));
   }
 
@@ -910,6 +917,8 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     (tags.indexOf('DB依頼') !== -1) ||
     hasImages ||
     hasStatedGoal ||
+    isCompletionTone ||
+    isRescheduleTone ||
     (matchedCompletedTasks.length > 0) ||
     /(✅|タスク追加|タスク更新|タスク完了|タスク削除|予定追加|予定変更|カレンダー登録|買物追加|ルーティン|日課|定期|メモして|覚えて|記録して|反映して)/.test(userText);
   const needSearch = (tags.indexOf('事実質問') !== -1);
@@ -944,16 +953,19 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
 
   // 3-3. DB操作仕様 ＆ JSONスキーマ（ピンポイント・マイクロスキーマ適用で大幅節約）
   if (needDbModule) {
-    const isCompletionWord = /(終|終わ|完了|できた|片付|回した|引いた|飲んだ|やった)/.test(userText || '');
-    const isUpdateWord = /(リスケ|延期|明日に|変えて|更新|優先)/.test(userText || '');
+    const isCompletionWord = /(終|終わ|完了|できた|片付|回した|引いた|飲んだ|やった|クリア)/.test(userText || '');
+    const isUpdateWord = /(リスケ|延期|明日に|変えて|更新|優先|回して|回しといて)/.test(userText || '');
     const isAddWord = /(タスク追加|タスク化|入れておいて|追加して)/.test(userText || '');
-    const isMultipleTaskOps = (isCompletionWord && isUpdateWord) || (isCompletionWord && isAddWord) || (isUpdateWord && isAddWord);
+    const isBatchReschedule = isUpdateWord && /(今日|残り|全部|すべて)/.test(userText || '');
+    const isMultipleTaskOps = (isCompletionWord && isUpdateWord) || (isCompletionWord && isAddWord) || (isUpdateWord && isAddWord) || isBatchReschedule;
 
     let effectiveTargetType = (liteResult && liteResult.db_target_type) ? liteResult.db_target_type : 'none';
     if (isMultipleTaskOps) {
       effectiveTargetType = 'task_all';
-    } else if (matchedCompletedTasks.length > 0) {
+    } else if (isCompletionWord && (matchedCompletedTasks.length > 0 || effectiveTargetType === 'none')) {
       effectiveTargetType = 'task_complete';
+    } else if (isUpdateWord && effectiveTargetType === 'none') {
+      effectiveTargetType = 'task_update';
     } else if (effectiveTargetType === 'none' && hasStatedGoal) {
       effectiveTargetType = 'task_add';
     } else if (effectiveTargetType === 'none' && /(ルーティン|日課|定期)/.test(userText)) {
@@ -1027,50 +1039,44 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   }
 
   // ----------------------------------------------------
-  // タスクの選別注入: 【操作対象 (Operation)】と【提案候補 (Suggestion)】の完全直交分離
+  // タスクの動的選別注入: AI(Lite)の選出結果を最大限に信頼・尊重
   // ----------------------------------------------------
-  let operationTasks = [];
-  let suggestionTasks = [];
+  const taskMap = {};
 
-  // ① 【操作対象タスク (Operation Target)】: フェーズに関係なく、DB操作・完了・更新要求があれば100%抽出
-  if (needDbModule) {
-    if (liteResult && liteResult.focused_task_ids && liteResult.focused_task_ids.length > 0) {
-      const mentioned = (allUncompletedTasks || []).filter(t => {
-        if (liteResult.focused_task_ids.indexOf(t.id) === -1) return false;
-        return isTaskMatchingUserText_(t.title, userText);
-      });
-      if (mentioned.length > 0) {
-        operationTasks = mentioned;
-      } else if (tags.indexOf('DB依頼') !== -1 || (liteResult && liteResult.need_db_action)) {
-        operationTasks = (allUncompletedTasks || []).filter(t => liteResult.focused_task_ids.indexOf(t.id) !== -1);
+  // ① AI(Lite)が文脈・状況・最新発言から選出したタスクをそのまま採用
+  if (liteResult && liteResult.focused_task_ids && liteResult.focused_task_ids.length > 0) {
+    (allUncompletedTasks || []).forEach(t => {
+      if (t && t.id && liteResult.focused_task_ids.indexOf(t.id) !== -1) {
+        taskMap[t.id] = t;
       }
-    }
-    if (operationTasks.length === 0) {
-      if (matchedCompletedTasks.length > 0) {
-        operationTasks = matchedCompletedTasks;
-      } else {
-        const fuzzyMatched = (allUncompletedTasks || []).filter(t => isTaskMatchingUserText_(t.title, userText));
-        if (fuzzyMatched.length > 0) {
-          operationTasks = fuzzyMatched;
+    });
+  }
+
+  // ② セーフティネット（フォールバック救済）:
+  // - 完了報告や言及でLiteがIDを漏らした場合のテキスト合致タスク
+  if (matchedCompletedTasks.length > 0) {
+    matchedCompletedTasks.forEach(t => { if (t && t.id) taskMap[t.id] = t; });
+  }
+  // - 「今日のタスク明日に回して」等の一括指示で、当日以前の未完了タスクが選出されていなかった場合の救済
+  if (isRescheduleTone && /(今日|残り|全部|すべて)/.test(userText || '')) {
+    (allUncompletedTasks || []).forEach(t => {
+      if (t && t.id && t.dueDate) {
+        const parts = t.dueDate.split('-');
+        if (parts.length === 3) {
+          const dueD = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+          if (dueD <= precomputed.todayDate) {
+            taskMap[t.id] = t;
+          }
         }
       }
-    }
+    });
+  }
+  // - まだ1件もタスクがなく、発言内に未完了タスクタイトルが含まれている場合の救済
+  if (Object.keys(taskMap).length === 0) {
+    const fuzzy = (allUncompletedTasks || []).filter(t => isTaskMatchingUserText_(t.title, userText));
+    fuzzy.forEach(t => { if (t && t.id) taskMap[t.id] = t; });
   }
 
-  // ② 【提案候補タスク (Suggestion Cards)】: 余白・相談・通常対話（PHASE_C / PHASE_D）の時のみ注入
-  // ※PHASE_A（進行中保護）や PHASE_B（即時送り出し）では、モメンタムを邪魔しないため新規提案カードは0件
-  if (phase === 'PHASE_C' || phase === 'PHASE_D') {
-    if (liteResult && liteResult.focused_task_ids && liteResult.focused_task_ids.length > 0) {
-      suggestionTasks = (allUncompletedTasks || []).filter(t => liteResult.focused_task_ids.indexOf(t.id) !== -1);
-    }
-  } else {
-    suggestionTasks = [];
-  }
-
-  // ③ マージ（重複排除）
-  const taskMap = {};
-  operationTasks.forEach(t => { if (t && t.id) taskMap[t.id] = t; });
-  suggestionTasks.forEach(t => { if (t && t.id) taskMap[t.id] = t; });
   const tasksToInject = Object.keys(taskMap).map(id => taskMap[id]);
 
   // 買物リスト・インプットストックの条件付き注入

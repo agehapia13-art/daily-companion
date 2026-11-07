@@ -1596,10 +1596,10 @@
     function openTaskModal(taskId) {
       state.editingTaskId = taskId || null;
       const activeTasks = (state.data && state.data.tasks) ? state.data.tasks.filter(t => t.status === '未完了') : [];
-      const prefixes = Array.from(new Set(activeTasks.map(t => t.prefix).filter(Boolean)));
-      const defaultPrefixes = ['生活伴走システム', '音楽制作', 'プライベート', '家事・生活'];
-      defaultPrefixes.forEach(dp => {
-        if (!prefixes.includes(dp)) prefixes.push(dp);
+      const defaultPrefixes = ['仕事', '制作・創作', '家事・環境', '実務・手続', '趣味・文化', '身体・ケア', 'お出かけ'];
+      const prefixes = [...defaultPrefixes];
+      activeTasks.forEach(t => {
+        if (t.prefix && t.prefix !== 'その他' && !prefixes.includes(t.prefix)) prefixes.push(t.prefix);
       });
 
       const sugBar = document.getElementById('modalPrefixSuggestions');

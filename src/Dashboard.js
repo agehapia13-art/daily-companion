@@ -157,13 +157,19 @@ function apiGetDashboardData(authKey) {
   const rawTasks = allTasks.filter(t => t.status === '未完了' || (t.status === '完了' && t.completedDate === todayStr));
 
   const enrichedTasks = rawTasks.map(t => {
-    // プレフィックス抽出（「対象/プロジェクト：内容」形式）
+    // プレフィックス抽出（[大分類] 内容 または 大分類：内容 形式）
     let prefix = 'その他';
     let cleanTitle = t.title || '';
-    const colonMatch = cleanTitle.match(/^([^：:]{1,20})[：:]\s*(.+)$/);
-    if (colonMatch) {
-      prefix = colonMatch[1].trim();
-      cleanTitle = colonMatch[2].trim();
+    const bracketMatch = cleanTitle.match(/^\[([^\]]+)\]\s*(.+)$/);
+    if (bracketMatch) {
+      prefix = bracketMatch[1].trim();
+      cleanTitle = bracketMatch[2].trim();
+    } else {
+      const colonMatch = cleanTitle.match(/^([^：:]{1,20})[：:]\s*(.+)$/);
+      if (colonMatch) {
+        prefix = colonMatch[1].trim();
+        cleanTitle = colonMatch[2].trim();
+      }
     }
 
     // 締切時刻の抽出（例: （〜12:00まで） / (18:00締切) など）
@@ -330,8 +336,8 @@ function apiAddTask(authKey, payload) {
   if (!fullTitle) throw new Error('タスク名を入力してください');
 
   const prefix = (payload.prefix || '').trim();
-  if (prefix && !fullTitle.includes('：') && !fullTitle.includes(':')) {
-    fullTitle = `${prefix}：${fullTitle}`;
+  if (prefix && !fullTitle.startsWith('[') && !fullTitle.includes('：') && !fullTitle.includes(':')) {
+    fullTitle = `[${prefix}] ${fullTitle}`;
   }
 
   const dueDate = (payload.dueDate || '').trim();
@@ -2257,10 +2263,10 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
     function openTaskModal(taskId) {
       state.editingTaskId = taskId || null;
       const activeTasks = (state.data && state.data.tasks) ? state.data.tasks.filter(t => t.status === '未完了') : [];
-      const prefixes = Array.from(new Set(activeTasks.map(t => t.prefix).filter(Boolean)));
-      const defaultPrefixes = ['生活伴走システム', '音楽制作', 'プライベート', '家事・生活'];
-      defaultPrefixes.forEach(dp => {
-        if (!prefixes.includes(dp)) prefixes.push(dp);
+      const defaultPrefixes = ['仕事', '制作・創作', '家事・環境', '実務・手続', '趣味・文化', '身体・ケア', 'お出かけ'];
+      const prefixes = [...defaultPrefixes];
+      activeTasks.forEach(t => {
+        if (t.prefix && t.prefix !== 'その他' && !prefixes.includes(t.prefix)) prefixes.push(t.prefix);
       });
 
       const sugBar = document.getElementById('modalPrefixSuggestions');

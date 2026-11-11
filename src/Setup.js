@@ -171,31 +171,40 @@ function syncSystemPromptToSpreadsheet() {
  * - 新システム（2モデル体制: Lite + Flash）と旧システム（単一Flash 6,400文字）の応答・トークン・アクションを並列比較します。
  */
 function testCustomScenario() {
-  // 着手摩擦解消・生活境界防衛・未完了タスク動き出しを検証するモックタスク
+  // [📄資料連携済] タスクに対する自然なDoc追記 vs 純粋な期限変更の直交ルーティング検証
   const mockTasks = [
-    { id: 'T_20261103_230042_188', title: '管理：Chrome・iCloud・Notionのパスワードを1Passwordへ順次移行', dueDate: '', status: '未完了', memo: '優先度高め。Chrome・iCloud・Notionで保管しているパスワードの移行作業', remindContext: '直近の空き枠・最優先' },
-    { id: 'T_20261103_230039_106', title: '生活伴走システム：過去の日報のプロパティ埋め', dueDate: '2026-11-06', status: '未完了', memo: '', remindContext: 'PC作業・空き時間' },
-    { id: 'T_20261107_101917_480', title: 'クリスマス飾り付け：コード・分岐の番号対応表を作成する', dueDate: '2026-11-07', status: '未完了', memo: 'イルミネーションの配線整理用', remindContext: '作業後・自室PC' },
-    { id: 'T_20261107_142139_273', title: 'モンスト：覇者の塔をクリアする（〜11:59まで）', dueDate: '2026-11-25', status: '未完了', memo: '11/7(土) 12:00 〜 11/25(水) 11:59まで出現', remindContext: '締切前日夜 または 当日朝' }
+    {
+      id: 'T_20261102_093316_410',
+      title: '[制作・創作] ブラックフライデーのプラグイン購入検討',
+      dueDate: '2026-11-27',
+      status: '未完了',
+      memo: 'セール対象プラグインのリストアップ・検討',
+      remindContext: '休日PC・夜自由時間',
+      docUrl: 'https://docs.google.com/document/d/1XUq6hv030_P_XyP2btiyo1m1yyMdNwP69fHJ5Pq7aiQ/edit'
+    },
+    {
+      id: 'T_20261026_191721_102',
+      title: '[家事・環境] Googleドライブのファイル整理',
+      dueDate: '',
+      status: '未完了',
+      memo: '時間かかるからそのうち',
+      remindContext: 'PC作業・隙間30分',
+      docUrl: 'https://docs.google.com/document/d/1HAQ5iAV3K5jeB41ghXY9CzB9j8JkOkQYy44XSwFfats/edit'
+    }
   ];
 
   const scenario = {
-    name: '実測検証: 生活境界アンカー直前 ＆ 未完了タスク着手摩擦の背中押し',
+    name: '検証: 資料連携済みタスクへの自然なDoc追記 ＆ 期限変更の直交判別',
     initialLogs: '',
     turns: [
       {
-        time: '2026-11-07 16:29:53',
-        user: 'そろそろ風呂沸かしに行かなきゃと思うのに面倒だぁ　布団から出たくなぁい',
+        time: '2026-11-11 13:45:29',
+        user: 'ブラックフライデーでの検討プラグインにこれを追加して https://store.minet.jp/category/_WAVES_SIN_EQ/10416.html',
         mockTasks: mockTasks
       },
       {
-        time: '2026-11-07 16:30:30',
-        user: 'お湯張スイッチ押すだけじゃないんだよ、軽くブラシかけなきゃいけないんだよぅ',
-        mockTasks: mockTasks
-      },
-      {
-        time: '2026-11-07 20:15:00',
-        user: '夕飯食べた後なんだけど、1Passwordの移行やらなきゃと思いつつ腰が重くて動けないな……',
+        time: '2026-11-11 13:47:00',
+        user: 'ブラックフライデーの期限は11/29まで延ばしておいて',
         mockTasks: mockTasks
       }
     ]

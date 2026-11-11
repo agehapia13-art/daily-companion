@@ -307,7 +307,18 @@ function getDefaultPromptLite() {
    - 単なる日常行動の報告（「夕飯食べた」「ニュース見終えた」「風呂入る」など）で未完了タスクやDB更新が伴わない場合のみ false。
 
 6. db_target_type（必要なDB操作の種別）:
-   - "none"（操作不要）、"task_complete"（タスク完了）、"task_add"（単発タスク追加・目標のタスク化・外出体験・既存プロジェクトへのタスク紐付け）、"task_update"（タスク更新: 期限変更・優先度変更・検討事項やメモの更新等）、"task_delete"（タスク削除）、"project_doc"（Google Driveのプロジェクトフォルダ新規作成・Google Docs新規作成・既存ドキュメントへの検討内容やメモの追記・既存タスクへの資料紐付け）、"routine"（毎日のタスク化・定期ルーティン・日課追加）、"calendar"（予定登録/変更）、"shopping"（買物メモ・食べたい食品・欲しい物）、"input_stock"（作品ストック: 映画/音楽/本/ゲーム等）、"memory"（生活習慣・プロファイル・辞書更新）、"other"（買物とタスクなど、2つ以上の異なるDB操作が同時に必要な場合・その他）。
+   - "none"（操作不要）
+   - "task_complete"（タスク完了）
+   - "task_add"（単発タスク追加・目標のタスク化・外出体験・既存プロジェクトへの新規タスク追加と紐付け）
+   - "task_update"（タスクの制御属性更新: 期限リスケ・優先度/リマインド目安変更・タイトル修正、および [📄資料連携済] が無い通常タスクへの短い補足メモ更新）
+   - "task_delete"（タスク削除）
+   - "project_doc"（Google Driveのプロジェクトフォルダ新規作成・Google Docs作成・タスク紐付け、および [📄資料連携済] タスクや 📄Doc連携あり プロジェクトに対する検討候補・URL・メモ内容の追加/追記全般 ※「ドキュメント」「資料」と明記しない自然な追加依頼もすべてここへ分類すること）
+   - "routine"（毎日のタスク化・定期ルーティン・日課追加）
+   - "calendar"（予定登録/変更）
+   - "shopping"（買物メモ・食べたい食品・欲しい物）
+   - "input_stock"（作品ストック: 映画/音楽/本/ゲーム等）
+   - "memory"（生活習慣・プロファイル・辞書更新）
+   - "other"（買物とタスクなど、2つ以上の異なるDB操作が同時に必要な場合・その他）
 
 7. future_schedule_inquiry（未来日程・カレンダー照会の有無）:
    - 明日以降の予定、週末スケジュール、来週などの確認・照会、または未来のスケジュールを意識した相談が含まれている場合は true。当日のやり取りのみなら false。
@@ -480,6 +491,7 @@ function getDefaultPromptDb() {
      形式: \`[大分類] 具体的な内容\` または \`[大分類] プロジェクト：具体的な内容\`（例: \`[制作・創作] REAPER：MCP連携の続き\`, \`[趣味・文化] 刀剣乱舞：回想回収\`, \`[家事・環境] メイクボックスの要件定義\`）。時間指定がある場合は末尾に \`（〜HH:mmまで）\` を明記する。
    - リマインド目安 (remind_context): 新規追加(add)や更新(update)の際、そのタスクを提案すべき最適なタイミング・状況（例: \`隙間15分・自室\`, \`夜・帰宅後\`, \`休日まとまった時間・PC\`, \`19時以降\` 等）を文脈から推論して必ず付与する。特に昼頃までの日中締切（\`〜11:59まで\` 等）があるタスクには \`締切前日夜 または 当日朝\` を設定する。また、外出・見学・旅行等の体験タスク追加時は、外的条件と連動できるよう \`休日お出かけ・晴れ\`、\`週末日中\` などの条件を設定する。
    - ★既存プロジェクト自動紐付け (project_name): 新規追加(\`add\`)または更新(\`update\`)時、コンテキストの【既存プロジェクトフォルダ一覧（Drive連携）】や同時作成プロジェクトに関連するものがあれば、\`project_name\` にそのプロジェクトフォルダ名（例: \`2611_BFプラグイン購入検討\`）を指定して自動紐付けする。独立単発タスクの場合は省略すること。
+   - ★連携資料とメモ欄の責務分離（重要）: 対象タスクに \`[📄資料連携済]\` が付いている（または対応する \`📄Doc連携あり\` プロジェクトが存在する）場合、検討候補・URL・調査メモ・案などの情報蓄積にはスプレッドシートの \`memo\` 列を上書きせず、必ず後述の \`project_actions\`（\`append_doc\`）へ出力すること。\`task_actions\` の \`update\` は期限・優先度・タイトル・資料紐付け等の制御属性変更のみに使用する。
    - ★タスク更新 (update) の差分パッチ原則: 変更するキーのみを出力してください（例: リスケなら \`task_id\` と \`due_date\` のみ出力）。指定のないキーはGAS側で既存値がそのまま保持されます。
    - ★一括リスケ指示への対応: 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭の了解だけで済ませず、コンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（\`due_date\` を翌日日付 \`YYYY-MM-DD\` に変更）を配列で確実に出力すること。
    - ★優先度・方針指定: ユーザーから「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の提案方針・優先度指定があった場合も、口頭の了解だけで済ませず必ず update を出力する。\`remind_context\` に優先度を反映した状況（例: \`直近の空き枠・最優先\`, \`休日PC・最優先\` 等）を設定し、\`memo\` に指定された背景・理由（例: \`昨今の情勢を考慮し優先度高め\` 等）を追記・更新する。
@@ -626,19 +638,23 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
 プロジェクトフォルダ作成・Google Docs作成・Docへの追記・タスク紐付けを行う場合は、以下のJSONキーを出力してください：
 - 7大カテゴリ（マイドライブ直下）: 仕事 / 制作・創作 / 家事・環境 / 実務・手続 / 趣味・文化 / 身体・ケア / お出かけ
 - フォルダ命名規則: 必ず YYMM_プロジェクト名 形式（例: 2611_〇〇）とし、親カテゴリ直下にファイルを直置きしない。
+- ★最重要【連携資料とタスクメモの責務分離】:
+  * 対象タスクに [📄資料連携済] が付いている場合（または対応する 📄Doc連携あり プロジェクトがある場合）、検討候補・URL・調査メモ・アイデア等の情報蓄積は tasks の memo を書き換えるのではなく、必ず append_doc を使って連携 Google Doc へ追記すること。
+  * 期限・優先度・リマインド目安・タイトル等、タスク自体の制御属性を更新したい場合のみ task_actions の update（差分パッチ）を併用すること。
 - 操作種別:
   * create_project: 新規プロジェクトフォルダ（＆Google Doc）作成。既存タスクに紐付ける場合は task_id（または target_task_title）を指定。同時に新規タスクも追加する場合は task_actions の add 側にも同じ project_name を指定する。
   * add_doc: コンテキストの【既存プロジェクトフォルダ一覧（Drive連携）】内の既存フォルダに新しいGoogle Docを追加。
-  * append_doc: 既存のGoogle Doc（または [📄資料連携済] タスクに紐付いたDoc）末尾に検討事項・メモ・URL等を追記（project_name または task_id / target_task_title と content を指定）。
+  * append_doc: 既存のGoogle Doc（または [📄資料連携済] タスクに紐付いたDoc）末尾に検討事項・候補・URL等を追記（project_name または task_id / target_task_title と content を指定）。
 {
   "reply_text": "【必須】ユーザーへの返信文（※URLや詳細の二重復唱は不要、1〜2文で簡潔に）",
   "project_actions": [
     { "action": "create_project", "category": "7大カテゴリ名", "project_name": "YYMM_プロジェクト名", "doc_title": "資料タイトル", "initial_content": "初期本文（任意）", "task_id": "（※既存タスクへ紐付ける場合のみ）" },
     { "action": "add_doc", "project_name": "既存プロジェクト名", "doc_title": "資料タイトル", "initial_content": "初期本文（任意）", "task_id": "（※関連タスクへ紐付ける場合のみ）" },
-    { "action": "append_doc", "project_name": "既存プロジェクト名", "task_id": "（※対象タスクがある場合）", "content": "追記内容" }
+    { "action": "append_doc", "project_name": "既存プロジェクト名", "task_id": "（※対象タスクがある場合）", "content": "追記内容（名称・URL・要点など）" }
   ],
   "task_actions": [
-    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安", "project_name": "YYMM_プロジェクト名" }
+    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安", "project_name": "YYMM_プロジェクト名" },
+    { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }
   ]
 }`;
   }
@@ -965,9 +981,50 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     matchedCompletedTasks = allUncompletedTasks.filter(t => isTaskMatchingUserText_(t.title, userText));
   }
 
+  // ----------------------------------------------------
+  // タスクの動的選別（[📄資料連携済] の有無をDBスキーマ選別前にも参照するため先行算出）
+  // ----------------------------------------------------
+  const taskMap = {};
+
+  // ① AI(Lite)が文脈・状況・最新発言から選出したタスクをそのまま採用
+  if (liteResult && liteResult.focused_task_ids && liteResult.focused_task_ids.length > 0) {
+    (allUncompletedTasks || []).forEach(t => {
+      if (t && t.id && liteResult.focused_task_ids.indexOf(t.id) !== -1) {
+        taskMap[t.id] = t;
+      }
+    });
+  }
+
+  // ② セーフティネット（フォールバック救済）:
+  if (matchedCompletedTasks.length > 0) {
+    matchedCompletedTasks.forEach(t => { if (t && t.id) taskMap[t.id] = t; });
+  }
+  if (isRescheduleTone && /(今日|残り|全部|すべて)/.test(userText || '')) {
+    (allUncompletedTasks || []).forEach(t => {
+      if (t && t.id && t.dueDate) {
+        const parts = t.dueDate.split('-');
+        if (parts.length === 3) {
+          const dueD = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+          if (dueD <= precomputed.todayDate) {
+            taskMap[t.id] = t;
+          }
+        }
+      }
+    });
+  }
+  if (Object.keys(taskMap).length === 0) {
+    const fuzzy = (allUncompletedTasks || []).filter(t => isTaskMatchingUserText_(t.title, userText));
+    fuzzy.forEach(t => { if (t && t.id) taskMap[t.id] = t; });
+  }
+
+  const tasksToInject = Object.keys(taskMap).map(id => taskMap[id]);
+  const hasLinkedDocInFocusedTasks = tasksToInject.some(t => Boolean(t && t.docUrl && String(t.docUrl).trim() !== ''));
+
   // プロジェクトフォルダ / Google Docs 操作意図の補助判定
   const hasProjectTopicWord = /(フォルダ|ドキュメント|Google\s*Docs?|Docs|資料|プロジェクト|ドライブ|Drive)/.test(userText || '');
   const hasProjectActionWord = /(フォルダ|ドキュメント|Google\s*Docs?|Docs|資料|プロジェクト|ドライブ|Drive).*(作|追加|更新|追記|整理|作成|紐付|連携)|((追記|書き足|書き加).*ドキュメント|(ドキュメント|資料|Docs)に)/.test(userText || '');
+  const hasContentAppendClue = /(https?:\/\/|追加|追記|メモ|候補|リスト|まとめ|案|書|残|入れ)/.test(userText || '');
+  const isScheduleOrPriorityOnly = !hasContentAppendClue && /(期限|リスケ|延期|明日に|別日に|後日に|優先|締切|回して|回しといて)/.test(userText || '');
 
   const needDbModule = Boolean(liteResult.need_db_action) ||
     (tags.indexOf('DB依頼') !== -1) ||
@@ -1016,7 +1073,13 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     const isAddWord = /(タスク追加|タスク化|入れておいて|追加して)/.test(userText || '');
     const isBatchReschedule = isUpdateWord && /(今日|残り|全部|すべて)/.test(userText || '');
     const isMultipleTaskOps = (isCompletionWord && isUpdateWord) || (isCompletionWord && isAddWord) || (isUpdateWord && isAddWord) || isBatchReschedule;
-    const isProjectIntent = (effectiveTargetType === 'project_doc') || hasProjectActionWord;
+
+    // すでに [📄資料連携済] のタスクが着目されており、純粋な日程・優先度のみの変更でない場合は project_doc を利用可能にする
+    const shouldPromoteLinkedTaskToDoc = hasLinkedDocInFocusedTasks &&
+      !isScheduleOrPriorityOnly &&
+      !isCompletionWord &&
+      (effectiveTargetType === 'none' || effectiveTargetType === 'task_add' || effectiveTargetType === 'task_update');
+    const isProjectIntent = (effectiveTargetType === 'project_doc') || hasProjectActionWord || shouldPromoteLinkedTaskToDoc;
 
     if (isProjectIntent && isMultipleTaskOps) {
       effectiveTargetType = 'other';
@@ -1099,47 +1162,6 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     contextLines.push(`【天気・気温】: ${weatherDisplay || '情報なし'}`);
     contextLines.push(`【気圧急降下】: ${pressureAlertVal === 'TRUE' ? '急降下中(注意)' : '安定'}`);
   }
-
-  // ----------------------------------------------------
-  // タスクの動的選別注入: AI(Lite)の選出結果を最大限に信頼・尊重
-  // ----------------------------------------------------
-  const taskMap = {};
-
-  // ① AI(Lite)が文脈・状況・最新発言から選出したタスクをそのまま採用
-  if (liteResult && liteResult.focused_task_ids && liteResult.focused_task_ids.length > 0) {
-    (allUncompletedTasks || []).forEach(t => {
-      if (t && t.id && liteResult.focused_task_ids.indexOf(t.id) !== -1) {
-        taskMap[t.id] = t;
-      }
-    });
-  }
-
-  // ② セーフティネット（フォールバック救済）:
-  // - 完了報告や言及でLiteがIDを漏らした場合のテキスト合致タスク
-  if (matchedCompletedTasks.length > 0) {
-    matchedCompletedTasks.forEach(t => { if (t && t.id) taskMap[t.id] = t; });
-  }
-  // - 「今日のタスク明日に回して」等の一括指示で、当日以前の未完了タスクが選出されていなかった場合の救済
-  if (isRescheduleTone && /(今日|残り|全部|すべて)/.test(userText || '')) {
-    (allUncompletedTasks || []).forEach(t => {
-      if (t && t.id && t.dueDate) {
-        const parts = t.dueDate.split('-');
-        if (parts.length === 3) {
-          const dueD = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-          if (dueD <= precomputed.todayDate) {
-            taskMap[t.id] = t;
-          }
-        }
-      }
-    });
-  }
-  // - まだ1件もタスクがなく、発言内に未完了タスクタイトルが含まれている場合の救済
-  if (Object.keys(taskMap).length === 0) {
-    const fuzzy = (allUncompletedTasks || []).filter(t => isTaskMatchingUserText_(t.title, userText));
-    fuzzy.forEach(t => { if (t && t.id) taskMap[t.id] = t; });
-  }
-
-  const tasksToInject = Object.keys(taskMap).map(id => taskMap[id]);
 
   // 買物リスト・インプットストックの条件付き注入
   const needShopping = (phase === 'PHASE_C' && tags.indexOf('過ごし方相談') !== -1) ||

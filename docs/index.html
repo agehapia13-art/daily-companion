@@ -1552,7 +1552,7 @@
 
       // 関連資料リンクバッジ（Google Docs / Drive フォルダ）
       let docBadge = '';
-      if (t.docUrl && /^https?:///i.test(t.docUrl)) {
+      if (t.docUrl && new RegExp('^https?://', 'i').test(t.docUrl)) {
         const isDoc = t.docUrl.indexOf('docs.google.com/document') !== -1;
         const isFolder = t.docUrl.indexOf('/folders/') !== -1;
         const docLabel = isDoc ? '📄 資料を開く' : (isFolder ? '📁 フォルダを開く' : '🔗 関連資料');

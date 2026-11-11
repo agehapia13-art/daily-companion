@@ -186,7 +186,7 @@
 │   ├── Webhook.js        # doPost (LINE Webhook & ダッシュボードJSON API) & doGet
 │   └── Setup.js          # 初期設定・メンテナンス・プロンプト検証ドライラン
 ├── scripts/
-│   ├── build-dashboard.js # src/Dashboard.js から docs/index.html を自動生成するスクリプト
+│   ├── build-dashboard.js # src/Dashboard.js から docs/index.html を自動生成 ＆ 埋め込みJS構文を検証するスクリプト
 │   └── sheet-cli.js       # Antigravity/ローカルからスプレッドシートを直接読み書き・同期する操作CLI
 └── README.md
 ```
@@ -265,13 +265,13 @@ Google Apps Script プロジェクトの「プロジェクトの設定」>「ス
 コード修正時は、常に以下のワンストップフローで構文チェック・GAS反映・Git保存を行います：
 
 ```bash
-# 1. src/ 配下の全ファイル構文チェック
+# 1. src/ 配下の全ファイル構文チェック（ダッシュボード埋め込みJS構文を含む）
 npm run check
 
 # 2. clasp でGASプロジェクトへコードを直接プッシュ (src/ 配下をファイル分割のまま同期)
 npm run push   # (npx clasp push --force)
 
-# 3. (ダッシュボード画面変更時のみ) docs/index.html を再ビルド
+# 3. (ダッシュボード画面変更時のみ) docs/index.html を再ビルド・構文検証
 npm run build:dashboard
 
 # 4. GitHubへ最新コードと変更履歴を保存（毎回必ずコミット＆プッシュ）

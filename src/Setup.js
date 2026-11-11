@@ -82,6 +82,7 @@ function setupSpreadsheet() {
     memorySheet.appendRow(['キー', '値']);
     formatHeaderRow_(memorySheet);
     memorySheet.appendRow(['profile', 'サウンドディレクター / ゲーム・映像音響制作。自宅(横浜市磯子区)と職場(渋谷)。DTM・ギター演奏が日課。']);
+    memorySheet.appendRow(['backend_model', 'lite']);
     memorySheet.appendRow(['weather_info', '自宅(磯子): 晴れ 最高22℃ 降水10% ｜ 職場(渋谷): 晴れ 最高23℃ 降水10%']);
     memorySheet.appendRow(['pressure_alert', 'FALSE']);
     memorySheet.appendRow(['cycle_stamps', '美容院: 2026-09-20, 機材メンテ: 2026-09-25']);
@@ -258,12 +259,18 @@ function runPromptScenario(scenario) {
     prompt_db: '', // コード最新の getDefaultPromptDb() を確実に評価
     _testCalendarExcludeDate: scenario.excludeCalendarDate || ''
   });
+  if (typeof scenario.useLiteForBackend === 'boolean') {
+    testMemory._testUseLiteForBackend = scenario.useLiteForBackend;
+  }
 
   let runningLogs = scenario.initialLogs || '';
   let cachedSheetTasks = null;
 
+  const backendLabel = (typeof resolveBackendModel_ === 'function')
+    ? resolveBackendModel_(testMemory).model
+    : SYSTEM_CONSTANTS.GEMINI_MODEL;
   Logger.log('============================================================');
-  Logger.log(`🧪 【${scenario.name}】 (${scenario.turns.length}ターン / 新システム単独ドライラン)`);
+  Logger.log(`🧪 【${scenario.name}】 [後段: ${backendLabel}] (${scenario.turns.length}ターン / 新システム単独ドライラン)`);
   Logger.log('============================================================');
 
   for (let i = 0; i < scenario.turns.length; i++) {
@@ -300,8 +307,9 @@ function runPromptScenario(scenario) {
 
     Logger.log(`\n🧭 [Lite判定]: ${meta.phaseAndTags || ''}`);
     Logger.log(`🎯 [Lite選出タスク (focused_task_ids)]: ${focusedDisplay}`);
-    Logger.log(`📊 [トークン]: 新システム合計 ${meta.newTotalTokens} tok (Lite: ${(meta.litePromptTokens || 0) + (meta.liteCandidatesTokens || 0)} + Flash: ${(meta.flashPromptTokens || 0) + (meta.flashCandidatesTokens || 0)})`);
-    Logger.log(`\n🆕 【新システム応答 (${outcome.phaseLabel})】:\n${newReply}${formatActionSummary_(outcome.primaryResult)}`);
+    const actualBackend = meta.backendModel || backendLabel;
+    Logger.log(`📊 [トークン]: 合計 ${meta.newTotalTokens} tok (前段Lite: ${(meta.litePromptTokens || 0) + (meta.liteCandidatesTokens || 0)} + 後段[${actualBackend}]: ${(meta.flashPromptTokens || 0) + (meta.flashCandidatesTokens || 0)})`);
+    Logger.log(`\n🆕 【新システム応答 (${outcome.phaseLabel} / ${actualBackend})】:\n${newReply}${formatActionSummary_(outcome.primaryResult)}`);
 
     const logLine = `${hhmm} User: ${turn.user}\nAI: ${newReply.replace(/\n/g, ' ')}`;
     runningLogs = runningLogs ? `${runningLogs}\n${logLine}` : logLine;

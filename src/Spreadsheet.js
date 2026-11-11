@@ -841,6 +841,7 @@ function getMemory() {
   const lastRow = sheet.getLastRow();
   const memoryObj = {
     profile: '',
+    backend_model: '',
     weather_info: '',
     pressure_alert: 'FALSE',
     cycle_stamps: '',

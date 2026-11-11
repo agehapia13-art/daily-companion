@@ -1305,7 +1305,60 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
 }
 
 /**
- * 生活伴走システムの1ターン統合実行エンジン（Flash-Lite 司令塔 ＋ Flash 動的アセンブル実行）
+ * memoryシートの backend_model 設定（またはテストフラグ）から後段生成モデル＆エンドポイントを解決
+ * @param {Object=} memory
+ * @return {{model: string, shortLabel: string, endpoint: string}}
+ */
+function resolveBackendModel_(memory) {
+  if (memory && memory._testUseLiteForBackend === true) {
+    return {
+      model: SYSTEM_CONSTANTS.GEMINI_LITE_MODEL,
+      shortLabel: 'lite',
+      endpoint: SYSTEM_CONSTANTS.GEMINI_LITE_ENDPOINT_BASE
+    };
+  }
+  if (memory && memory._testUseLiteForBackend === false) {
+    return {
+      model: SYSTEM_CONSTANTS.GEMINI_MODEL,
+      shortLabel: 'flash',
+      endpoint: SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE
+    };
+  }
+
+  const raw = String((memory && memory.backend_model) || '').trim();
+  const normalized = raw.toLowerCase();
+
+  if (normalized === 'lite' || normalized === 'flash-lite' || normalized === SYSTEM_CONSTANTS.GEMINI_LITE_MODEL.toLowerCase()) {
+    return {
+      model: SYSTEM_CONSTANTS.GEMINI_LITE_MODEL,
+      shortLabel: 'lite',
+      endpoint: SYSTEM_CONSTANTS.GEMINI_LITE_ENDPOINT_BASE
+    };
+  }
+  if (!normalized || normalized === 'flash' || normalized === SYSTEM_CONSTANTS.GEMINI_MODEL.toLowerCase()) {
+    return {
+      model: SYSTEM_CONSTANTS.GEMINI_MODEL,
+      shortLabel: 'flash',
+      endpoint: SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE
+    };
+  }
+  if (normalized.indexOf('gemini-') === 0) {
+    return {
+      model: raw,
+      shortLabel: raw,
+      endpoint: `https://generativelanguage.googleapis.com/v1beta/models/${raw}:generateContent`
+    };
+  }
+
+  return {
+    model: SYSTEM_CONSTANTS.GEMINI_MODEL,
+    shortLabel: 'flash',
+    endpoint: SYSTEM_CONSTANTS.GEMINI_ENDPOINT_BASE
+  };
+}
+
+/**
+ * 生活伴走システムの1ターン統合実行エンジン（Flash-Lite 司令塔 ＋ 後段モデル動的アセンブル実行）
  * @param {string} userText
  * @param {Array<GoogleAppsScript.Base.Blob>} imageBlobs
  * @param {string} todayLogsText
@@ -1368,13 +1421,14 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
   const phaseLabel = phaseShortMap[phase] || phase;
   const phaseFullLabel = phaseMap[phase] || phase;
   const tagsStr = (liteResult.tags || []).join(',');
-  const phaseAndTags = `[${phaseFullLabel} / ${tagsStr} / 直前:${liteResult.previous_action_status} / 体調:${liteResult.health_status} / topic:${liteResult.matched_habit_topic}]`;
+  const backendTarget = resolveBackendModel_(memory);
+  const phaseAndTags = `[${phaseFullLabel} / ${tagsStr} / 直前:${liteResult.previous_action_status} / 体調:${liteResult.health_status} / topic:${liteResult.matched_habit_topic} / model:${backendTarget.shortLabel}]`;
 
-  // 4. 後段 Flash のリクエスト構築
+  // 4. 後段モデルのリクエスト構築
   const newPayload = buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory, liteResult, phase, precomputed, allUncompletedTasks);
 
-  // 5. 後段 Flash の実行
-  const singleRes = fetchGeminiResultWithRetry(newPayload);
+  // 5. 後段モデルの実行（memory.backend_model またはテストフラグにより切替）
+  const singleRes = fetchGeminiResultWithRetry(newPayload, backendTarget.endpoint);
   const newUsage = singleRes.usage || {};
   const newParsed = parseGeminiActionJson_(singleRes.text, newUsage);
 
@@ -1393,6 +1447,7 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
 
   const logMeta = {
     isTwoModel: true,
+    backendModel: backendTarget.model,
     litePromptTokens: litePrompt,
     liteCandidatesTokens: liteCand,
     liteCachedTokens: liteCache,

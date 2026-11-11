@@ -65,181 +65,17 @@ function doPost(e) {
       // ----------------------------------------------------
       if (messageType === 'text') {
         const userText = event.message.text ? event.message.text.trim() : '';
-
-        // A. 本日初回発言判定 (ファースト・ハロー)
-        // ※朝ブリーフィングは午前04:00〜昼11:59（正午まで）の発言かつ、本日未配信の場合のみ発動
-        // ※午後（12:00以降）や夜の発言では絶対に誤発動させない
-        const currentHour = new Date().getHours();
-        const isMorningTime = currentHour >= 4 && currentHour < 12;
-        const isFirstHello = isMorningTime && !isBriefingDeliveredToday();
-
-        // B. 蓄積画像の取得
-        const bufferedImages = getBufferedImages();
-        const imageBlobs = bufferedImages.blobs;
-        const imageUrls = bufferedImages.urls;
-
-        // C. 本日の全会話ログおよびメモリー情報の取得
-        const todayLogsCondensed = getCondensedTodayLogs();
-        const memory = getMemory();
-
-        // D. 生活伴走エンジン実行（Flash-Lite 司令塔 ＋ Flash 動的アセンブル）
-        let turnOutcome = null;
-        let aiResult;
-        let isGeminiSuccess = false;
-        try {
-          turnOutcome = executeCompanionTurn(userText, imageBlobs, todayLogsCondensed, memory);
-          aiResult = turnOutcome.primaryResult;
-          isGeminiSuccess = true;
-        } catch (geminiErr) {
-          const errStr = String(geminiErr.message || '');
-          Logger.log('Gemini呼び出しエラー: ' + errStr);
-
-          let errorReply = '申し訳ありません、システムの処理中にエラーが発生しました。';
-          if (errStr.includes('429') || errStr.includes('RESOURCE_EXHAUSTED') || errStr.includes('quota') || errStr.includes('Credit')) {
-            errorReply = '【システム通知】Gemini APIのクレジット残高不足、または利用クォータの上限に達しました。\nGoogle AI Studio / Google Cloud コンソールの残高・お支払い情報をご確認ください。';
-          } else if (errStr.includes('503') || errStr.includes('UNAVAILABLE') || errStr.includes('high demand')) {
-            errorReply = '【システム通知】GoogleのAIサーバーが現在一時的にアクセス集中・混雑しています。\n自動再試行を行いましたが応答が得られませんでした。少し時間を置いてもう一度お話しください。';
-          } else if (errStr.includes('401') || errStr.includes('403') || errStr.includes('API key')) {
-            errorReply = '【システム通知】Gemini APIキーの認証に失敗しました。\nGASスクリプトプロパティの GEMINI_API_KEY 設定をご確認ください。';
-          } else if (errStr.includes('404')) {
-            errorReply = '【システム通知】Geminiの指定モデルが見つかりません(404)。\nモデル設定をご確認ください。';
-          } else {
-            errorReply = `【システム通知】思考エンジンの応答中にエラーが発生しました。\n詳細: ${errStr.substring(0, 100)}`;
+        executeAndPersistCompanionTurn_({
+          promptText: userText,
+          displayText: userText,
+          inlineImages: [],
+          consumeBuffer: true,
+          allowErrorFallback: true,
+          onBeforePersist: function (displayReplyText) {
+            // G. LINE Reply API で返答送信
+            replyLineMessage(replyToken, displayReplyText);
           }
-
-          aiResult = {
-            reply_text: errorReply,
-            task_actions: [],
-            calendar_actions: [],
-            shopping_actions: [],
-            input_stock_actions: [],
-            routine_actions: [],
-            project_actions: []
-          };
-        }
-
-        // F. DB・カレンダー操作アクションの即時適用（※二重実行防止のため新システム側のアクションのみ実行）
-        const stripManualNoticeLines = (text) => {
-          return String(text || '').split('\n').filter(line => {
-            const trimmed = line.trim();
-            return !/^(📝\s*タスク追加|📝\s*タスク更新|✅\s*タスク完了|🗑️\s*タスク破棄|📅\s*カレンダー|🛒\s*買物|🎬\s*インプット|🔄\s*ルーティン|📁\s*フォルダ作成|📄\s*資料|🔗\s*タスク紐付)/.test(trimmed);
-          }).join('\n').trim();
-        };
-
-        let pureReplyText = (aiResult.reply_text || '了解いたしました。').trim();
-        const executedNotices = [];
-
-        try {
-          let createdProjectUrlMap = {};
-          if (aiResult.project_actions && aiResult.project_actions.length > 0 && typeof applyProjectActions === 'function') {
-            const projRes = applyProjectActions(aiResult.project_actions);
-            if (projRes && projRes.notices) {
-              executedNotices.push.apply(executedNotices, projRes.notices);
-            }
-            if (projRes && projRes.createdUrlMap) {
-              createdProjectUrlMap = projRes.createdUrlMap;
-            }
-          }
-          if (aiResult.task_actions && aiResult.task_actions.length > 0) {
-            const taskRes = applyTaskActions(aiResult.task_actions, createdProjectUrlMap);
-            executedNotices.push.apply(executedNotices, taskRes);
-          }
-          if (aiResult.calendar_actions && aiResult.calendar_actions.length > 0) {
-            const calRes = applyCalendarActions(aiResult.calendar_actions);
-            executedNotices.push.apply(executedNotices, calRes);
-          }
-          if (aiResult.shopping_actions && aiResult.shopping_actions.length > 0) {
-            const shopRes = applyShoppingActions(aiResult.shopping_actions);
-            executedNotices.push.apply(executedNotices, shopRes);
-          }
-          if (aiResult.input_stock_actions && aiResult.input_stock_actions.length > 0) {
-            const inputRes = applyInputStockActions(aiResult.input_stock_actions);
-            executedNotices.push.apply(executedNotices, inputRes);
-          }
-          if (aiResult.routine_actions && aiResult.routine_actions.length > 0) {
-            const routineRes = applyRoutineActions(aiResult.routine_actions);
-            executedNotices.push.apply(executedNotices, routineRes);
-          }
-        } catch (actionErr) {
-          Logger.log('アクション先行適用エラー: ' + actionErr.message);
-        }
-
-        if (executedNotices.length > 0) {
-          pureReplyText = stripManualNoticeLines(pureReplyText);
-        }
-
-        // logs シート保存用の新システム返答（次ターンの会話履歴汚染を防ぐため旧返答や比較装飾を含めない）
-        let loggedAiReply = pureReplyText;
-        if (executedNotices.length > 0) {
-          loggedAiReply += '\n\n' + executedNotices.join('\n');
-        }
-
-        // LINE 送信用の表示テキスト構築（返信本文 ＋ DB操作通知）
-        let lineDisplayText = loggedAiReply;
-
-        // プログラム制御による朝ブリーフィング合流（1日1回・初回のみ確実に付加し即時配信完了記録）
-        if (isFirstHello && isGeminiSuccess) {
-          markBriefingDeliveredToday();
-          const briefingText = buildDailyBriefingText();
-          lineDisplayText += '\n\n' + briefingText;
-          loggedAiReply += '\n\n' + briefingText;
-        }
-
-        // G. LINE Reply API で返答送信
-        replyLineMessage(replyToken, lineDisplayText);
-
-        // H. 返答完了後の後続処理（ログ保存・メモリー更新・バッファクリア）
-        try {
-          // Gemini呼び出しが成功した場合のみ画像バッファクリア
-          if (isGeminiSuccess && imageBlobs.length > 0) {
-            clearImageBuffer();
-          }
-
-          // ログ追記 (第5列には新システムの返答のみを保存し、第6〜16列にLite/Flash別トークン・判定・旧比較を記録)
-          const nowStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
-          const imgUrlString = imageUrls.join('\n');
-          let loggedUserText = userText;
-          if (aiResult.image_summary && aiResult.image_summary.trim() !== '') {
-            const imgDesc = `[画像内容: ${aiResult.image_summary.trim()}]`;
-            loggedUserText = loggedUserText ? `${loggedUserText}\n${imgDesc}` : imgDesc;
-          }
-          const logMeta = turnOutcome ? turnOutcome.logMeta : (aiResult._usage || null);
-          appendLog(nowStr, 'user', loggedUserText, imgUrlString, loggedAiReply, logMeta);
-
-          // メモリー更新（AIが文脈や指示から判定して出力した各領域の更新を安全関数経由で反映）
-          if (aiResult.memory_updates) {
-            // 1. cycle_stamps のオンデマンド更新（散歩・読書・楽器・爪切り等の実施報告時）
-            if (aiResult.memory_updates.cycle_stamps_updates) {
-              updateCycleStampsSafely(aiResult.memory_updates.cycle_stamps_updates);
-              Logger.log('周期スタンプ(cycle_stamps)を更新しました: ' + aiResult.memory_updates.cycle_stamps_updates);
-            }
-
-            // 2. lifestyle_habits のオンデマンド更新（生活リズム・こだわり・余白習慣の変更時）
-            if (aiResult.memory_updates.lifestyle_habits) {
-              updateLifestyleHabitsSafely(aiResult.memory_updates.lifestyle_habits);
-              Logger.log('生活習慣メモリー(lifestyle_habits)を更新しました');
-            }
-
-            // 3. プロファイルの安全な新陳代謝・追記（住居・家族構成・勤務形態等の恒久基盤）
-            if (aiResult.memory_updates.profile) {
-              updateProfileSafely(aiResult.memory_updates.profile);
-              Logger.log('プロファイル(profile)を安全に更新しました');
-            }
-
-            // 4. 用語辞書への追記（新出用語の定義や説明がある時）
-            if (aiResult.memory_updates.dictionary) {
-              updateDictionarySafely(aiResult.memory_updates.dictionary);
-              Logger.log('用語辞書(dictionary)に新しい前提知識を安全に反映しました');
-            }
-          }
-
-          // 月報通知フラグの解除
-          if (memory.monthly_report_ready === 'TRUE') {
-            setMemoryValue('monthly_report_ready', 'FALSE');
-          }
-        } catch (postProcessErr) {
-          Logger.log('後続処理反映エラー: ' + postProcessErr.message);
-        }
+        });
       }
     }
 
@@ -367,4 +203,266 @@ function doGet(e) {
     }
   }
   return renderDashboardHtml(e);
+}
+
+/**
+ * Gemini呼び出しエラーをユーザー向けの案内文とエラー種別へ変換
+ * @param {Error} geminiErr
+ * @return {{ code: string, message: string }}
+ */
+function classifyGeminiError_(geminiErr) {
+  const errStr = String((geminiErr && geminiErr.message) || geminiErr || '');
+  if (errStr.includes('429') || errStr.includes('RESOURCE_EXHAUSTED') || errStr.includes('quota') || errStr.includes('Credit')) {
+    return {
+      code: 'QUOTA',
+      message: '【システム通知】Gemini APIのクレジット残高不足、または利用クォータの上限に達しました。\nGoogle AI Studio / Google Cloud コンソールの残高・お支払い情報をご確認ください。'
+    };
+  }
+  if (errStr.includes('503') || errStr.includes('UNAVAILABLE') || errStr.includes('high demand')) {
+    return {
+      code: 'UNAVAILABLE',
+      message: '【システム通知】GoogleのAIサーバーが現在一時的にアクセス集中・混雑しています。\n自動再試行を行いましたが応答が得られませんでした。少し時間を置いてもう一度お話しください。'
+    };
+  }
+  if (errStr.includes('401') || errStr.includes('403') || errStr.includes('API key')) {
+    return {
+      code: 'AUTH',
+      message: '【システム通知】Gemini APIキーの認証に失敗しました。\nGASスクリプトプロパティの GEMINI_API_KEY 設定をご確認ください。'
+    };
+  }
+  if (errStr.includes('404')) {
+    return {
+      code: 'NOT_FOUND',
+      message: '【システム通知】Geminiの指定モデルが見つかりません(404)。\nモデル設定をご確認ください。'
+    };
+  }
+  return {
+    code: 'UNKNOWN',
+    message: `【システム通知】思考エンジンの応答中にエラーが発生しました。\n詳細: ${errStr.substring(0, 100)}`
+  };
+}
+
+/**
+ * AI返答文に混入した手動通知風行を除去する（DB実行結果と二重表示を防ぐ）
+ * @param {string} text
+ * @return {string}
+ */
+function stripManualNoticeLines_(text) {
+  return String(text || '').split('\n').filter(line => {
+    const trimmed = line.trim();
+    return !/^(📝\s*タスク追加|📝\s*タスク更新|✅\s*タスク完了|🗑️\s*タスク破棄|📅\s*カレンダー|🛒\s*買物|🎬\s*インプット|🔄\s*ルーティン|📁\s*フォルダ作成|📄\s*資料|🔗\s*タスク紐付)/.test(trimmed);
+  }).join('\n').trim();
+}
+
+/**
+ * LINE・PWA共通の生活伴走1ターン実行〜DB適用〜ブリーフィング合流〜ログ・メモリー永続化パイプライン
+ * @param {Object} params
+ * @param {string} params.promptText AIへ渡す入力文
+ * @param {string=} params.displayText ログ保存・表示用の自然な発話文（省略時は promptText）
+ * @param {Array<{ blob: GoogleAppsScript.Base.Blob, fileName?: string, url?: string }>=} params.inlineImages 直接添付された画像一覧（url未設定時はGemini成功後にDriveへ保存）
+ * @param {boolean=} params.consumeBuffer 画像バッファ（LINE先行送信・ショートカット経由）を取り込むか（既定 true）
+ * @param {boolean=} params.allowErrorFallback LINE向け: Geminiエラー時も通知返信＋ログ記録へフォールバックするか（既定 false）
+ * @param {Function=} params.onBeforePersist 返答文確定直後（永続化直前）に呼ばれるコールバック（LINE即時返信等）
+ * @return {Object} ターン実行結果
+ */
+function executeAndPersistCompanionTurn_(params) {
+  const opts = params || {};
+  const promptText = String(opts.promptText || '').trim();
+  const displayBase = opts.displayText !== undefined ? String(opts.displayText).trim() : promptText;
+  const consumeBuffer = opts.consumeBuffer !== false;
+  const allowErrorFallback = !!opts.allowErrorFallback;
+  const extraImages = Array.isArray(opts.inlineImages) ? opts.inlineImages : [];
+
+  // A. 本日初回発言判定 (ファースト・ハロー)
+  // ※朝ブリーフィングは午前04:00〜昼11:59（正午まで）の発言かつ、本日未配信の場合のみ発動
+  const currentHour = new Date().getHours();
+  const isMorningTime = currentHour >= 4 && currentHour < 12;
+  const isFirstHello = isMorningTime && !isBriefingDeliveredToday();
+
+  // B. 蓄積画像＋直接添付画像の統合
+  const bufferedImages = consumeBuffer ? getBufferedImages() : { blobs: [], urls: [] };
+  const extraBlobs = extraImages.map(img => img && img.blob).filter(Boolean);
+  const imageBlobs = bufferedImages.blobs.concat(extraBlobs);
+  let imageUrls = bufferedImages.urls.slice();
+
+  // C. 本日の全会話ログおよびメモリー情報の取得
+  const todayLogsCondensed = getCondensedTodayLogs();
+  const memory = getMemory();
+
+  // D. 生活伴走エンジン実行（Flash-Lite 司令塔 ＋ Flash 動的アセンブル）
+  let turnOutcome = null;
+  let aiResult;
+  let isGeminiSuccess = false;
+  let geminiErrInfo = null;
+  try {
+    turnOutcome = executeCompanionTurn(promptText, imageBlobs, todayLogsCondensed, memory);
+    aiResult = turnOutcome.primaryResult;
+    isGeminiSuccess = true;
+  } catch (geminiErr) {
+    Logger.log('Gemini呼び出しエラー: ' + String((geminiErr && geminiErr.message) || geminiErr));
+    geminiErrInfo = classifyGeminiError_(geminiErr);
+
+    if (!allowErrorFallback) {
+      return {
+        isGeminiSuccess: false,
+        errorCode: geminiErrInfo.code,
+        errorMessage: geminiErrInfo.message,
+        pureReplyText: geminiErrInfo.message,
+        executedNotices: [],
+        briefingText: '',
+        displayReplyText: geminiErrInfo.message,
+        loggedUserText: displayBase,
+        imageUrls: imageUrls,
+        nowStr: Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss'),
+        aiResult: null,
+        turnOutcome: null
+      };
+    }
+
+    aiResult = {
+      reply_text: geminiErrInfo.message,
+      task_actions: [],
+      calendar_actions: [],
+      shopping_actions: [],
+      input_stock_actions: [],
+      routine_actions: [],
+      project_actions: []
+    };
+  }
+
+  // 直接添付された画像はGemini成功後にDriveへ保存（失敗時の不要なDriveゴミを防止）
+  if (isGeminiSuccess && extraImages.length > 0) {
+    for (let i = 0; i < extraImages.length; i++) {
+      const item = extraImages[i];
+      if (!item) continue;
+      if (item.url) {
+        imageUrls.push(item.url);
+      } else if (item.blob) {
+        try {
+          const fname = item.fileName || item.blob.getName() || `pwa_img_${Date.now()}_${i}.jpg`;
+          const saved = saveImageBlobToDrive_(item.blob, fname);
+          imageUrls.push(saved.url);
+        } catch (imgSaveErr) {
+          Logger.log('PWA添付画像のDrive保存エラー: ' + imgSaveErr.message);
+        }
+      }
+    }
+  }
+
+  // F. DB・カレンダー操作アクションの即時適用
+  let pureReplyText = (aiResult.reply_text || '了解いたしました。').trim();
+  const executedNotices = [];
+
+  try {
+    let createdProjectUrlMap = {};
+    if (aiResult.project_actions && aiResult.project_actions.length > 0 && typeof applyProjectActions === 'function') {
+      const projRes = applyProjectActions(aiResult.project_actions);
+      if (projRes && projRes.notices) {
+        executedNotices.push.apply(executedNotices, projRes.notices);
+      }
+      if (projRes && projRes.createdUrlMap) {
+        createdProjectUrlMap = projRes.createdUrlMap;
+      }
+    }
+    if (aiResult.task_actions && aiResult.task_actions.length > 0) {
+      const taskRes = applyTaskActions(aiResult.task_actions, createdProjectUrlMap);
+      executedNotices.push.apply(executedNotices, taskRes);
+    }
+    if (aiResult.calendar_actions && aiResult.calendar_actions.length > 0) {
+      const calRes = applyCalendarActions(aiResult.calendar_actions);
+      executedNotices.push.apply(executedNotices, calRes);
+    }
+    if (aiResult.shopping_actions && aiResult.shopping_actions.length > 0) {
+      const shopRes = applyShoppingActions(aiResult.shopping_actions);
+      executedNotices.push.apply(executedNotices, shopRes);
+    }
+    if (aiResult.input_stock_actions && aiResult.input_stock_actions.length > 0) {
+      const inputRes = applyInputStockActions(aiResult.input_stock_actions);
+      executedNotices.push.apply(executedNotices, inputRes);
+    }
+    if (aiResult.routine_actions && aiResult.routine_actions.length > 0) {
+      const routineRes = applyRoutineActions(aiResult.routine_actions);
+      executedNotices.push.apply(executedNotices, routineRes);
+    }
+  } catch (actionErr) {
+    Logger.log('アクション先行適用エラー: ' + actionErr.message);
+  }
+
+  if (executedNotices.length > 0) {
+    pureReplyText = stripManualNoticeLines_(pureReplyText);
+  }
+
+  let loggedAiReply = pureReplyText;
+  if (executedNotices.length > 0) {
+    loggedAiReply += '\n\n' + executedNotices.join('\n');
+  }
+
+  let briefingText = '';
+  if (isFirstHello && isGeminiSuccess) {
+    markBriefingDeliveredToday();
+    briefingText = buildDailyBriefingText();
+    loggedAiReply += '\n\n' + briefingText;
+  }
+
+  if (typeof opts.onBeforePersist === 'function') {
+    opts.onBeforePersist(loggedAiReply);
+  }
+
+  const nowStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+  let loggedUserText = displayBase;
+  if (aiResult.image_summary && aiResult.image_summary.trim() !== '') {
+    const imgDesc = `[画像内容: ${aiResult.image_summary.trim()}]`;
+    loggedUserText = loggedUserText ? `${loggedUserText}\n${imgDesc}` : imgDesc;
+  }
+
+  // H. 後続処理（バッファクリア・ログ保存・メモリー更新）
+  try {
+    if (isGeminiSuccess && consumeBuffer && bufferedImages.blobs.length > 0) {
+      clearImageBuffer();
+    }
+
+    const imgUrlString = imageUrls.join('\n');
+    const logMeta = turnOutcome ? turnOutcome.logMeta : (aiResult._usage || null);
+    appendLog(nowStr, 'user', loggedUserText, imgUrlString, loggedAiReply, logMeta);
+
+    if (aiResult.memory_updates) {
+      if (aiResult.memory_updates.cycle_stamps_updates) {
+        updateCycleStampsSafely(aiResult.memory_updates.cycle_stamps_updates);
+        Logger.log('周期スタンプ(cycle_stamps)を更新しました: ' + aiResult.memory_updates.cycle_stamps_updates);
+      }
+      if (aiResult.memory_updates.lifestyle_habits) {
+        updateLifestyleHabitsSafely(aiResult.memory_updates.lifestyle_habits);
+        Logger.log('生活習慣メモリー(lifestyle_habits)を更新しました');
+      }
+      if (aiResult.memory_updates.profile) {
+        updateProfileSafely(aiResult.memory_updates.profile);
+        Logger.log('プロファイル(profile)を安全に更新しました');
+      }
+      if (aiResult.memory_updates.dictionary) {
+        updateDictionarySafely(aiResult.memory_updates.dictionary);
+        Logger.log('用語辞書(dictionary)に新しい前提知識を安全に反映しました');
+      }
+    }
+
+    if (memory.monthly_report_ready === 'TRUE') {
+      setMemoryValue('monthly_report_ready', 'FALSE');
+    }
+  } catch (postProcessErr) {
+    Logger.log('後続処理反映エラー: ' + postProcessErr.message);
+  }
+
+  return {
+    isGeminiSuccess: isGeminiSuccess,
+    errorCode: geminiErrInfo ? geminiErrInfo.code : '',
+    errorMessage: geminiErrInfo ? geminiErrInfo.message : '',
+    pureReplyText: pureReplyText,
+    executedNotices: executedNotices,
+    briefingText: briefingText,
+    displayReplyText: loggedAiReply,
+    loggedUserText: loggedUserText,
+    imageUrls: imageUrls,
+    nowStr: nowStr,
+    aiResult: aiResult,
+    turnOutcome: turnOutcome
+  };
 }

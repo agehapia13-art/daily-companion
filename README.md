@@ -128,16 +128,16 @@
 - **Notion投稿成功を確認してから**ログをクリアするデータ保護設計。また、Gemini APIの一時的な高負荷（503/429）に対する自動リトライ機構を完備。
 - 毎月1日には前月日報を日付昇順で自動集約し、月間ハイライト・思い出ジャーナルをNotion月報DBへ投稿。平坦な全件要約や過剰な物語化・美談化・煽りポエムを完全排除し、5領域の等身大の前進・学び・感情の動いたエピソードを淡々と、かつ温かみをもって記録する原則ベースプロンプトを採用。
 
-### 11. 生活伴走Webダッシュボード（GitHub Pages × LIFF × LINEリッチメニュー）
-- **スプレッドシートの`logs`以外（全5タブ）をスマホで直感操作できる専用SPA**:
-  - 🌿 **タスク**: 未完了タスク一覧、プレフィックス別グループ表示、締切順並び替え、Google Docs / Driveフォルダ直リンクボタン（`📄 資料を開く` / `📁 フォルダを開く`）、本文タップでの編集・関連資料URL設定・破棄モーダル。
-  - 🛒 **買い物**: カテゴリ別未買リスト、ワンタップ購入済チェック、クイック追加。
-  - 💡 **ストック**: 映画・音楽・本・ゲーム等の未消化作品一覧、消化チェック、新規追加。
-  - 🔄 **周期・記憶**: 美容院や弦交換などの「あれから○日経過」と「✨ 今日やった」ワンタップ更新、プロフィールや用語辞書の閲覧・編集。
-- **GitHub Pages × LIFF 連携によるネイティブアプリ体験**:
-  - **公開URL**: `https://agehapia13-art.github.io/daily-companion/`
-  - ダッシュボード操作時、LIFFを通じて**LINEトーク画面にユーザー自身の緑の吹き出しで自動発言**され、AIの返信とともに当日ログへ記録。
-  - **LIFF初回認証の整流化 ＆ 自動リカバリーリトライ**: LINE内ブラウザからの初回アクセス時、LINE SDKによる `liff.state` 展開・パラメータ復元を `await initLiff()` で確実に待機してからAPIリクエストを実行するライフサイクルへ整流化。さらに `liff.state` のデコード堅牢化と、万が一の認証失敗時におけるパラメータ再同期＋1回自動リトライ機構を完備し、初回アクセス時の認証失敗・手動リロードを完全根絶。
+### 11. 生活伴走 PWA チャットアプリ（GitHub Pages × LIFF × LINE共通伴走パイプライン）
+- **チャット中心・自然対話主体のレスポンシブ PWA UI (`Chat`, `Tasks`, `Shopping`, `Stock`, `Habits`)**:
+  - **Chat**: LINE Bot と当日の会話ログ (`logs`)・朝ファーストハロー・DB実行通知・Google Docsリンクをリアルタイムに統合表示。送信・エラー時の再試行／入力復元・バックグラウンド受信時 Web 通知（オプトイン）に対応。
+  - **インライン変数ピル入力（Appleショートカット流儀）**: `Tasks`（締切順＋カテゴリ絞込）・`Shopping`・`Stock`・`Habits`（最長経過順）の各カードをタップすると、文字入力カーソル位置へ項目ピルを直接埋め込んで自然な複合文をそのまま AI へ送信（`logs` シートには読みやすい自然な文章で保存）。
+  - **マルチデバイス＆テーマ対応**: モバイル1ペイン（下部5タブ）＋タブレット/PC 2ペイン（左チャット＋右カードワークスペース）。ライト／ダーク（Deep Forest Charcoal）自動追従＋手動切替を完備。
+  - **画像入力 ＆ iOSショートカット共有シート連携**: 写真ライブラリ選択・カメラ直接撮影（`capture="environment"`）・貼り付け・D&D に加え、クライアント側 `<canvas>` JPEG 自動リサイズ・軽量化を搭載。また `apiBufferCompanionImage` により iOS/macOS の「ショートカット」から共有シート画像を事前バッファリング（30分TTL）し、アプリ起動時に待機画像としてシームレスに合流可能（個別キャンセルは `apiRemoveBufferedImage`）。
+  - **モデルルーティングの忠実性**: 画像付きメッセージも通常ターン同様 `memory.backend_model` 設定に従属し、`executeAndPersistCompanionTurn_` を通じて LINE と完全に同一の伴走ロジックで処理・永続化。
+- **GitHub Pages × LIFF 連携**:
+  - **公開URL**: `https://agehapia13-art.github.io/daily-companion/`（`docs/manifest.json`・`docs/sw.js`・`docs/icon.svg` によるホーム画面追加・スタンドアロンPWA動作に対応）
+  - **LIFF初回認証の整流化 ＆ 自動リカバリーリトライ**: LINE内ブラウザ・リッチメニュー（`tab=tasks|shopping|input|memory`）・直接PWA起動のいずれでもURLパラメータ / `liff.state` / `localStorage` をシームレスに引き継ぎ、設定モーダルからの手動接続・再同期にも対応。
 
 ### 12. ログ基盤 ＆ トークン追跡（30日ローリング保持）
 - **スプレッドシート `logs` の16列拡張**:
@@ -170,7 +170,10 @@
 ├── appsscript.json       # タイムゾーン (Asia/Tokyo) およびV8ランタイム設定
 ├── service-account.json  # Google Cloud サービスアカウント秘密鍵 (Git管理対象外)
 ├── docs/
-│   ├── index.html        # GitHub Pages配信用ダッシュボードSPA (scripts/build-dashboard.jsで自動生成)
+│   ├── index.html        # GitHub Pages配信用PWAアプリ (scripts/build-dashboard.jsで自動生成)
+│   ├── manifest.json     # PWA Web App Manifest (standalone / relative scope)
+│   ├── sw.js             # PWA Service Worker (オフライン起動キャッシュ & 通知クリック復帰)
+│   ├── icon.svg          # PWA アプリアイコン
 │   └── .nojekyll         # GitHub Pages高速配信用設定
 ├── src/                  # ★GAS本体コード (全機能のマスター。clasp push でGASへ同期)
 │   ├── appsscript.json   # GASデプロイ用マニフェスト
@@ -181,13 +184,13 @@
 │   ├── Weather.js        # Open-Meteo 天気(最高/最低気温・出社連動渋谷天気) & 気圧急降下検知
 │   ├── Notion.js         # Notion API連携（日報・月報投稿・リッチテキスト/画像ブロック）
 │   ├── Gemini.js         # 2段階ハイブリッド連携（Flash-Liteルーター ＋ Flash動的アセンブル・503リトライ・日報プロンプト）
-│   ├── Line.js           # LINE Reply API & 画像Drive保存
+│   ├── Line.js           # LINE Reply API・Base64/LINE画像Drive保存・30分画像バッファ管理
 │   ├── Batch.js          # dailyMidnightBatch (深夜03:00バッチ / 消化インプット連携 / ログ保護)
-│   ├── Dashboard.js      # WebダッシュボードAPI・HTMLテンプレート ＆ リッチメニュー登録
-│   ├── Webhook.js        # doPost (LINE Webhook & ダッシュボードJSON API) & doGet
+│   ├── Dashboard.js      # PWA/WebアプリAPI (`apiSendCompanionMessage` / 画像バッファAPI等)・SPAテンプレート・リッチメニュー登録
+│   ├── Webhook.js        # LINE・PWA共通伴走パイプライン (`executeAndPersistCompanionTurn_`)・doPost / doGet
 │   └── Setup.js          # 初期設定・メンテナンス・プロンプト検証ドライラン
 ├── scripts/
-│   ├── build-dashboard.js       # src/Dashboard.js から docs/index.html を自動生成 ＆ 埋め込みJS構文を検証
+│   ├── build-dashboard.js       # src/Dashboard.js から docs/ PWA一式を自動生成 ＆ JS/SW構文を検証
 │   ├── migrate-task-prefixes.js # 未完了タスクを7大生活プリフィックス形式へ一括移行（tasks!A2:I全行対象）
 │   ├── sheet-cli.js             # Antigravity/ローカルからスプレッドシートを直接読み書き・同期する操作CLI
 │   └── sync-prompts-to-sheet.js # src/Gemini.js 内の最新プロンプト群および custom_system_prompt を memory シートへ同期
@@ -275,7 +278,7 @@ Google Apps Script プロジェクトの「プロジェクトの設定」>「ス
 # 1. src/ 配下の全ファイル構文チェック（ダッシュボード埋め込みJS構文を含む）
 npm run check
 
-# 2. (ダッシュボード画面変更時) docs/index.html を再ビルド・構文検証
+# 2. (フロントエンド変更時) docs/ 配下のPWAアセットを再ビルド・構文検証
 npm run build:dashboard
 
 # 3. clasp でGASプロジェクトへコードを直接プッシュ (src/ 配下をファイル分割のまま同期)

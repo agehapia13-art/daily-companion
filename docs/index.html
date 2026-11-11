@@ -133,10 +133,25 @@
       -webkit-tap-highlight-color: transparent;
     }
 
-    html, body {
+    html {
       margin: 0;
       padding: 0;
+      width: 100%;
       height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      background-color: var(--dc-bg-base);
+    }
+
+    body {
+      position: fixed;
+      inset: 0;
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
       background-color: var(--dc-bg-base);
       color: var(--dc-text-main);
       font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
@@ -168,13 +183,14 @@
     /* App Shell */
     .dc-shell {
       width: 100%;
-      height: 100vh;
-      height: 100dvh;
+      height: 100%;
+      box-sizing: border-box;
       margin: 0 auto;
       display: flex;
       flex-direction: column;
       position: relative;
       overflow: hidden;
+      overscroll-behavior: none;
       background-color: var(--dc-bg-base);
     }
 
@@ -188,8 +204,9 @@
 
     /* Slim Quiet Header */
     .dc-header {
-      height: 48px;
-      padding: 0 14px;
+      box-sizing: border-box;
+      height: calc(48px + env(safe-area-inset-top));
+      padding: env(safe-area-inset-top) max(14px, env(safe-area-inset-right)) 0 max(14px, env(safe-area-inset-left));
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -267,7 +284,7 @@
       min-width: 0;
       display: grid;
       grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: 1fr auto auto;
+      grid-template-rows: minmax(0, 1fr) auto auto;
       grid-template-areas:
         "main"
         "composer"
@@ -292,6 +309,9 @@
       min-width: 0;
       overflow-y: auto;
       overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+      touch-action: pan-y;
       padding: 12px 16px 24px;
     }
 
@@ -301,6 +321,9 @@
       min-width: 0;
       overflow-y: auto;
       overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+      touch-action: pan-y;
       padding: 12px 16px 24px;
     }
 
@@ -344,10 +367,14 @@
       color: var(--dc-text-muted);
     }
 
+    .dc-shell.keyboard-open .dc-bottom-nav {
+      padding-bottom: 6px;
+    }
+
     @media (min-width: 768px) {
       .dc-workspace {
         grid-template-columns: minmax(0, 1.05fr) minmax(340px, 0.95fr);
-        grid-template-rows: auto 1fr auto;
+        grid-template-rows: auto minmax(0, 1fr) auto;
         grid-template-areas:
           "chat cardtabs"
           "chat cards"
@@ -2004,9 +2031,51 @@
       return window.innerWidth >= 768;
     }
 
-    window.addEventListener('resize', function() {
+    var prevKeyboardOpen = false;
+    function syncViewportLayout() {
+      var vv = window.visualViewport;
+      if (shellEl) {
+        if (vv && vv.height > 0) {
+          shellEl.style.height = Math.round(vv.height) + 'px';
+          var kbOpen = !isSplitViewport() && (window.innerHeight - vv.height > 120);
+          shellEl.classList.toggle('keyboard-open', kbOpen);
+          if (!prevKeyboardOpen && kbOpen && state.activeMobileTab === 'chat') {
+            scrollToChatBottom();
+          }
+          prevKeyboardOpen = kbOpen;
+        } else {
+          shellEl.style.height = '100%';
+          shellEl.classList.remove('keyboard-open');
+          prevKeyboardOpen = false;
+        }
+      }
+      if (window.scrollX !== 0 || window.scrollY !== 0) {
+        window.scrollTo(0, 0);
+      }
       syncVisiblePanels();
+    }
+
+    window.addEventListener('resize', syncViewportLayout);
+    window.addEventListener('orientationchange', function() {
+      setTimeout(syncViewportLayout, 60);
     });
+    window.addEventListener('DOMContentLoaded', syncViewportLayout);
+    window.addEventListener('pageshow', syncViewportLayout);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', syncViewportLayout);
+      window.visualViewport.addEventListener('scroll', syncViewportLayout);
+    }
+    if (editor) {
+      editor.addEventListener('focus', function() {
+        setTimeout(function() {
+          syncViewportLayout();
+          if (!isSplitViewport() && state.activeMobileTab === 'chat') {
+            scrollToChatBottom();
+          }
+        }, 180);
+      });
+    }
+    requestAnimationFrame(syncViewportLayout);
 
     function switchTab(tab) {
       var norm = normalizeTabName(tab);

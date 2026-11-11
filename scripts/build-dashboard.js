@@ -276,7 +276,7 @@ function encodeRgbPng(width, height, rawScanlines) {
 }
 
 function buildServiceWorkerJs() {
-  return `const CACHE_NAME = 'dc-pwa-v2';
+  return `const CACHE_NAME = 'dc-pwa-v3';
 const PRECACHE_URLS = [
   './',
   './index.html',

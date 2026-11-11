@@ -186,8 +186,10 @@
 │   ├── Webhook.js        # doPost (LINE Webhook & ダッシュボードJSON API) & doGet
 │   └── Setup.js          # 初期設定・メンテナンス・プロンプト検証ドライラン
 ├── scripts/
-│   ├── build-dashboard.js # src/Dashboard.js から docs/index.html を自動生成 ＆ 埋め込みJS構文を検証するスクリプト
-│   └── sheet-cli.js       # Antigravity/ローカルからスプレッドシートを直接読み書き・同期する操作CLI
+│   ├── build-dashboard.js       # src/Dashboard.js から docs/index.html を自動生成 ＆ 埋め込みJS構文を検証
+│   ├── migrate-task-prefixes.js # 未完了タスクを7大生活プリフィックス形式へ一括移行（tasks!A2:I全行対象）
+│   ├── sheet-cli.js             # Antigravity/ローカルからスプレッドシートを直接読み書き・同期する操作CLI
+│   └── sync-prompts-to-sheet.js # src/Gemini.js 内の最新プロンプト群および custom_system_prompt を memory シートへ同期
 └── README.md
 ```
 
@@ -220,8 +222,8 @@ Google Apps Script プロジェクトの「プロジェクトの設定」>「ス
 
 ## 📊 スプレッドシート構造（全6タブ）
 
-1. **`logs`**（会話ログ ＆ トークン追跡）:
-   `[時刻, 発言者, メッセージ, 画像URL, AI返答, 入力トークン, 出力トークン, キャッシュトークン, 合計トークン]`
+1. **`logs`**（会話ログ ＆ トークン追跡・全16列対応）:
+   `[時刻, 発言者, メッセージ, 画像URL, AI返答, Lite入力, Lite出力, Liteキャッシュ, Flash入力, Flash出力, Flashキャッシュ, 新総トークン, 判定タグ/フェーズ, 旧AI返答（比較用）, 旧Flash総トークン, トークン削減差分]`
    （※直近30日分を常時ローリング保持。30日を超えた古いログのみ深夜バッチで安全にパージ）
 2. **`tasks`**（単発タスク）:
    `[タスクID, タスク名, 期限, ステータス(未完了/完了/破棄), 登録日, 完了日, メモ, リマインド目安, 関連URL]`
@@ -234,10 +236,12 @@ Google Apps Script プロジェクトの「プロジェクトの設定」>「ス
 6. **`memory`**（中長期記憶 ＆ モジュール型プロンプト体系）: `[キー, 値]`
    - **記憶・前提データ**:
      - `profile`: ユーザー属性・生活前提条件
+     - `ideal_self`: ありたい人間像・生活指針（提案・判断の羅針盤）
      - `dictionary`: 用語辞書（客観的前提知識）
      - `rolling_memory`: 最近の関心・ログ（直近7〜10日分の活動・関心バッファ）
      - `weekly_summary`: 直近数日間の疲労・睡眠サマリー
      - `lifestyle_habits`: 生活習慣・運動（散歩、室内ストレッチ動画、フィットネスゲーム等）・身体ケアの前提定義
+     - `skill_options`: 能動的スキルアップメニュー（時間枠別の音楽・ビジネス選択肢）
      - `cycle_stamps`: 周期メンテナンス ＆ 音楽スキルアップ記録（経過日数を動的に自動注釈）
      - `project_folders`: Google Drive プロジェクトフォルダ ＆ 代表Google Doc台帳（AI自動判別・紐付け用）
      - `project_root_ids`: 7大カテゴリ親フォルダIDキャッシュJSON（API応答高速化用）
@@ -254,6 +258,7 @@ Google Apps Script プロジェクトの「プロジェクトの設定」>「ス
      - `prompt_phase_d`: フェーズD（通常対話・完了労い・雑談・事実質問）
      - `prompt_db`: DB・カレンダー・タスク操作時の厳密仕様
      - `prompt_relief`: 体調不良・疲労時のケア＆引き算ルール
+     - `custom_system_prompt`: 追加カスタム指示（レイアウト・改行・時報アナウンス禁止等の最優先ルール）
 
 ---
 
@@ -268,26 +273,29 @@ Google Apps Script プロジェクトの「プロジェクトの設定」>「ス
 # 1. src/ 配下の全ファイル構文チェック（ダッシュボード埋め込みJS構文を含む）
 npm run check
 
-# 2. clasp でGASプロジェクトへコードを直接プッシュ (src/ 配下をファイル分割のまま同期)
-npm run push   # (npx clasp push --force)
-
-# 3. (ダッシュボード画面変更時のみ) docs/index.html を再ビルド・構文検証
+# 2. (ダッシュボード画面変更時) docs/index.html を再ビルド・構文検証
 npm run build:dashboard
 
-# 4. GitHubへ最新コードと変更履歴を保存（毎回必ずコミット＆プッシュ）
+# 3. clasp でGASプロジェクトへコードを直接プッシュ (src/ 配下をファイル分割のまま同期)
+npm run push   # (npx clasp push --force)
+
+# 4. 既存WebアプリデプロイIDを新バージョンへ更新（通常更新時）
+npx clasp deployments
+npx clasp deploy -i <デプロイID> -d "feat/fix: 変更内容の概要"
+
+# 5. GitHubへ最新コードと変更履歴を保存（毎回必ずコミット＆プッシュ）
 git add . && git commit -m "feat/fix: 変更内容の概要" && git push origin main
 ```
 
 > [!IMPORTANT]
-> **権限承認の都合上、AI側は `clasp push`（コード反映）および `git push`（リポジトリ保存）までを実施し、GASのデプロイコマンドは実行しません。**
+> **通常のコード更新・バグ修正は上記のとおり `clasp push` ＋ `clasp deploy -i <デプロイID>` までCLI側から一気通貫で実施できます（初回デプロイやGoogle OAuthスコープ追加時など、権限承認が必要な場合のみGASエディタでの手動操作が必要です）。**
 
-### 2. GASエディタ側でのデプロイ更新（ユーザー手動担当）
+### 2. GASエディタ側での承認・手動操作が必要なケース
 
-Googleアカウントの権限設定・スコープ承認が必要となるため、**コードプッシュ後のWebアプリのデプロイ（新バージョン発行）はユーザー自身がGASエディタ上で行います**：
+Googleアカウントの権限設定・OAuthスコープ承認が必要となる以下のケースでは、ユーザー自身がGASエディタ上で操作を行います：
 
-1. GASエディタ右上の **「デプロイ」＞「デプロイを管理」** を開く。
-2. 鉛筆マーク（編集）を押し、バージョンを **「新バージョン」**、アクセスできるユーザーを **「全員」** にして「デプロイ」を押す。
-3. （必要に応じて初回やスコープ追加時）アクセス権限の承認画面が出た場合は承認を完了する。
+1. 新規デプロイ作成やアクセス権変更時：GASエディタ右上の **「デプロイ」＞「デプロイを管理」** から設定・デプロイを実行する。
+2. 新しいGoogle APIスコープ追加時（例: Google Docs / Drive 連携の初回導入等）：該当するセットアップ関数（例: `setupInitialProjectSystem`）をエディタ上で実行し、アクセス権限の承認画面で許可を完了する。
 
 ### 3. プロンプト改善・即時反映運用（完全ノーデプロイ）
 
@@ -307,13 +315,14 @@ Googleアカウントの権限設定・スコープ承認が必要となるた�
   ```bash
   # コード上の全プロンプトをスプレッドシートへ一括同期
   node scripts/sheet-cli.js sync-prompts
-  # モジュール一覧の確認
+  # モジュール一覧・特定モジュールの確認・更新
   node scripts/sheet-cli.js get-prompt
-  # 特定モジュールの確認
   node scripts/sheet-cli.js get-prompt prompt_phase_c
-  # 特定モジュールの更新
   node scripts/sheet-cli.js set-prompt prompt_phase_c "新しいプロンプト内容"
-  # タスク一覧・ログの確認
+  # memory キーの確認・更新（profile, project_folders 等）
+  node scripts/sheet-cli.js get-memory [key]
+  node scripts/sheet-cli.js set-memory <key> <value>
+  # タスク一覧（全行・関連URL列対応）・会話ログの確認
   node scripts/sheet-cli.js get-tasks 未完了
   node scripts/sheet-cli.js get-logs 10 検索キーワード
   ```

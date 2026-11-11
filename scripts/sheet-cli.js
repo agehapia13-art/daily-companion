@@ -92,14 +92,14 @@ async function setMemory(key, value) {
 async function getTasks(filterStatus) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'tasks!A2:H100'
+    range: 'tasks!A2:I'
   });
   const rows = res.data.values || [];
   console.log(`=== タスク一覧 (全${rows.length}件${filterStatus ? '・フィルタ: ' + filterStatus : ''}) ===`);
   rows.forEach((r, i) => {
-    const [id, title, dueDate, status, createdDate, completedDate, memo, remindContext] = r;
+    const [id, title, dueDate, status, createdDate, completedDate, memo, remindContext, docUrl] = r;
     if (!filterStatus || status === filterStatus) {
-      console.log(`[Row ${i + 2}] [${id || ''}] ${title || ''} | 期限: ${dueDate || 'なし'} | 状態: ${status || ''} | 作成: ${createdDate || ''} | 完了: ${completedDate || ''} | メモ: ${memo || ''} | 目安: ${remindContext || ''}`);
+      console.log(`[Row ${i + 2}] [${id || ''}] ${title || ''} | 期限: ${dueDate || 'なし'} | 状態: ${status || ''} | 作成: ${createdDate || ''} | 完了: ${completedDate || ''} | メモ: ${memo || ''} | 目安: ${remindContext || ''}${docUrl ? ' | URL: ' + docUrl : ''}`);
     }
   });
 }

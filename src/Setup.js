@@ -260,6 +260,7 @@ function runPromptScenario(scenario) {
   });
 
   let runningLogs = scenario.initialLogs || '';
+  let cachedSheetTasks = null;
 
   Logger.log('============================================================');
   Logger.log(`🧪 【${scenario.name}】 (${scenario.turns.length}ターン / 新システム単独ドライラン)`);
@@ -283,7 +284,22 @@ function runPromptScenario(scenario) {
     const meta = outcome.logMeta || {};
     const newReply = (outcome.primaryResult && outcome.primaryResult.reply_text) || '';
 
+    const focusedIds = (outcome.liteResult && Array.isArray(outcome.liteResult.focused_task_ids))
+      ? outcome.liteResult.focused_task_ids
+      : [];
+    let focusedDisplay = 'なし (0件)';
+    if (focusedIds.length > 0) {
+      if (!turnMemory._testMockTasks && !cachedSheetTasks) {
+        cachedSheetTasks = getTasks('未完了');
+      }
+      const refTasks = turnMemory._testMockTasks || cachedSheetTasks || [];
+      const titleById = {};
+      refTasks.forEach(t => { if (t && t.id) titleById[t.id] = t.title; });
+      focusedDisplay = `${focusedIds.length}件 -> ` + focusedIds.map(id => titleById[id] ? `[${id}] ${titleById[id]}` : id).join(' / ');
+    }
+
     Logger.log(`\n🧭 [Lite判定]: ${meta.phaseAndTags || ''}`);
+    Logger.log(`🎯 [Lite選出タスク (focused_task_ids)]: ${focusedDisplay}`);
     Logger.log(`📊 [トークン]: 新システム合計 ${meta.newTotalTokens} tok (Lite: ${(meta.litePromptTokens || 0) + (meta.liteCandidatesTokens || 0)} + Flash: ${(meta.flashPromptTokens || 0) + (meta.flashCandidatesTokens || 0)})`);
     Logger.log(`\n🆕 【新システム応答 (${outcome.phaseLabel})】:\n${newReply}${formatActionSummary_(outcome.primaryResult)}`);
 

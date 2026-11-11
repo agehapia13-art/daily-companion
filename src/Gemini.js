@@ -472,6 +472,48 @@ function getDefaultPromptPhaseD() {
 }
 
 /**
+ * 7大生活プリフィックスの分類基準・命名規則のデフォルト定義（prompt_db ＆ 各マイクロDBスキーマの単一情報源）
+ * @return {string}
+ * @private
+ */
+function getDefaultTaskPrefixGuide_() {
+  return `   - 命名規則（7大生活プリフィックスの厳守）: タスクのタイトルはダッシュボードでの一覧性と生活領域の直交性を保つため、必ず以下の【7大生活プリフィックス】のいずれかを先頭に角括弧で付与してください：
+     * [仕事]: 本業業務、社内手続き、勤務・出社に伴う用事
+     * [制作・創作]: 音楽制作・DTM・楽器・プラグイン、執筆、イラスト等、表現物や専門成果物を生み出す創造活動・スキル制作
+     * [家事・環境]: 掃除、片付け、洗濯、消耗品・日用品、道具・コスメの手入れ、デジタル環境整理など住・作業環境の整備
+     * [実務・手続]: 契約・保険・お金・行政手続き、相談・連絡調整、および生活基盤や本システム（生活伴走システム）の保守・機能改善など生活運営の実務
+     * [趣味・文化]: ゲーム、読書、映画・アニメ鑑賞、音楽鑑賞など、作品をプレイ・鑑賞して楽しむ余暇・娯楽インプット
+     * [身体・ケア]: 運動、散歩、睡眠、健康管理、受診、身だしなみ・セルフケア
+     * [お出かけ]: 外出体験、下見、散策、店舗訪問など移動を伴う用事
+     形式: \`[大分類] 具体的な内容\` または \`[大分類] 対象・プロジェクト：具体的な内容\`。時間指定がある場合は末尾に \`（〜HH:mmまで）\` を明記する。`;
+}
+
+/**
+ * カスタム prompt_db（設定時）またはデフォルト定義から7大生活プリフィックス分類基準を抽出
+ * @param {string=} customDbPrompt
+ * @return {string}
+ * @private
+ */
+function resolveTaskPrefixGuide_(customDbPrompt) {
+  if (customDbPrompt && typeof customDbPrompt === 'string') {
+    const match = customDbPrompt.match(/(?:^|\n)([ \t]*-\s*命名規則（7大生活プリフィックス[^\n]*\n[\s\S]*?)(?=\n[ \t]*-\s*(?:リマインド目安|★|期限|タスク)|$)/);
+    if (match && match[1] && match[1].trim()) {
+      return match[1].replace(/\s+$/, '');
+    }
+  }
+  return getDefaultTaskPrefixGuide_();
+}
+
+/**
+ * 新規タスク・更新タスクにおける既存プロジェクト紐付け（project_name）の共通ルール
+ * @return {string}
+ * @private
+ */
+function getTaskProjectLinkRule_() {
+  return `   - ★既存プロジェクト紐付け (project_name): 【既存プロジェクトフォルダ一覧（Drive連携）】にある既存フォルダと「同じ生活領域（[大分類]）かつ主題が直接一致する」場合、または同ターンで新規作成する場合のみフォルダ名を指定する。別領域のフォルダや連想・こじつけでの紐付けは禁止し、該当しない独立タスクはキー自体を省略すること。`;
+}
+
+/**
  * デフォルトのDB操作仕様 ＆ JSONスキーマ (prompt_db)
  * @return {string}
  */
@@ -480,17 +522,10 @@ function getDefaultPromptDb() {
 タスク・カレンダー・買物・インプット・ルーティン・メモリー操作が必要な場合は、以下の仕様に従ってJSONキーを出力してください（不要なキーは省略すること）：
 
 1. タスク操作 (task_actions):
-   - 命名規則（7大生活プリフィックスの厳守）: タスクのタイトルはダッシュボードでの一覧性と生活領域の直交性を保つため、必ず以下の【7大生活プリフィックス】のいずれかを先頭に角括弧で付与してください：
-     * [仕事]: 本業業務、社内業務、出社時の用事など
-     * [制作・創作]: 音楽制作・DTM/REAPER・作曲・ギター・プラグイン・執筆・イラスト・個人開発など
-     * [家事・環境]: 掃除、片付け、洗濯、消耗品・日用品、コスメ・道具の手入れ、デジタル整理など
-     * [実務・手続]: 保険、税金・お金、行政手続き、生活伴走システム開発など
-     * [趣味・文化]: ゲーム（モンスト、刀剣乱舞等）、読書、アニメ・映画、音楽鑑賞など
-     * [身体・ケア]: 運動、散歩、睡眠、健康、受診、爪切り・セルフケアなど
-     * [お出かけ]: 外出、下見、散策、買い物先での用事など
-     形式: \`[大分類] 具体的な内容\` または \`[大分類] プロジェクト：具体的な内容\`（例: \`[制作・創作] REAPER：MCP連携の続き\`, \`[趣味・文化] 刀剣乱舞：回想回収\`, \`[家事・環境] メイクボックスの要件定義\`）。時間指定がある場合は末尾に \`（〜HH:mmまで）\` を明記する。
+${getDefaultTaskPrefixGuide_()}
+   - 期限 (due_date): ユーザーから期限・期間・実施日の明示がある場合のみ \`YYYY-MM-DD\` を設定し、未指定の調査・検討タスク等ではキーを省略すること。
    - リマインド目安 (remind_context): 新規追加(add)や更新(update)の際、そのタスクを提案すべき最適なタイミング・状況（例: \`隙間15分・自室\`, \`夜・帰宅後\`, \`休日まとまった時間・PC\`, \`19時以降\` 等）を文脈から推論して必ず付与する。特に昼頃までの日中締切（\`〜11:59まで\` 等）があるタスクには \`締切前日夜 または 当日朝\` を設定する。また、外出・見学・旅行等の体験タスク追加時は、外的条件と連動できるよう \`休日お出かけ・晴れ\`、\`週末日中\` などの条件を設定する。
-   - ★既存プロジェクト自動紐付け (project_name): 新規追加(\`add\`)または更新(\`update\`)時、コンテキストの【既存プロジェクトフォルダ一覧（Drive連携）】や同時作成プロジェクトに関連するものがあれば、\`project_name\` にそのプロジェクトフォルダ名（例: \`2611_BFプラグイン購入検討\`）を指定して自動紐付けする。独立単発タスクの場合は省略すること。
+${getTaskProjectLinkRule_()}
    - ★連携資料とメモ欄の責務分離（重要）: 対象タスクに \`[📄資料連携済]\` が付いている（または対応する \`📄Doc連携あり\` プロジェクトが存在する）場合、検討候補・URL・調査メモ・案などの情報蓄積にはスプレッドシートの \`memo\` 列を上書きせず、必ず後述の \`project_actions\`（\`append_doc\`）へ出力すること。\`task_actions\` の \`update\` は期限・優先度・タイトル・資料紐付け等の制御属性変更のみに使用する。
    - ★タスク更新 (update) の差分パッチ原則: 変更するキーのみを出力してください（例: リスケなら \`task_id\` と \`due_date\` のみ出力）。指定のないキーはGAS側で既存値がそのまま保持されます。
    - ★一括リスケ指示への対応: 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭の了解だけで済ませず、コンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（\`due_date\` を翌日日付 \`YYYY-MM-DD\` に変更）を配列で確実に出力すること。
@@ -517,7 +552,7 @@ function getDefaultPromptDb() {
   "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "image_summary": "（※画像添付時のみ）画像の客観的な内容要約",
   "task_actions": [
-    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安（例: 夜・自室 / 休日PC 等）", "project_name": "（※既存/同時作成プロジェクトへ紐付ける場合のみ）" },
+    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "（※期限指定がある場合のみ YYYY-MM-DD。未指定時は省略）", "memo": "補足", "remind_context": "提案目安（例: 夜・自室 / 休日PC 等）", "project_name": "（※同領域かつ主題が直接一致する既存/同時作成プロジェクトがある場合のみ。該当なしはキー省略）" },
     { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD", "project_name": "（※紐付け先変更時のみ）" },
     { "action": "complete", "task_id": "T_..." },
     { "action": "delete", "task_id": "T_..." }
@@ -542,7 +577,7 @@ function getDefaultPromptDb() {
     { "action": "delete", "title": "タイトル" }
   ],
   "routine_actions": [
-    { "action": "add", "title": "ルール名", "type": "day_of_week/day_of_month/interval_days", "value": "設定値" }
+    { "action": "add", "title": "[大分類] 具体的な内容", "type": "day_of_week/day_of_month/interval_days", "value": "設定値" }
   ],
   "memory_updates": {
     "cycle_stamps_updates": "（※対象活動の実施報告時のみ）項目名: YYYY-MM-DD",
@@ -556,11 +591,14 @@ function getDefaultPromptDb() {
 /**
  * DB操作種別に応じた最小限のJSONスキーマ・仕様モジュールを返す（Flashの入力トークン節約）
  * @param {string} dbTargetType 'task_complete' | 'task_add' | 'task_update' | 'task_delete' | 'project_doc' | 'calendar' | 'shopping' | 'input_stock' | 'other'
- * @param {string=} customDbPrompt カスタムDBプロンプト（設定されていれば'other'時に優先）
+ * @param {string=} customDbPrompt カスタムDBプロンプト（設定時はプリフィックス定義および'other'時に優先）
  * @return {string}
  * @private
  */
 function getMicroDbSchema_(dbTargetType, customDbPrompt) {
+  const prefixGuide = resolveTaskPrefixGuide_(customDbPrompt);
+  const projectLinkRule = getTaskProjectLinkRule_();
+
   if (dbTargetType === 'task_all' || dbTargetType === 'task_mixed') {
     return `【データベース操作仕様: タスク操作（追加・更新・完了・破棄）】
 発言内容に応じて、必要なタスク操作を task_actions に配列で出力してください（完了・更新・追加の混在も可）：
@@ -571,14 +609,17 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
     - 例（優先度・リマインド変更）: { "action": "update", "task_id": "T_...", "remind_context": "直近の空き枠・最優先", "memo": "..." }
     - 例（タイトル変更）: { "action": "update", "task_id": "T_...", "new_title": "新タイトル" }
     - 例（既存プロジェクト資料紐付け）: { "action": "update", "task_id": "T_...", "project_name": "2611_〇〇" }
-  * 追加(add): コンテキストの【既存プロジェクトフォルダ一覧（Drive連携）】に関連する既存プロジェクトがある場合は project_name を指定して自動紐付け（独立タスクなら省略）。
+  * 追加(add):
+${prefixGuide}
+    - 期限 (due_date): ユーザーから期限・期間・実施日の明示がある場合のみ YYYY-MM-DD を設定し、未指定の調査・検討タスク等では省略する。
+${projectLinkRule}
 - 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭了解だけでなくコンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（due_date を翌日日付 YYYY-MM-DD に変更）を配列で出力してください。
 {
   "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "task_actions": [
     { "action": "complete", "task_id": "T_..." },
     { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" },
-    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安", "project_name": "（※関連既存プロジェクトがある場合のみ）" },
+    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "（※期限指定がある場合のみ YYYY-MM-DD。未指定時は省略）", "memo": "補足", "remind_context": "提案目安", "project_name": "（※同領域かつ主題が直接一致する既存プロジェクトがある場合のみ。該当なしはキー省略）" },
     { "action": "delete", "task_id": "T_..." }
   ]
 }`;
@@ -596,13 +637,14 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
   if (dbTargetType === 'task_add') {
     return `【データベース操作仕様: タスク追加】
 タスクを新規追加する場合は、以下のJSONキーを出力してください：
-- 命名規則: 必ず7大生活プリフィックス（[仕事], [制作・創作], [家事・環境], [実務・手続], [趣味・文化], [身体・ケア], [お出かけ]）のいずれかを先頭に角括弧で付与し、「[大分類] 具体的な内容」または「[大分類] プロジェクト：具体的な内容」の形式で命名。時間指定がある場合は末尾に「（〜HH:mmまで）」を明記。
+${prefixGuide}
+- 期限 (due_date): ユーザーから期限・期間・実施日の明示がある場合のみ YYYY-MM-DD を設定し、未指定の調査・検討タスク等ではキーを省略すること。
 - リマインド目安 (remind_context): そのタスクを提案すべき最適なタイミング・状況（例: 「夜・自室」「休日PC」等）を文脈から推論して必ず設定。
-- 既存プロジェクト自動紐付け (project_name): コンテキストの【既存プロジェクトフォルダ一覧（Drive連携）】に明確に関連する既存プロジェクトがある場合は、そのフォルダ名（例: "2611_BFプラグイン購入検討"）を指定して自動紐付けすること。独立タスクなら省略する。
+${projectLinkRule}
 {
   "reply_text": "【必須】ユーザーへの返信文",
   "task_actions": [
-    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安", "project_name": "（※既存プロジェクトに関連する場合のみ）" }
+    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "（※期限指定がある場合のみ YYYY-MM-DD。未指定時は省略）", "memo": "補足", "remind_context": "提案目安", "project_name": "（※同領域かつ主題が直接一致する既存プロジェクトがある場合のみ。該当なしはキー省略）" }
   ]
 }`;
   }
@@ -636,7 +678,9 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
   if (dbTargetType === 'project_doc') {
     return `【データベース操作仕様: Google Drive プロジェクトフォルダ＆Google Docs連携】
 プロジェクトフォルダ作成・Google Docs作成・Docへの追記・タスク紐付けを行う場合は、以下のJSONキーを出力してください：
-- 7大カテゴリ（マイドライブ直下）: 仕事 / 制作・創作 / 家事・環境 / 実務・手続 / 趣味・文化 / 身体・ケア / お出かけ
+${prefixGuide}
+- ※project_actions の category には、上記7大生活プリフィックスから角括弧を外した名称（仕事 / 制作・創作 / 家事・環境 / 実務・手続 / 趣味・文化 / 身体・ケア / お出かけ）を指定すること。
+- 期限 (due_date): ユーザーから期限・期間・実施日の明示がある場合のみ YYYY-MM-DD を設定し、未指定時は省略すること。
 - フォルダ命名規則: 必ず YYMM_プロジェクト名 形式（例: 2611_〇〇）とし、親カテゴリ直下にファイルを直置きしない。
 - ★最重要【連携資料とタスクメモの責務分離】:
   * 対象タスクに [📄資料連携済] が付いている場合（または対応する 📄Doc連携あり プロジェクトがある場合）、検討候補・URL・調査メモ・アイデア等の情報蓄積は tasks の memo を書き換えるのではなく、必ず append_doc を使って連携 Google Doc へ追記すること。
@@ -653,7 +697,7 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
     { "action": "append_doc", "project_name": "既存プロジェクト名", "task_id": "（※対象タスクがある場合）", "content": "追記内容（名称・URL・要点など）" }
   ],
   "task_actions": [
-    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安", "project_name": "YYMM_プロジェクト名" },
+    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "（※期限指定がある場合のみ YYYY-MM-DD。未指定時は省略）", "memo": "補足", "remind_context": "提案目安", "project_name": "YYMM_プロジェクト名" },
     { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }
   ]
 }`;
@@ -703,13 +747,14 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
 毎日・毎週などの定期的な日課・ルーティン化を依頼された場合は、以下のJSONキーを出力してください：
 - 【明日以降の自動生成ルール】: routine_actions にルールを出力（毎日なら type: "interval_days", value: "1"、特定曜日なら type: "day_of_week", value: "MON" 等）。
 - 【本日分の未完了タスク】: 「今日はまだやってない」等、本日分のタスクがまだ実行されていない場合は、本日すぐ取り組めるよう task_actions にも本日の単発タスク（due_date: 当日日付）を出力してください。
+${prefixGuide}
 {
   "reply_text": "【必須】ユーザーへの返信文",
   "routine_actions": [
-    { "action": "add", "title": "対象/プロジェクト：具体的な内容", "type": "interval_days", "value": "1", "memo": "補足" }
+    { "action": "add", "title": "[大分類] 具体的な内容", "type": "interval_days", "value": "1", "memo": "補足" }
   ],
   "task_actions": [
-    { "action": "add", "title": "対象/プロジェクト：具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" }
+    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" }
   ]
 }`;
   }

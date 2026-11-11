@@ -172,8 +172,17 @@ function syncSystemPromptToSpreadsheet() {
  * - 新システム（2モデル体制: Lite + Flash）と旧システム（単一Flash 6,400文字）の応答・トークン・アクションを並列比較します。
  */
 function testCustomScenario() {
-  // [📄資料連携済] タスクに対する自然なDoc追記 vs 純粋な期限変更の直交ルーティング検証
+  // タスク新規追加（task_add / 複数同時追加）における7大生活プリフィックス分類精度 ＆ 不要期限省略の検証
   const mockTasks = [
+    {
+      id: 'T_20261111_151947_950',
+      title: '[実務・手続] 生活伴走システム：Webダッシュボードの独立アクセス化・データ取得高速化の検討',
+      dueDate: '',
+      status: '未完了',
+      memo: 'LINE経由だけでなくPC/iPad等から直接アクセスできるようにする改修およびデータ取得高速化の検討',
+      remindContext: '休日まとまった時間・PC',
+      docUrl: ''
+    },
     {
       id: 'T_20261102_093316_410',
       title: '[制作・創作] ブラックフライデーのプラグイン購入検討',
@@ -182,30 +191,21 @@ function testCustomScenario() {
       memo: 'セール対象プラグインのリストアップ・検討',
       remindContext: '休日PC・夜自由時間',
       docUrl: 'https://docs.google.com/document/d/1XUq6hv030_P_XyP2btiyo1m1yyMdNwP69fHJ5Pq7aiQ/edit'
-    },
-    {
-      id: 'T_20261026_191721_102',
-      title: '[家事・環境] Googleドライブのファイル整理',
-      dueDate: '',
-      status: '未完了',
-      memo: '時間かかるからそのうち',
-      remindContext: 'PC作業・隙間30分',
-      docUrl: 'https://docs.google.com/document/d/1HAQ5iAV3K5jeB41ghXY9CzB9j8JkOkQYy44XSwFfats/edit'
     }
   ];
 
   const scenario = {
-    name: '検証: 資料連携済みタスクへの自然なDoc追記 ＆ 期限変更の直交判別',
+    name: '検証: 生活伴走システム改修タスクの分類一貫性 ＆ 複数カテゴリ混在追加',
     initialLogs: '',
     turns: [
       {
-        time: '2026-11-11 13:45:29',
-        user: 'ブラックフライデーでの検討プラグインにこれを追加して https://store.minet.jp/category/_WAVES_SIN_EQ/10416.html',
+        time: '2026-11-11 17:08:07',
+        user: 'このシステムの改善タスクをそれぞれ作ってほしい\n- 終了したルーティンの完了フラグ\n- 出社が外歩き・散歩に反映されない',
         mockTasks: mockTasks
       },
       {
-        time: '2026-11-11 13:47:00',
-        user: 'ブラックフライデーの期限は11/29まで延ばしておいて',
+        time: '2026-11-11 17:15:00',
+        user: 'あと、モンストの今週のラキモン作りと、REAPERのショートカット見直しもタスクに入れといて',
         mockTasks: mockTasks
       }
     ]

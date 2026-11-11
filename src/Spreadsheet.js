@@ -467,6 +467,28 @@ function normalizeTaskRemindContext_(title, rawRemindContext) {
 }
 
 /**
+ * タスクの7大生活プリフィックスと既存プロジェクトの親カテゴリフォルダの直交整合性を検証
+ * @param {string} taskTitle
+ * @param {string} projectCategoryFolderName 例: '03_家事・環境'
+ * @return {boolean} タイトルが7大プリフィックスのいずれかであり、かつ別カテゴリフォルダと明確に不一致の場合は false
+ * @private
+ */
+function isProjectCategoryCompatibleWithTask_(taskTitle, projectCategoryFolderName) {
+  const folder = String(projectCategoryFolderName || '').trim();
+  if (!folder) return true;
+  const match = String(taskTitle || '').trim().match(/^\[([^\]]+)\]/);
+  if (!match || !match[1]) return true;
+  const taskPrefix = match[1].trim();
+  const categories = (typeof SYSTEM_CONSTANTS !== 'undefined' && SYSTEM_CONSTANTS.PROJECT_ROOT_CATEGORIES) || [];
+  for (let i = 0; i < categories.length; i++) {
+    if (categories[i].prefix === taskPrefix) {
+      return categories[i].folderName === folder;
+    }
+  }
+  return true;
+}
+
+/**
  * タスクアクション（doc_url / project_name）から関連Google Docs / フォルダURLを解決
  * @param {Object} act
  * @param {Object=} extraProjectUrlMapOpt 同一ターンで作成されたプロジェクト名 -> URL マップ
@@ -498,6 +520,10 @@ function resolveTaskDocUrl_(act, extraProjectUrlMapOpt, getEntriesFnOpt) {
     const entries = getEntriesFnOpt();
     const entry = findProjectEntry(entries, projQuery);
     if (entry) {
+      if (act.action === 'add' && !isProjectCategoryCompatibleWithTask_(act.title, entry.categoryFolderName)) {
+        Logger.log(`[誤紐付けガード] タスク(${act.title})と既存プロジェクト(${entry.categoryFolderName}/${entry.projectName})の生活領域が一致しないため自動紐付けをスキップします`);
+        return null;
+      }
       const url = getProjectEntryResourceUrl(entry);
       if (url) return url;
     }

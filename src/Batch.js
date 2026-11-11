@@ -28,6 +28,11 @@ function dailyMidnightBatch() {
   const inputStock = getInputStockList();
   const memory = getMemory();
 
+  // 前日および日付変更後〜午前3時までに完了したタスク・消化したインプット・対象日カレンダー予定を抽出
+  const completedTasks = tasks.filter(t => t.status === '完了' && (t.completedDate === targetDateStr || t.completedDate === todayStr));
+  const consumedInputs = inputStock.filter(inp => inp.status === '完' && (inp.consumedDate === targetDateStr || inp.consumedDate === todayStr));
+  const targetDateEvents = (typeof getTodayEventsList === 'function') ? getTodayEventsList(yesterday) : [];
+
   let isDailyReportSuccess = false;
 
   // ----------------------------------------------------
@@ -35,9 +40,6 @@ function dailyMidnightBatch() {
   // ----------------------------------------------------
   try {
     Logger.log('1. 日報生成 & Notion投稿処理開始');
-    // 前日および日付変更後〜午前3時までに完了したタスク・消化したインプットを抽出
-    const completedTasks = tasks.filter(t => t.status === '完了' && (t.completedDate === targetDateStr || t.completedDate === todayStr));
-    const consumedInputs = inputStock.filter(inp => inp.status === '完' && (inp.consumedDate === targetDateStr || inp.consumedDate === todayStr));
 
     if (logs.length > 0 || completedTasks.length > 0 || consumedInputs.length > 0) {
       const dailyMarkdown = generateDailyReportMarkdown(logs, completedTasks, memory, targetDateStr, consumedInputs);
@@ -60,7 +62,7 @@ function dailyMidnightBatch() {
   // ----------------------------------------------------
   try {
     Logger.log('2. 中長期メモリー更新処理開始');
-    if (logs.length > 0) {
+    if (logs.length > 0 || completedTasks.length > 0) {
       const memoryUpdates = analyzeMemoryUpdates(
         logs,
         memory.cycle_stamps,
@@ -68,7 +70,12 @@ function dailyMidnightBatch() {
         memory.rolling_memory,
         memory.profile,
         memory.dictionary,
-        targetDateStr
+        targetDateStr,
+        {
+          lifestyleHabits: memory.lifestyle_habits || '',
+          targetEvents: targetDateEvents,
+          completedTasks: completedTasks
+        }
       );
       if (memoryUpdates.rolling_memory) {
         setMemoryValue('rolling_memory', memoryUpdates.rolling_memory);

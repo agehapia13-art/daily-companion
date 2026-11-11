@@ -427,8 +427,9 @@ function executeAndPersistCompanionTurn_(params) {
 
     if (aiResult.memory_updates) {
       if (aiResult.memory_updates.cycle_stamps_updates) {
-        updateCycleStampsSafely(aiResult.memory_updates.cycle_stamps_updates);
-        Logger.log('周期スタンプ(cycle_stamps)を更新しました: ' + aiResult.memory_updates.cycle_stamps_updates);
+        if (updateCycleStampsSafely(aiResult.memory_updates.cycle_stamps_updates)) {
+          Logger.log('周期スタンプ(cycle_stamps)を更新しました: ' + aiResult.memory_updates.cycle_stamps_updates);
+        }
       }
       if (aiResult.memory_updates.lifestyle_habits) {
         updateLifestyleHabitsSafely(aiResult.memory_updates.lifestyle_habits);

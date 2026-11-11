@@ -835,9 +835,13 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed,
   if (memory && memory.lifestyle_habits && memory.lifestyle_habits.trim() !== '') {
     userContent += `【生活習慣・活動定義 (lifestyle_habits)】:\n${memory.lifestyle_habits.trim()}\n`;
   }
-  const stampEntries = parseCycleStampEntries_(memory && memory.cycle_stamps);
-  if (stampEntries.length > 0) {
-    userContent += `【登録済み周期スタンプ一覧 (cycle_stamps)】: ${stampEntries.map(e => `${e.label} (${e.normalizedDate || e.value})`).join(' / ')}\n`;
+  if (memory && memory.cycle_stamps && memory.cycle_stamps.trim() !== '') {
+    const pendingStampEntries = getPendingCycleStampEntries_(memory.cycle_stamps, precomputed.todayDate);
+    if (pendingStampEntries.length > 0) {
+      userContent += `【登録済み周期スタンプ一覧 (cycle_stamps)】: ${pendingStampEntries.map(e => `${e.label} (${e.normalizedDate || e.value})`).join(' / ')}\n`;
+    } else if (parseCycleStampEntries_(memory.cycle_stamps).length > 0) {
+      userContent += `【登録済み周期スタンプ一覧 (cycle_stamps)】: （本日分は全て記録済み）\n`;
+    }
   }
   userContent += '\n';
 
@@ -993,6 +997,18 @@ function parseCycleStampEntries_(rawStamps) {
 }
 
 /**
+ * cycle_stamps のうち本日まだ記録されていない項目だけを抽出する
+ * @param {string} rawStamps
+ * @param {Date=} todayDate
+ * @return {Array<{label: string, value: string, normalizedDate: string}>}
+ * @private
+ */
+function getPendingCycleStampEntries_(rawStamps, todayDate) {
+  const todayDateStr = Utilities.formatDate(todayDate || new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+  return parseCycleStampEntries_(rawStamps).filter(entry => entry.normalizedDate !== todayDateStr);
+}
+
+/**
  * cycle_stamps 文字列をパースし、各項目の経過日数ラベルを付与した文字列を生成
  * @param {string} rawStamps
  * @param {Date} todayDate
@@ -1139,13 +1155,11 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   const needWeather = (Boolean(liteResult.weather_relevance) || phase === 'PHASE_C' || isRelief);
 
   const todayDateStr = Utilities.formatDate(precomputed.todayDate || new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
-  const allStampEntries = parseCycleStampEntries_(memory && memory.cycle_stamps);
   const matchedStampLabels = (liteResult && Array.isArray(liteResult.matched_cycle_stamps))
     ? liteResult.matched_cycle_stamps.map(s => String(s || '').trim()).filter(Boolean)
     : [];
-  const pendingStampEntries = allStampEntries.filter(entry =>
-    matchedStampLabels.indexOf(entry.label) !== -1 && entry.normalizedDate !== todayDateStr
-  );
+  const pendingStampEntries = getPendingCycleStampEntries_(memory && memory.cycle_stamps, precomputed.todayDate)
+    .filter(entry => matchedStampLabels.indexOf(entry.label) !== -1);
   const hasPendingCycleStamps = pendingStampEntries.length > 0;
   const stampTargetNames = pendingStampEntries.map(e => e.label).join('、');
   const stampExampleLines = pendingStampEntries.map(e => `${e.label}: ${todayDateStr}`).join('\\n');

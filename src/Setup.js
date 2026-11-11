@@ -172,52 +172,135 @@ function syncSystemPromptToSpreadsheet() {
  * - 新システム（2モデル体制: Lite + Flash）と旧システム（単一Flash 6,400文字）の応答・トークン・アクションを並列比較します。
  */
 function testCustomScenario() {
-  // タスク更新（カテゴリ変更・タイトル修正・資料連携済みタスクの制御属性分離）を本番同等 backend_model: lite で検証
+  // 周期スタンプ（外歩き・散歩）のリアルタイム更新＆深夜バッチ3点クロスチェックを本番同等 backend_model: lite で検証（完全ドライラン）
+  const currentMemory = getMemory();
+  const baseHabits = (currentMemory.lifestyle_habits || '').trim();
+  const updatedOutdoorRule = '③ 屋外（30分〜1時間 / 周期スタンプ「外歩き・散歩」対象）: 近所の散歩・外気浴のほか、出社・外出等で最寄り駅まで徒歩往復する日（片道15分強・往復30分超）も屋外歩行・運動の実績とみなす（駅ホーム到着・電車乗車・出社や外出の開始/帰宅報告も該当）。';
+  const mockLifestyleHabits = baseHabits.includes('③ 屋外')
+    ? baseHabits.replace(/③\s*屋外[^\n]*/, updatedOutdoorRule)
+    : `${baseHabits}\n${updatedOutdoorRule}`;
+
+  const baseStamps = (currentMemory.cycle_stamps || '').trim();
+  const stampsBeforeNov4 = baseStamps.replace(/外歩き・散歩[：:].*/, '外歩き・散歩: 2026-10-28');
+  const stampsAlreadyNov10 = baseStamps.replace(/外歩き・散歩[：:].*/, '外歩き・散歩: 2026-11-10');
+
   const mockTasks = [
     {
-      id: 'T_20261019_101646_564',
-      title: '[実務・手続] 生活伴走システム：仕事用伴走環境（ChatGPT再現）の構想・仕様検討',
-      dueDate: '',
+      id: 'T_20261104_090000_001',
+      title: '[趣味・文化] モンスト メダル受け取り',
+      dueDate: '2026-11-04',
       status: '未完了',
-      memo: 'ChatGPTを活用して業務用の生活・業務伴走システムを再現するアイデアの検討',
-      remindContext: '休日まとまった時間・PC',
+      memo: '',
+      remindContext: '朝・出勤前',
       docUrl: ''
-    },
-    {
-      id: 'T_20261102_093316_410',
-      title: '[制作・創作] ブラックフライデーのプラグイン購入検討',
-      dueDate: '2026-11-27',
-      status: '未完了',
-      memo: 'セール対象プラグインのリストアップ・検討',
-      remindContext: '休日PC・夜自由時間',
-      docUrl: 'https://docs.google.com/document/d/1XUq6hv030_P_XyP2btiyo1m1yyMdNwP69fHJ5Pq7aiQ/edit'
     }
   ];
 
-  const scenario = {
-    name: '検証: タスクカテゴリ変更・タイトル修正（model:lite / 資料連携タスク保護）',
+  // A-1: 駅到着 + タスク完了の混在ターン (task_complete と cycle_stamps_updates の両立)
+  runPromptScenario({
+    name: '検証A-1: 駅到着＋タスク完了の混在ターン (2026-11-04 / model:lite)',
     useLiteForBackend: true,
+    mockMemory: {
+      lifestyle_habits: mockLifestyleHabits,
+      cycle_stamps: stampsBeforeNov4
+    },
+    mockTasks: mockTasks,
     initialLogs: '',
     turns: [
       {
-        time: '2026-11-11 22:27:41',
-        user: '「生活伴走システム：仕事用伴走環境（ChatGPT再現）の構想・仕様検討」 これ仕事環境の話なのでタスクカテゴリを仕事にしてほしい',
-        mockTasks: mockTasks
-      },
-      {
-        time: '2026-11-11 22:30:00',
-        user: '「ブラックフライデーのプラグイン購入検討」 のカテゴリを趣味・文化に変えておいて',
-        mockTasks: mockTasks
-      },
-      {
-        time: '2026-11-11 22:31:00',
-        user: '「生活伴走システム：仕事用伴走環境（ChatGPT再現）の構想・仕様検討」のタイトルを「[仕事] 仕事用伴走環境（ChatGPT再現）の構想・仕様検討」に変えておいて',
-        mockTasks: mockTasks
+        time: '2026-11-04 09:53:11',
+        user: '上大岡のホーム着いた　メダル受け取り完了'
       }
     ]
-  };
+  });
 
-  runPromptScenario(scenario);
+  // A-2: Phase B (出社出発送り出し + 周期スタンプ更新) → 同日帰宅時の重複抑止
+  runPromptScenario({
+    name: '検証A-2: Phase B 出社送り出し＆スタンプ更新 → 同日重複更新抑止 (2026-11-10 / model:lite)',
+    useLiteForBackend: true,
+    mockMemory: {
+      lifestyle_habits: mockLifestyleHabits,
+      cycle_stamps: stampsBeforeNov4
+    },
+    initialLogs: '',
+    turns: [
+      {
+        time: '2026-11-10 09:59:53',
+        user: '電車に乗った　これから出社'
+      },
+      {
+        time: '2026-11-10 19:20:00',
+        user: 'これから帰るよ〜',
+        mockMemory: {
+          cycle_stamps: stampsAlreadyNov10
+        }
+      }
+    ]
+  });
+
+  // A-3: 有給休暇日の誤更新防止 (カレンダー上に「♪出社」が残っていても外出扱いしない)
+  runPromptScenario({
+    name: '検証A-3: 有給休暇日のリアルタイム誤検知防止 (2026-11-11 / model:lite)',
+    useLiteForBackend: true,
+    mockMemory: {
+      lifestyle_habits: mockLifestyleHabits,
+      cycle_stamps: stampsAlreadyNov10
+    },
+    initialLogs: '01:33 User: 明日は休みとった〜',
+    turns: [
+      {
+        time: '2026-11-11 10:30:00',
+        user: 'おはよう　今日は休みとったから家でゆっくりする'
+      }
+    ]
+  });
+
+  // B: 深夜バッチ analyzeMemoryUpdates 3点クロスチェック検証 (完全ドライラン)
+  Logger.log('============================================================');
+  Logger.log('🧪 【検証B: 深夜バッチ analyzeMemoryUpdates 3点クロスチェック】');
+  Logger.log('============================================================');
+
+  const commuteBatchRes = analyzeMemoryUpdates(
+    [
+      { timestampStr: '2026-11-10 09:59:53', sender: 'user', message: '電車に乗った　これから出社' },
+      { timestampStr: '2026-11-10 22:55:00', sender: 'user', message: '懇親会やりきって帰宅したよ！' }
+    ],
+    stampsBeforeNov4,
+    currentMemory.weekly_summary,
+    currentMemory.rolling_memory,
+    currentMemory.profile,
+    currentMemory.dictionary,
+    '2026-11-10',
+    {
+      lifestyleHabits: mockLifestyleHabits,
+      targetEvents: ['[共用] 11:00〜19:00 ♪出社', '19:30〜22:00 懇親会'],
+      completedTasks: [{ title: '[仕事] 懇親会の進行準備', completedDate: '2026-11-10' }]
+    }
+  );
+  Logger.log('\n--- 🌙 Case B-1: 2026-11-10 実出社日 (期待: 外歩き・散歩 -> 2026-11-10) ---');
+  Logger.log('cycle_stamps:\n' + (commuteBatchRes.cycle_stamps || '（なし）'));
+
+  const mockRollingWithLeave = `${(currentMemory.rolling_memory || '').replace(/- 2026-11-10:[\s\S]*/, '').trim()}\n- 2026-11-10: 出社日。懇親会を無事やり切った。翌日は休暇を取得しており起床時間を楽しみに眠りについた。`;
+  const leaveBatchRes = analyzeMemoryUpdates(
+    [
+      { timestampStr: '2026-11-11 01:33:36', sender: 'user', message: '明日は休みとった〜　ゆっくり寝る！' }
+    ],
+    stampsAlreadyNov10,
+    currentMemory.weekly_summary,
+    mockRollingWithLeave,
+    currentMemory.profile,
+    currentMemory.dictionary,
+    '2026-11-11',
+    {
+      lifestyleHabits: mockLifestyleHabits,
+      targetEvents: ['[共用] 11:00〜19:00 ♪出社'],
+      completedTasks: []
+    }
+  );
+  Logger.log('\n--- 🌙 Case B-2: 2026-11-11 カレンダー♪出社残留×有休申告 (期待: 2026-11-10維持 / rolling_memoryが休暇扱い) ---');
+  Logger.log('cycle_stamps:\n' + (leaveBatchRes.cycle_stamps || '（なし）'));
+  Logger.log('rolling_memory (末尾):\n' + String(leaveBatchRes.rolling_memory || '').split('\n').slice(-2).join('\n'));
+  Logger.log('💡 完全ドライランのため、スプレッドシートの書き換えは行っていません。');
 }
 
 /**
@@ -248,13 +331,15 @@ function testAllStandardScenario() {
  * @param {{
  *   name: string,
  *   initialLogs?: string,
- *   turns: Array<{ time: string, user: string }>
+ *   mockMemory?: Object,
+ *   mockTasks?: Array<Object>,
+ *   turns: Array<{ time: string, user: string, mockMemory?: Object, mockTasks?: Array<Object> }>
  * }} scenario
  */
 function runPromptScenario(scenario) {
   const memory = getMemory();
   // 新システム単独ドライランモード（コード内最新のデフォルトプロンプトを直接評価）
-  const testMemory = Object.assign({}, memory, {
+  const testMemory = Object.assign({}, memory, scenario.mockMemory || {}, {
     prompt_lite: '', // コード最新の getDefaultPromptLite() を確実に評価
     prompt_core: '', // コード最新の getDefaultPromptCore() を確実に評価
     prompt_phase_a: '', // コード最新の getDefaultPromptPhaseA() を確実に評価
@@ -288,7 +373,7 @@ function runPromptScenario(scenario) {
     Logger.log(`\n--- 💬 Turn ${i + 1} [${timeLabel}] ---`);
     Logger.log(`User: ${turn.user}`);
 
-    const turnMemory = Object.assign({}, testMemory);
+    const turnMemory = Object.assign({}, testMemory, turn.mockMemory || {});
     if (turn.mockTasks || scenario.mockTasks) {
       turnMemory._testMockTasks = turn.mockTasks || scenario.mockTasks;
     }
@@ -313,6 +398,10 @@ function runPromptScenario(scenario) {
 
     Logger.log(`\n🧭 [Lite判定]: ${meta.phaseAndTags || ''}`);
     Logger.log(`🎯 [Lite選出タスク (focused_task_ids)]: ${focusedDisplay}`);
+    const matchedStamps = (outcome.liteResult && Array.isArray(outcome.liteResult.matched_cycle_stamps) && outcome.liteResult.matched_cycle_stamps.length > 0)
+      ? outcome.liteResult.matched_cycle_stamps.join(', ')
+      : 'なし';
+    Logger.log(`📌 [Lite検出スタンプ (matched_cycle_stamps)]: ${matchedStamps}`);
     const actualBackend = meta.backendModel || backendLabel;
     Logger.log(`📊 [トークン]: 合計 ${meta.newTotalTokens} tok (前段Lite: ${(meta.litePromptTokens || 0) + (meta.liteCandidatesTokens || 0)} + 後段[${actualBackend}]: ${(meta.flashPromptTokens || 0) + (meta.flashCandidatesTokens || 0)})`);
     Logger.log(`\n🆕 【新システム応答 (${outcome.phaseLabel} / ${actualBackend})】:\n${newReply}${formatActionSummary_(outcome.primaryResult)}`);
@@ -371,14 +460,19 @@ function testDailyBriefingOutput() {
 
 /**
  * 手動テスト用: 中期記憶(rolling_memory)および長期記憶(profile)の代謝テスト（ドライラン）
+ * @param {string=} targetDateStrOpt 指定日付の例: '2026-11-10'（省略時は当日全ログ対象）
  */
-function testMemoryLifecycleSimulation() {
+function testMemoryLifecycleSimulation(targetDateStrOpt) {
   Logger.log('=== 記憶新陳代謝テスト開始 ===');
-  const logs = getLogs();
+  const now = new Date();
+  const targetDateStr = targetDateStrOpt || Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd');
+  const targetDate = targetDateStrOpt ? new Date(`${targetDateStr}T12:00:00+09:00`) : now;
+  const logs = targetDateStrOpt ? getLogs(targetDateStr) : getLogs();
   const memory = getMemory();
-  const todayStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+  const targetEvents = (typeof getTodayEventsList === 'function') ? getTodayEventsList(targetDate) : [];
+  const completedTasks = getTasks('完了').filter(t => t.completedDate === targetDateStr);
 
-  Logger.log(`対象ログ件数: ${logs.length} 件`);
+  Logger.log(`対象日: ${targetDateStr} / 対象ログ件数: ${logs.length} 件 / 完了タスク: ${completedTasks.length} 件`);
   const updates = analyzeMemoryUpdates(
     logs,
     memory.cycle_stamps,
@@ -386,7 +480,12 @@ function testMemoryLifecycleSimulation() {
     memory.rolling_memory,
     memory.profile,
     memory.dictionary,
-    todayStr
+    targetDateStr,
+    {
+      lifestyleHabits: memory.lifestyle_habits || '',
+      targetEvents: targetEvents,
+      completedTasks: completedTasks
+    }
   );
 
   Logger.log('【解析結果】rolling_memory:\n' + (updates.rolling_memory || '（なし）'));

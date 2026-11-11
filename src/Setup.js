@@ -597,6 +597,17 @@ function testDailyReportDryRun(targetDateStrOpt) {
 }
 
 /**
+ * 手動テスト用: 温度シグナルと水増し排除の挙動を複数実ログ日で一括ドライラン検証
+ * GASエディタ上で引数なしで実行し、11/04・11/05・11/06・11/11 の4日分を続けてログ出力します。
+ */
+function testDailyReportSamplesDryRun() {
+  const sampleDates = ['2026-11-04', '2026-11-05', '2026-11-06', '2026-11-11'];
+  for (let i = 0; i < sampleDates.length; i++) {
+    testDailyReportDryRun(sampleDates[i]);
+  }
+}
+
+/**
  * 手動テスト用: 月報生成の完全ドライラン検証（Notion投稿なし・プレーンテキスト出力）
  * - Notion日報DBから指定月（未指定時は直近月、例: 2026-10）の日報データを集約
  * - Gemini 3.8 Flash で月間ジャーナル（Markdown）を生成

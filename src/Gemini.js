@@ -245,9 +245,13 @@ const LITE_RESPONSE_SCHEMA = {
     },
     matched_habit_topic: {
       type: 'STRING'
+    },
+    matched_cycle_stamps: {
+      type: 'ARRAY',
+      items: { type: 'STRING' }
     }
   },
-  required: ['tags', 'previous_action_status', 'action_intent', 'focused_task_ids', 'need_db_action', 'db_target_type', 'future_schedule_inquiry', 'location', 'health_status', 'weather_relevance', 'matched_habit_topic']
+  required: ['tags', 'previous_action_status', 'action_intent', 'focused_task_ids', 'need_db_action', 'db_target_type', 'future_schedule_inquiry', 'location', 'health_status', 'weather_relevance', 'matched_habit_topic', 'matched_cycle_stamps']
 };
 
 /**
@@ -310,14 +314,14 @@ function getDefaultPromptLite() {
    - "none"（操作不要）
    - "task_complete"（タスク完了）
    - "task_add"（単発タスク追加・目標のタスク化・外出体験・既存プロジェクトへの新規タスク追加と紐付け）
-   - "task_update"（タスクの制御属性更新: 期限リスケ・優先度/リマインド目安変更・タイトル修正、および [📄資料連携済] が無い通常タスクへの短い補足メモ更新）
+   - "task_update"（タスクの制御属性更新: 期限リスケ・カテゴリ/タイトル変更・優先度/リマインド目安変更、および [📄資料連携済] が無い通常タスクへの短い補足メモ更新）
    - "task_delete"（タスク削除）
    - "project_doc"（Google Driveのプロジェクトフォルダ新規作成・Google Docs作成・タスク紐付け、および [📄資料連携済] タスクや 📄Doc連携あり プロジェクトに対する検討候補・URL・メモ内容の追加/追記全般 ※「ドキュメント」「資料」と明記しない自然な追加依頼もすべてここへ分類すること）
    - "routine"（毎日のタスク化・定期ルーティン・日課追加）
    - "calendar"（予定登録/変更）
    - "shopping"（買物メモ・食べたい食品・欲しい物）
    - "input_stock"（作品ストック: 映画/音楽/本/ゲーム等）
-   - "memory"（生活習慣・プロファイル・辞書更新）
+   - "memory"（生活習慣・周期スタンプ・プロファイル・辞書更新）
    - "other"（買物とタスクなど、2つ以上の異なるDB操作が同時に必要な場合・その他）
 
 7. future_schedule_inquiry（未来日程・カレンダー照会の有無）:
@@ -336,7 +340,13 @@ function getDefaultPromptLite() {
    - 外出・移動の言及、天気・気温・気圧の質問、または屋外活動（散歩・買い物等）の可能性がある場合は true、室内完結のやり取りなら false。
 
 11. matched_habit_topic（関連生活習慣トピックの動的キー照合）:
-   - コンテキストで提示された【登録済み生活習慣トピック一覧】の中で、今回の発言または直前の継続中行動に直接関連するトピック名があればそのトピック名を1つ出力。無関係であれば "none" を出力。`;
+   - コンテキストで提示された【登録済み生活習慣トピック一覧】の中で、今回の発言または直前の継続中行動に直接関連するトピック名があればそのトピック名を1つ出力。無関係であれば "none" を出力。
+
+12. matched_cycle_stamps（周期スタンプの実施検知）:
+   - コンテキストで提示された【登録済み周期スタンプ一覧 (cycle_stamps)】の中から、今回の発言または当日の会話履歴において「実際に開始・実施・達成した」と判断できる項目名（表記そのまま）を配列で選出。
+   - 【原則ベースの実施判定】:
+     * スタンプ項目名の直接的な言及だけでなく、【ユーザー基本基盤 (profile)】および【生活習慣・活動定義 (lifestyle_habits)】に照らし合わせ、報告された実際の行動・移動・達成タスクがその項目の実施条件（物理的な移動・活動内容等）を必然的に伴う場合も実施とみなして選出する。
+     * 【除外】: これから行う未実行の単なる願望・未来予定の相談、および本格的な実施・メンテナンス基準に満たない極めて軽微な部分ケアは除外し、該当なしの場合は空配列 [] を出力。`;
 }
 
 /**
@@ -485,7 +495,7 @@ function getDefaultTaskPrefixGuide_() {
      * [趣味・文化]: ゲーム、読書、映画・アニメ鑑賞、音楽鑑賞など、作品をプレイ・鑑賞して楽しむ余暇・娯楽インプット
      * [身体・ケア]: 運動、散歩、睡眠、健康管理、受診、身だしなみ・セルフケア
      * [お出かけ]: 外出体験、下見、散策、店舗訪問など移動を伴う用事
-     形式: \`[大分類] 具体的な内容\` または \`[大分類] 対象・プロジェクト：具体的な内容\`。時間指定がある場合は末尾に \`（〜HH:mmまで）\` を明記する。`;
+     形式: \`[大分類] 具体的な内容\` または \`[大分類] 対象・プロジェクト：具体的な内容\`。時間指定がある場合は末尾に \`（〜HH:mmまで）\` を明記する。なお、ユーザーからカテゴリ・領域の明示指定がある場合は、上記分類基準よりもユーザー指定を優先する。`;
 }
 
 /**
@@ -526,8 +536,8 @@ ${getDefaultTaskPrefixGuide_()}
    - 期限 (due_date): ユーザーから期限・期間・実施日の明示がある場合のみ \`YYYY-MM-DD\` を設定し、未指定の調査・検討タスク等ではキーを省略すること。
    - リマインド目安 (remind_context): 新規追加(add)や更新(update)の際、そのタスクを提案すべき最適なタイミング・状況（例: \`隙間15分・自室\`, \`夜・帰宅後\`, \`休日まとまった時間・PC\`, \`19時以降\` 等）を文脈から推論して必ず付与する。特に昼頃までの日中締切（\`〜11:59まで\` 等）があるタスクには \`締切前日夜 または 当日朝\` を設定する。また、外出・見学・旅行等の体験タスク追加時は、外的条件と連動できるよう \`休日お出かけ・晴れ\`、\`週末日中\` などの条件を設定する。
 ${getTaskProjectLinkRule_()}
-   - ★連携資料とメモ欄の責務分離（重要）: 対象タスクに \`[📄資料連携済]\` が付いている（または対応する \`📄Doc連携あり\` プロジェクトが存在する）場合、検討候補・URL・調査メモ・案などの情報蓄積にはスプレッドシートの \`memo\` 列を上書きせず、必ず後述の \`project_actions\`（\`append_doc\`）へ出力すること。\`task_actions\` の \`update\` は期限・優先度・タイトル・資料紐付け等の制御属性変更のみに使用する。
-   - ★タスク更新 (update) の差分パッチ原則: 変更するキーのみを出力してください（例: リスケなら \`task_id\` と \`due_date\` のみ出力）。指定のないキーはGAS側で既存値がそのまま保持されます。
+   - ★連携資料とメモ欄の責務分離（重要）: 対象タスクに \`[📄資料連携済]\` が付いている（または対応する \`📄Doc連携あり\` プロジェクトが存在する）場合、検討候補・URL・調査メモ・案などの情報蓄積にはスプレッドシートの \`memo\` 列を上書きせず、必ず後述の \`project_actions\`（\`append_doc\`）へ出力すること。\`task_actions\` の \`update\` は期限・優先度・カテゴリ・タイトル・資料紐付け等の制御属性変更のみに使用する。
+   - ★タスク更新 (update) の差分パッチ原則: 変更するキーのみを出力してください（例: リスケなら \`task_id\` と \`due_date\`、カテゴリ変更なら \`task_id\` と \`category\`（7大カテゴリ名）、タイトル本文変更なら \`task_id\` と \`new_title\` を出力）。指定のないキーはGAS側で既存値がそのまま保持されます。
    - ★一括リスケ指示への対応: 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭の了解だけで済ませず、コンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（\`due_date\` を翌日日付 \`YYYY-MM-DD\` に変更）を配列で確実に出力すること。
    - ★優先度・方針指定: ユーザーから「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の提案方針・優先度指定があった場合も、口頭の了解だけで済ませず必ず update を出力する。\`remind_context\` に優先度を反映した状況（例: \`直近の空き枠・最優先\`, \`休日PC・最優先\` 等）を設定し、\`memo\` に指定された背景・理由（例: \`昨今の情勢を考慮し優先度高め\` 等）を追記・更新する。
    - タスク完了(complete)・破棄(delete): \`task_id\` を指定すれば \`title\` は省略可能。
@@ -553,7 +563,7 @@ ${getTaskProjectLinkRule_()}
   "image_summary": "（※画像添付時のみ）画像の客観的な内容要約",
   "task_actions": [
     { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "（※期限指定がある場合のみ YYYY-MM-DD。未指定時は省略）", "memo": "補足", "remind_context": "提案目安（例: 夜・自室 / 休日PC 等）", "project_name": "（※同領域かつ主題が直接一致する既存/同時作成プロジェクトがある場合のみ。該当なしはキー省略）" },
-    { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD", "project_name": "（※紐付け先変更時のみ）" },
+    { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD", "category": "（※カテゴリ変更時のみ: 7大カテゴリ名）", "new_title": "（※タイトル本文変更時のみ）", "project_name": "（※紐付け先変更時のみ）" },
     { "action": "complete", "task_id": "T_..." },
     { "action": "delete", "task_id": "T_..." }
   ],
@@ -606,8 +616,9 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
   * 完了(complete)・破棄(delete): task_id が分かっている場合は title を省略し、{ "action": "complete", "task_id": "T_..." } のみ出力。
   * 更新(update): 変更するキーのみを出力（差分パッチ）。変更のない項目は出力しないこと（GAS側で指定のない項目は保持されます）。
     - 例（リスケのみ）: { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }
+    - 例（カテゴリ変更）: { "action": "update", "task_id": "T_...", "category": "7大カテゴリ名" }（※先頭[大分類]のみ付け替え）
     - 例（優先度・リマインド変更）: { "action": "update", "task_id": "T_...", "remind_context": "直近の空き枠・最優先", "memo": "..." }
-    - 例（タイトル変更）: { "action": "update", "task_id": "T_...", "new_title": "新タイトル" }
+    - 例（タイトル文言変更）: { "action": "update", "task_id": "T_...", "new_title": "[大分類] 新タイトル" }
     - 例（既存プロジェクト資料紐付け）: { "action": "update", "task_id": "T_...", "project_name": "2611_〇〇" }
   * 追加(add):
 ${prefixGuide}
@@ -618,7 +629,7 @@ ${projectLinkRule}
   "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "task_actions": [
     { "action": "complete", "task_id": "T_..." },
-    { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" },
+    { "action": "update", "task_id": "T_...", "due_date": "（※期限変更時のみ YYYY-MM-DD）", "category": "（※カテゴリ変更時のみ: 7大カテゴリ名）", "new_title": "（※タイトル文言変更時のみ）" },
     { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "（※期限指定がある場合のみ YYYY-MM-DD。未指定時は省略）", "memo": "補足", "remind_context": "提案目安", "project_name": "（※同領域かつ主題が直接一致する既存プロジェクトがある場合のみ。該当なしはキー省略）" },
     { "action": "delete", "task_id": "T_..." }
   ]
@@ -650,18 +661,20 @@ ${projectLinkRule}
   }
   if (dbTargetType === 'task_update') {
     return `【データベース操作仕様: タスク更新】
-タスクの更新・延期・優先度変更を行う場合は、以下のJSONキーを出力してください：
+タスクの更新・カテゴリ変更・延期・優先度変更・タイトル修正を行う場合は、以下のJSONキーを出力してください：
+${prefixGuide}
 - 【完全差分パッチ原則】: 変更するキーのみを出力してください。変更のない項目はキー自体を省略すること（GAS側で指定のない項目は保持されます）。
   * 例（リスケのみ）: { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }
+  * 例（カテゴリ変更）: { "action": "update", "task_id": "T_...", "category": "7大カテゴリ名" }（※タイトル本文は維持し先頭[大分類]のみ付け替え。上記7大生活プリフィックスから角括弧を外した名称を指定）
   * 例（優先度・リマインド変更）: { "action": "update", "task_id": "T_...", "remind_context": "直近の空き枠・最優先", "memo": "..." }
-  * 例（タイトル変更）: { "action": "update", "task_id": "T_...", "new_title": "新タイトル" }
+  * 例（タイトル文言変更）: { "action": "update", "task_id": "T_...", "new_title": "[大分類] 新タイトル" }
   * 例（資料・プロジェクト紐付け）: { "action": "update", "task_id": "T_...", "project_name": "2611_〇〇" }
 - 「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の指定があった場合も、口頭の了解だけで済ませず必ず update を出力し、remind_context（例: 「直近の空き枠・最優先」「休日PC・最優先」等）と memo（背景・理由）を更新してください。
 - 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭了解だけでなくコンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（due_date を翌日日付 YYYY-MM-DD に変更）を配列で出力してください。
 {
   "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "task_actions": [
-    { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }
+    { "action": "update", "task_id": "T_...", "due_date": "（※期限変更時のみ YYYY-MM-DD）", "category": "（※カテゴリ変更時のみ: 7大カテゴリ名）", "new_title": "（※タイトル文言変更時のみ）" }
   ]
 }`;
   }
@@ -698,7 +711,7 @@ ${prefixGuide}
   ],
   "task_actions": [
     { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "（※期限指定がある場合のみ YYYY-MM-DD。未指定時は省略）", "memo": "補足", "remind_context": "提案目安", "project_name": "YYMM_プロジェクト名" },
-    { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }
+    { "action": "update", "task_id": "T_...", "due_date": "（※期限変更時のみ YYYY-MM-DD）", "category": "（※カテゴリ変更時のみ: 7大カテゴリ名）", "new_title": "（※タイトル文言変更時のみ）" }
   ]
 }`;
   }
@@ -760,12 +773,14 @@ ${prefixGuide}
   }
   if (dbTargetType === 'memory') {
     return `【データベース操作仕様: メモリー更新】
-生活習慣（lifestyle_habits）、用語辞書（dictionary）、プロファイル（profile）を更新する場合は、以下のJSONキーを出力してください：
+周期スタンプ（cycle_stamps_updates）、生活習慣（lifestyle_habits）、用語辞書（dictionary）、プロファイル（profile）を更新する場合は、以下のJSONキーを出力してください：
+- 周期スタンプ（cycle_stamps）に登録されている活動の実施が確認・報告された場合は cycle_stamps_updates（例: "項目名: YYYY-MM-DD"）に出力してください。
 - 食事・入浴・睡眠・余白や趣味などの生活リズムやこだわりは lifestyle_habits（例: "[トピック名]: 更新後の内容"）に出力してください。
 - 住居・家族構成・勤務形態・通勤時間などの恒久基盤のみ profile に出力してください。
 {
   "reply_text": "【必須】ユーザーへの返信文",
   "memory_updates": {
+    "cycle_stamps_updates": "（※対象活動の実施確認・報告時のみ）項目名: YYYY-MM-DD",
     "lifestyle_habits": "（※生活習慣・時間リズム・余白習慣の変更時）[トピック名]: 更新後の内容",
     "profile": "（※住居・家族構成・勤務形態等の恒久基盤変更時のみ）更新後のプロファイル全文",
     "dictionary": "（※新出用語の説明時のみ）単語名: 客観的な定義"
@@ -812,7 +827,19 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed,
   userContent += `【現在日時】: ${precomputed.nowStr}\n`;
   userContent += `【直前のやり取りからの経過時間(Δt)】: ${precomputed.elapsedStr}\n`;
   userContent += `【時間の鏡（現在の予定・次の境界までの残り時間）】: ${precomputed.boundaryInfo.summaryText}\n`;
-  userContent += `【本日のカレンダー予定一覧】: ${precomputed.todayEvents.length > 0 ? precomputed.todayEvents.join(' / ') : '予定なし'}\n\n`;
+  userContent += `【本日のカレンダー予定一覧】: ${precomputed.todayEvents.length > 0 ? precomputed.todayEvents.join(' / ') : '予定なし'}\n`;
+
+  if (memory && memory.profile && memory.profile.trim() !== '') {
+    userContent += `【ユーザー基本基盤 (profile)】: ${memory.profile.trim()}\n`;
+  }
+  if (memory && memory.lifestyle_habits && memory.lifestyle_habits.trim() !== '') {
+    userContent += `【生活習慣・活動定義 (lifestyle_habits)】:\n${memory.lifestyle_habits.trim()}\n`;
+  }
+  const stampEntries = parseCycleStampEntries_(memory && memory.cycle_stamps);
+  if (stampEntries.length > 0) {
+    userContent += `【登録済み周期スタンプ一覧 (cycle_stamps)】: ${stampEntries.map(e => `${e.label} (${e.normalizedDate || e.value})`).join(' / ')}\n`;
+  }
+  userContent += '\n';
 
   // Liteがスマートにタスクを選別・キュレーションできるよう、未完了タスク概要を注入
   if (uncompletedTasks && uncompletedTasks.length > 0) {
@@ -863,7 +890,8 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed,
         location: parsed.location || '自宅',
         health_status: parsed.health_status || '通常',
         weather_relevance: Boolean(parsed.weather_relevance),
-        matched_habit_topic: parsed.matched_habit_topic || 'none'
+        matched_habit_topic: parsed.matched_habit_topic || 'none',
+        matched_cycle_stamps: Array.isArray(parsed.matched_cycle_stamps) ? parsed.matched_cycle_stamps.map(s => String(s || '').trim()).filter(Boolean) : []
       },
       usage: res.usage
     };
@@ -881,7 +909,8 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed,
         location: '自宅',
         health_status: '通常',
         weather_relevance: false,
-        matched_habit_topic: 'none'
+        matched_habit_topic: 'none',
+        matched_cycle_stamps: []
       },
       usage: { promptTokenCount: 0, candidatesTokenCount: 0, cachedContentTokenCount: 0, totalTokenCount: 0 }
     };
@@ -935,6 +964,32 @@ function determineActionPhase(liteResult, boundaryInfo) {
 
   // それ以外（通常対話、完了受諾、DB操作等） -> フェーズD
   return 'PHASE_D';
+}
+
+/**
+ * cycle_stamps 文字列をエントリ配列へ安全にパースする
+ * @param {string} rawStamps
+ * @return {Array<{label: string, value: string, normalizedDate: string}>}
+ * @private
+ */
+function parseCycleStampEntries_(rawStamps) {
+  if (!rawStamps || typeof rawStamps !== 'string' || !rawStamps.trim()) return [];
+  const entries = [];
+  const lines = rawStamps.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^([^:：]+)[：:]\s*(.+)$/);
+    if (!m) continue;
+    const label = m[1].replace(/^[・\-\s]+/, '').trim();
+    const value = m[2].trim();
+    if (!label) continue;
+    let normalizedDate = '';
+    const dm = value.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+    if (dm) {
+      normalizedDate = `${dm[1]}-${String(Number(dm[2])).padStart(2, '0')}-${String(Number(dm[3])).padStart(2, '0')}`;
+    }
+    entries.push({ label: label, value: value, normalizedDate: normalizedDate });
+  }
+  return entries;
 }
 
 /**
@@ -1069,7 +1124,7 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   const hasProjectTopicWord = /(フォルダ|ドキュメント|Google\s*Docs?|Docs|資料|プロジェクト|ドライブ|Drive)/.test(userText || '');
   const hasProjectActionWord = /(フォルダ|ドキュメント|Google\s*Docs?|Docs|資料|プロジェクト|ドライブ|Drive).*(作|追加|更新|追記|整理|作成|紐付|連携)|((追記|書き足|書き加).*ドキュメント|(ドキュメント|資料|Docs)に)/.test(userText || '');
   const hasContentAppendClue = /(https?:\/\/|追加|追記|メモ|候補|リスト|まとめ|案|書|残|入れ)/.test(userText || '');
-  const isScheduleOrPriorityOnly = !hasContentAppendClue && /(期限|リスケ|延期|明日に|別日に|後日に|優先|締切|回して|回しといて)/.test(userText || '');
+  const isScheduleOrPriorityOnly = !hasContentAppendClue && /(期限|リスケ|延期|明日に|別日に|後日に|優先|締切|回して|回しといて|カテゴリ|分類|領域|タイトル|タスク名)/.test(userText || '');
 
   const needDbModule = Boolean(liteResult.need_db_action) ||
     (tags.indexOf('DB依頼') !== -1) ||
@@ -1079,9 +1134,24 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     isRescheduleTone ||
     (matchedCompletedTasks.length > 0) ||
     hasProjectActionWord ||
-    /(✅|タスク追加|タスク更新|タスク完了|タスク削除|予定追加|予定変更|カレンダー登録|買物追加|ルーティン|日課|定期|メモして|覚えて|記録して|反映して)/.test(userText);
+    /(✅|タスク追加|タスク更新|タスク完了|タスク削除|予定追加|予定変更|カレンダー登録|買物追加|ルーティン|日課|定期|メモして|覚えて|記録して|反映して|(?:カテゴリ|分類|領域|タスク名|タイトル).*(?:変更|変え|修正|直し|にして))/.test(userText);
   const needSearch = (tags.indexOf('事実質問') !== -1);
   const needWeather = (Boolean(liteResult.weather_relevance) || phase === 'PHASE_C' || isRelief);
+
+  const todayDateStr = Utilities.formatDate(precomputed.todayDate || new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+  const allStampEntries = parseCycleStampEntries_(memory && memory.cycle_stamps);
+  const matchedStampLabels = (liteResult && Array.isArray(liteResult.matched_cycle_stamps))
+    ? liteResult.matched_cycle_stamps.map(s => String(s || '').trim()).filter(Boolean)
+    : [];
+  const pendingStampEntries = allStampEntries.filter(entry =>
+    matchedStampLabels.indexOf(entry.label) !== -1 && entry.normalizedDate !== todayDateStr
+  );
+  const hasPendingCycleStamps = pendingStampEntries.length > 0;
+  const stampTargetNames = pendingStampEntries.map(e => e.label).join('、');
+  const stampExampleLines = pendingStampEntries.map(e => `${e.label}: ${todayDateStr}`).join('\\n');
+  const cycleStampGuidance = hasPendingCycleStamps
+    ? `- 今回の発言・行動は【生活習慣・活動定義】および【プロファイル】の基準に基づき、周期スタンプ【${stampTargetNames}】の本日実施に該当する可能性が高いです。文脈上、実際の開始・実施・外出移動が確認できる場合は、会話の自然な返信と並行して \`memory_updates.cycle_stamps_updates\` に \`"項目名: ${todayDateStr}"\` を出力してください（※単なる未実行の予定・願望のみの場合は省略可）。`
+    : '';
 
   // ----------------------------------------------------
   // 1. プロンプトモジュールの動的選別・結合
@@ -1114,7 +1184,7 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   let effectiveTargetType = (liteResult && liteResult.db_target_type) ? liteResult.db_target_type : 'none';
   if (needDbModule) {
     const isCompletionWord = /(終|終わ|完了|できた|片付|回した|引いた|飲んだ|やった|クリア)/.test(userText || '');
-    const isUpdateWord = /(リスケ|延期|明日に|変えて|更新|優先|回して|回しといて)/.test(userText || '');
+    const isUpdateWord = /(リスケ|延期|明日に|変えて|変更|更新|優先|回して|回しといて|カテゴリ|分類|領域|タイトル|タスク名|(?:修正|直し)(?:て|して))/.test(userText || '');
     const isAddWord = /(タスク追加|タスク化|入れておいて|追加して)/.test(userText || '');
     const isBatchReschedule = isUpdateWord && /(今日|残り|全部|すべて)/.test(userText || '');
     const isMultipleTaskOps = (isCompletionWord && isUpdateWord) || (isCompletionWord && isAddWord) || (isUpdateWord && isAddWord) || isBatchReschedule;
@@ -1150,11 +1220,24 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
       effectiveTargetType = 'other';
     }
 
-    if (effectiveTargetType !== 'none' && effectiveTargetType !== 'other' && !hasImages) {
+    const usesFullDbSchema = !(effectiveTargetType !== 'none' && effectiveTargetType !== 'other' && !hasImages);
+    if (!usesFullDbSchema) {
       promptModules.push(getMicroDbSchema_(effectiveTargetType, memory.prompt_db));
+      if (hasPendingCycleStamps) {
+        if (effectiveTargetType === 'memory') {
+          promptModules.push(`【周期スタンプ更新の確認】\n${cycleStampGuidance}`);
+        } else {
+          promptModules.push(`【併せて行う周期スタンプ更新 (memory_updates.cycle_stamps_updates)】\n${cycleStampGuidance}\n出力JSONのトップレベルへ以下を追加可能:\n"memory_updates": {\n  "cycle_stamps_updates": "${stampExampleLines}"\n}`);
+        }
+      }
     } else {
       promptModules.push((memory.prompt_db && memory.prompt_db.trim() !== '') ? memory.prompt_db.trim() : getDefaultPromptDb());
+      if (hasPendingCycleStamps) {
+        promptModules.push(`【周期スタンプ更新の確認】\n${cycleStampGuidance}`);
+      }
     }
+  } else if (hasPendingCycleStamps) {
+    promptModules.push(`【出力JSONスキーマ ＆ 周期スタンプ更新】\n${cycleStampGuidance}\n{\n  "reply_text": "【必須】ユーザーへの返信文",\n  "memory_updates": {\n    "cycle_stamps_updates": "${stampExampleLines}"\n  }\n}`);
   } else {
     promptModules.push(`【出力JSONスキーマ】\n{ "reply_text": "【必須】ユーザーへの返信文" }`);
   }
@@ -1180,8 +1263,10 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     contextLines.push(`【月報通知フラグ】: TRUE`);
   }
 
-  // 3-4. 関連生活習慣トピックのオンデマンド注入（該当エントリーのみピンポイント抽出）
-  if (liteResult.matched_habit_topic && liteResult.matched_habit_topic !== 'none' && memory.lifestyle_habits) {
+  // 3-4. 生活習慣メモリーのオンデマンド注入（周期スタンプ更新候補またはmemory操作時は全体基準、通常時は該当トピックのみ）
+  if ((hasPendingCycleStamps || effectiveTargetType === 'memory') && memory.lifestyle_habits && memory.lifestyle_habits.trim() !== '') {
+    contextLines.push(`【生活習慣・活動定義 (lifestyle_habits)】:\n${memory.lifestyle_habits.trim()}`);
+  } else if (liteResult.matched_habit_topic && liteResult.matched_habit_topic !== 'none' && memory.lifestyle_habits) {
     const habitEntry = extractHabitEntryByTopic(memory.lifestyle_habits, liteResult.matched_habit_topic);
     if (habitEntry) {
       contextLines.push(`【関連する生活習慣メモリー (${liteResult.matched_habit_topic})】:\n${habitEntry}`);
@@ -1231,6 +1316,7 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   }
 
   // フェーズC（余白・段取り）専用コンパス＆候補プール
+  let cycleStampsInjected = false;
   if (phase === 'PHASE_C') {
     if (!isRelief) {
       if (memory.ideal_self && memory.ideal_self.trim() !== '') {
@@ -1246,11 +1332,23 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
         if (memory.cycle_stamps && memory.cycle_stamps.trim() !== '') {
           const formattedStamps = formatCycleStampsWithElapsed_(memory.cycle_stamps, precomputed.todayDate);
           contextLines.push(`【活動・メンテナンス最終記録 (cycle_stamps)】:\n${formattedStamps}`);
+          cycleStampsInjected = true;
         }
       }
       if (memory.weekly_summary && memory.weekly_summary.trim() !== '') {
         contextLines.push(`【直近1〜2週間の生活・活動サマリー】: ${memory.weekly_summary.trim()}`);
       }
+    }
+  }
+
+  // フェーズに関わらず、更新候補の周期スタンプまたはmemory更新時は現在のスタンプ状態をピンポイント注入
+  if (!cycleStampsInjected && memory && memory.cycle_stamps && memory.cycle_stamps.trim() !== '') {
+    if (effectiveTargetType === 'memory') {
+      const formattedStamps = formatCycleStampsWithElapsed_(memory.cycle_stamps, precomputed.todayDate);
+      contextLines.push(`【活動・メンテナンス最終記録 (cycle_stamps)】:\n${formattedStamps}`);
+    } else if (hasPendingCycleStamps) {
+      const pendingText = pendingStampEntries.map(e => `${e.label}: ${e.value}`).join('\n');
+      contextLines.push(`【更新候補の周期スタンプ (cycle_stamps)】:\n${pendingText}`);
     }
   }
 
@@ -1637,18 +1735,35 @@ ${relevantDict ? `- 関連用語定義:\n${relevantDict}\n` : ''}
  * @param {string} currentProfile
  * @param {string} currentDictionary
  * @param {string} targetDateStr
+ * @param {{lifestyleHabits?: string, targetEvents?: Array<string>, completedTasks?: Array<Object>}=} contextOpt
  * @return {Object} { cycle_stamps: string, weekly_summary: string, rolling_memory: string, profile: string, dictionary: string }
  */
-function analyzeMemoryUpdates(logs, currentCycleStamps, currentWeeklySummary, currentRollingMemory, currentProfile, currentDictionary, targetDateStr) {
-  let logsSummary = logs.map(l => `${l.sender}: ${l.message}`).join('\n');
+function analyzeMemoryUpdates(logs, currentCycleStamps, currentWeeklySummary, currentRollingMemory, currentProfile, currentDictionary, targetDateStr, contextOpt) {
+  const opts = contextOpt || {};
+  const lifestyleHabits = (typeof opts.lifestyleHabits === 'string') ? opts.lifestyleHabits.trim() : '';
+  const targetEvents = Array.isArray(opts.targetEvents) ? opts.targetEvents : [];
+  const completedTasks = Array.isArray(opts.completedTasks) ? opts.completedTasks : [];
 
-  const prompt = `あなたは生活伴走アシスタントです。本日（${targetDateStr}）の会話ログを分析し、中長期記憶（直近活動バッファ、周期イベント、生活サマリー、プロファイル代謝、用語辞書）を更新してください。
+  const logsSummary = (logs || []).map(l => {
+    const tStr = l.timestampStr ? `[${String(l.timestampStr).slice(0, 16)}] ` : '';
+    return `${tStr}${l.sender}: ${l.message}`;
+  }).join('\n');
+
+  const eventsSummary = targetEvents.length > 0 ? targetEvents.join(' / ') : '予定なし（または未取得）';
+  const completedTasksSummary = completedTasks.length > 0
+    ? completedTasks.map(t => `- ${t.title}${t.completedDate ? ' (完了日: ' + t.completedDate + ')' : ''}`).join('\n')
+    : 'なし';
+
+  const prompt = `あなたは生活伴走アシスタントです。本日（${targetDateStr}）の会話ログおよび各種客観コンテキストを総合分析し、中長期記憶（直近活動バッファ、周期イベント、生活サマリー、プロファイル代謝、用語辞書）を更新してください。
 
 【既存の直近活動バッファ (rolling_memory: 最大10日分)】
 ${currentRollingMemory || 'なし'}
 
 【既存のプロファイル】
 ${currentProfile || '未設定'}
+
+【生活習慣・活動定義 (lifestyle_habits)】
+${lifestyleHabits || '未設定'}
 
 【既存の用語辞書・前提知識】
 ${currentDictionary || 'なし'}
@@ -1659,7 +1774,13 @@ ${currentCycleStamps || 'なし'}
 【既存の直近サマリー】
 ${currentWeeklySummary || 'なし'}
 
-【本日の会話ログ】
+【対象日(${targetDateStr})のカレンダー予定一覧】
+${eventsSummary}
+
+【対象日(${targetDateStr})に完了したタスク一覧】
+${completedTasksSummary}
+
+【対象日の会話ログ (時系列)】
 ${logsSummary || 'ログなし'}
 
 【更新ルール】
@@ -1668,6 +1789,7 @@ ${logsSummary || 'ログなし'}
    - 【記録すべき2大要素】:
      ① 生活・体調・食事・買い物・生活タスク（睡眠や体調の波、購入品、翌日予定など）
      ② 触れたエンタメ・作品・音楽・ゲーム・趣味（作品名・アーティスト名・ゲームタイトル等の固有名詞、ゲームタスク、プレイや視聴時の感想・評価など）
+   - 【勤務形態・外出事実の客観記載】: 出社・在宅（リモート）・休暇の別は、会話ログ内の実際の起床・移動・在宅描写・休暇宣言および前日の予定申告とカレンダー予定を照合して客観的に判断し、カレンダー情報だけで安易に補完・断定しないこと。
    - 【過度な圧縮の禁止】: ここに記録された関心は将来プロファイルへ昇格するかどうかの重要な判定材料となるため、文字数制限を理由に作品名や感想を削ぎ落とさないでください（1行に無理に収めず、2〜3文や複数行になっても構いません）。
    - 既存のrolling_memoryの末尾に追加し、全体で直近7〜10日分を超えた古い日付のブロックは自動で押し出し削除（忘却）してください。
 2. profile（長期記憶・恒久生活基盤）の新陳代謝ルール（★厳格かつ保守的に運用すること）:
@@ -1676,12 +1798,16 @@ ${logsSummary || 'ログなし'}
    - 【原則維持】上記の明確な変更事実がない限り、既存プロファイルの文章・数値をそのまま一字一句維持して返してください。
 3. cycle_stamps（生活メンテナンス ＆ 創造・能動的活動の最終実施記録）:
    - 目的: 次回のお手入れ時期や、創造・スキルアップ・運動活動の「ご無沙汰（疎遠）」を検知して再提案するためのスタンプ（改行区切りの「項目名: YYYY-MM-DD」または「項目名: 未着手」形式）です。
-   - 【動的照合ルール】:
-     * 上記【既存の周期イベント記録】に登録されている各項目名を参照し、当日の会話ログの中でその活動（または直接関連する作業・実験・実践など。例: 「楽曲制作・DTM」であれば作曲だけでなくDAW操作・音源設定・連携実験等も含む）が行われたことが確認できた項目の日付を当日（${targetDateStr}）に更新してください。
-     * 既存の項目（過去に記録された日付や「未着手」の表記）は、当日のログで実施が確認されない限り、架空の日付を捏造せずそのままの値（「未着手」なら「未着手」のまま）を維持してください。
-     * 勝手に新しい項目を捏造・追加せず、既存の項目セットをベースに日付のみを新陳代謝してください。
-   - 【絶対除外ルール】:
-     ① 日常の軽微なお手入れや部分ケア（例: 爪1本だけを削った、枝毛を切った、浴槽の軽いブラシがけ等）は cycle_stamps には記録せず、既存の記録をそのまま維持してください。
+   - 【原則ベースの統合照合ルール（リアルタイム取りこぼし補完）】:
+     * 上記【既存の周期イベント記録】に登録されている各項目について、対象日の会話ログおよび【対象日に完了したタスク一覧】の内容に加え、【既存のプロファイル】および【生活習慣・活動定義 (lifestyle_habits)】に定義された実施条件・外出や生活行動との結びつきも照合し、当日の実施・実践・達成が客観的に確認できた項目の日付を当日（${targetDateStr}）に更新してください（※リアルタイム応答等で既に当日以降の日付が記録済みの項目は維持）。
+     * 項目名の直接的な言及だけでなく、完了タスクの達成実績や、プロファイル・生活習慣定義上その活動（屋外歩行・練習・メンテナンス等）を必然的に伴う実際の移動・外出・到着・実践の報告がある場合も実施として反映してください。
+     * 既存の項目（過去に記録された日付や「未着手」の表記）は、当日の実施根拠が確認されない限り、架空の日付を捏造せずそのままの値（「未着手」なら「未着手」のまま）を維持してください。
+     * 勝手に新しい項目を捏造・追加せず、既存の項目セット・表記形式をベースに日付のみを新陳代謝してください。
+   - 【3点クロスチェックによる誤爆防止ルール】:
+     * カレンダー予定に出社や外出の記載があっても、その情報単独を機械的に実施根拠としてはならない。必ず「①対象日のカレンダー予定」「②対象日の会話ログ（タイムスタンプ含む）・完了タスク」「③前日以前のrolling_memory（翌日の休暇取得・予定変更・体調不良等の申し送り）」の3点を相互検証すること。
+     * 当日の会話ログで在宅・休暇・休養が示されている日、前日のrolling_memory（または未明ログ）に当日の休暇取得・予定キャンセルが記録されている日、または該当行動・外出を行った実態の証拠が一切なく他情報と矛盾する日は、カレンダーに元の予定が残っていても絶対に出社や外出実施と誤認してスタンプを更新しないこと。
+   - 【除外ルール】:
+     * 本格的なメンテナンス・活動基準に満たない極めて部分的な処置や数秒の簡単な後片付け、および未実行の願望・未来予定の言及のみは cycle_stamps には記録せず、既存の記録をそのまま維持してください。
 4. weekly_summary（直近1〜2週間の生活・活動・感想統合サマリー）:
    - 体調だけでなく、直近1〜2週間の「生活・活動・関心の動向」を200〜300文字程度で高密度にまとめてください。
    - 【必須の3大要素】:

@@ -172,14 +172,14 @@ function syncSystemPromptToSpreadsheet() {
  * - 新システム（2モデル体制: Lite + Flash）と旧システム（単一Flash 6,400文字）の応答・トークン・アクションを並列比較します。
  */
 function testCustomScenario() {
-  // タスク新規追加（task_add / 複数同時追加）における7大生活プリフィックス分類精度 ＆ 不要期限省略の検証
+  // タスク更新（カテゴリ変更・タイトル修正・資料連携済みタスクの制御属性分離）を本番同等 backend_model: lite で検証
   const mockTasks = [
     {
-      id: 'T_20261111_151947_950',
-      title: '[実務・手続] 生活伴走システム：Webダッシュボードの独立アクセス化・データ取得高速化の検討',
+      id: 'T_20261019_101646_564',
+      title: '[実務・手続] 生活伴走システム：仕事用伴走環境（ChatGPT再現）の構想・仕様検討',
       dueDate: '',
       status: '未完了',
-      memo: 'LINE経由だけでなくPC/iPad等から直接アクセスできるようにする改修およびデータ取得高速化の検討',
+      memo: 'ChatGPTを活用して業務用の生活・業務伴走システムを再現するアイデアの検討',
       remindContext: '休日まとまった時間・PC',
       docUrl: ''
     },
@@ -195,17 +195,23 @@ function testCustomScenario() {
   ];
 
   const scenario = {
-    name: '検証: 生活伴走システム改修タスクの分類一貫性 ＆ 複数カテゴリ混在追加',
+    name: '検証: タスクカテゴリ変更・タイトル修正（model:lite / 資料連携タスク保護）',
+    useLiteForBackend: true,
     initialLogs: '',
     turns: [
       {
-        time: '2026-11-11 17:08:07',
-        user: 'このシステムの改善タスクをそれぞれ作ってほしい\n- 終了したルーティンの完了フラグ\n- 出社が外歩き・散歩に反映されない',
+        time: '2026-11-11 22:27:41',
+        user: '「生活伴走システム：仕事用伴走環境（ChatGPT再現）の構想・仕様検討」 これ仕事環境の話なのでタスクカテゴリを仕事にしてほしい',
         mockTasks: mockTasks
       },
       {
-        time: '2026-11-11 17:15:00',
-        user: 'あと、モンストの今週のラキモン作りと、REAPERのショートカット見直しもタスクに入れといて',
+        time: '2026-11-11 22:30:00',
+        user: '「ブラックフライデーのプラグイン購入検討」 のカテゴリを趣味・文化に変えておいて',
+        mockTasks: mockTasks
+      },
+      {
+        time: '2026-11-11 22:31:00',
+        user: '「生活伴走システム：仕事用伴走環境（ChatGPT再現）の構想・仕様検討」のタイトルを「[仕事] 仕事用伴走環境（ChatGPT再現）の構想・仕様検討」に変えておいて',
         mockTasks: mockTasks
       }
     ]

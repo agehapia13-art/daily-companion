@@ -532,6 +532,30 @@ function resolveTaskDocUrl_(act, extraProjectUrlMapOpt, getEntriesFnOpt) {
 }
 
 /**
+ * 既存タスクタイトルの先頭カテゴリプリフィックス [大分類] を新しいカテゴリへ安全に付け替える
+ * @param {string} currentTitle
+ * @param {string} rawCategory 例: '仕事', '[仕事]', '01_仕事'
+ * @return {string}
+ * @private
+ */
+function applyTaskCategoryPrefix_(currentTitle, rawCategory) {
+  const base = String(currentTitle || '').trim();
+  const cleanedRaw = String(rawCategory || '').replace(/[\[\]]/g, '').trim();
+  if (!cleanedRaw) return base;
+
+  const matched = (typeof findProjectCategoryEntry === 'function')
+    ? findProjectCategoryEntry(cleanedRaw)
+    : null;
+  const nextPrefix = matched ? matched.prefix : cleanedRaw.replace(/^\d{2}_/, '').trim();
+  if (!nextPrefix) return base;
+
+  if (/^\[[^\]]+\]\s*/.test(base)) {
+    return base.replace(/^\[[^\]]+\]\s*/, `[${nextPrefix}] `);
+  }
+  return base ? `[${nextPrefix}] ${base}` : `[${nextPrefix}]`;
+}
+
+/**
  * Geminiレスポンスに基づくタスク操作を適用（8列目「リマインド目安」・9列目「関連URL」対応）
  * @param {Array<Object>} actions
  * @param {Object=} extraProjectUrlMapOpt 同一ターンで作成されたプロジェクトURLマップ
@@ -561,14 +585,19 @@ function applyTaskActions(actions, extraProjectUrlMapOpt) {
     if (!act || !act.action) continue;
 
     if (act.action === 'add' && act.title) {
+      let addTitle = String(act.title).trim();
+      if (act.category && !/^\[[^\]]+\]/.test(addTitle)) {
+        addTitle = applyTaskCategoryPrefix_(addTitle, act.category);
+      }
       const taskId = 'T_' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmmss') + '_' + Math.floor(Math.random() * 1000);
       const dueDate = act.due_date || '';
       const memo = act.memo ? String(act.memo).trim() : '';
-      const remindContext = normalizeTaskRemindContext_(act.title, act.remind_context);
-      const resolvedUrl = resolveTaskDocUrl_(act, extraProjectUrlMapOpt, getProjectEntriesCached);
+      const remindContext = normalizeTaskRemindContext_(addTitle, act.remind_context);
+      const actForUrl = addTitle === act.title ? act : Object.assign({}, act, { title: addTitle });
+      const resolvedUrl = resolveTaskDocUrl_(actForUrl, extraProjectUrlMapOpt, getProjectEntriesCached);
       const docUrl = resolvedUrl || '';
-      appendRowSafely_(sheet, [taskId, act.title, dueDate, '未完了', todayStr, '', memo, remindContext, docUrl]);
-      const formattedTitle = formatTaskTitleWithBadge(act.title);
+      appendRowSafely_(sheet, [taskId, addTitle, dueDate, '未完了', todayStr, '', memo, remindContext, docUrl]);
+      const formattedTitle = formatTaskTitleWithBadge(addTitle);
       results.push(`📝 タスク追加: ${formattedTitle}${dueDate ? ` (期限: ${dueDate})` : ''}${docUrl ? ' 🔗 資料連携' : ''}`);
     } else if (act.action === 'update') {
       const tasks = getTasks();
@@ -576,39 +605,83 @@ function applyTaskActions(actions, extraProjectUrlMapOpt) {
       for (let j = 0; j < tasks.length; j++) {
         const t = tasks[j];
         if (t.status === '未完了') {
-          const matchById = act.task_id && t.id === act.task_id;
-          const matchByTitle = searchTitle && (t.title.includes(searchTitle) || searchTitle.includes(t.title));
+          const matchById = Boolean(act.task_id && t.id === act.task_id);
+          const matchByTitle = Boolean(searchTitle && (t.title.includes(searchTitle) || searchTitle.includes(t.title)));
           if (matchById || matchByTitle) {
-            let updatedTitle = t.title;
-            // new_title が指定されている場合のみタイトル列（列2）を更新
+            let updatedTitle = String(t.title || '').trim();
+            let hasChanges = false;
+
+            // new_title、category、または ID一致時の明確な変更後 title をタイトル列（列2）へ反映
+            let resolvedNewTitle = '';
             if (act.new_title !== undefined && String(act.new_title).trim() !== '') {
-              updatedTitle = String(act.new_title).trim();
-              sheet.getRange(t.rowIndex, 2).setValue(updatedTitle);
+              resolvedNewTitle = String(act.new_title).trim();
+            } else if (matchById && act.title !== undefined && String(act.title).trim() !== '') {
+              const candTitle = String(act.title).trim();
+              const hasOtherFieldUpdate = act.due_date !== undefined || act.memo !== undefined ||
+                act.remind_context !== undefined || act.doc_url !== undefined ||
+                act.project_name !== undefined || act.category !== undefined;
+              const curBody = updatedTitle.replace(/^\[[^\]]+\]\s*/, '');
+              const candBody = candTitle.replace(/^\[[^\]]+\]\s*/, '');
+              const isCategoryPrefixOnlyChange = /^\[[^\]]+\]\s*/.test(candTitle) && curBody === candBody && candTitle !== updatedTitle;
+              if (!updatedTitle.includes(candTitle) && (!hasOtherFieldUpdate || isCategoryPrefixOnlyChange)) {
+                resolvedNewTitle = candTitle;
+              }
             }
+
+            if (resolvedNewTitle) {
+              updatedTitle = resolvedNewTitle;
+            }
+            if (act.category !== undefined && String(act.category).trim() !== '') {
+              updatedTitle = applyTaskCategoryPrefix_(updatedTitle, act.category);
+            }
+            if (updatedTitle !== String(t.title || '').trim()) {
+              sheet.getRange(t.rowIndex, 2).setValue(updatedTitle);
+              hasChanges = true;
+            }
+
             // due_date が指定されている場合のみ期限列（列3）を更新
-            let updatedDue = t.dueDate;
+            let updatedDue = String(t.dueDate || '').trim();
             if (act.due_date !== undefined) {
-              updatedDue = String(act.due_date || '').trim();
-              sheet.getRange(t.rowIndex, 3).setValue(updatedDue);
+              const nextDue = String(act.due_date || '').trim();
+              if (nextDue !== updatedDue) {
+                sheet.getRange(t.rowIndex, 3).setValue(nextDue);
+                updatedDue = nextDue;
+                hasChanges = true;
+              }
             }
             // memo が指定されている場合のみメモ列（列7）を更新
             if (act.memo !== undefined) {
-              sheet.getRange(t.rowIndex, 7).setValue(String(act.memo || '').trim());
+              const nextMemo = String(act.memo || '').trim();
+              if (nextMemo !== String(t.memo || '').trim()) {
+                sheet.getRange(t.rowIndex, 7).setValue(nextMemo);
+                hasChanges = true;
+              }
             }
             // remind_context が指定されている場合のみリマインド文脈（列8）を更新
             if (act.remind_context !== undefined) {
               const newRemind = normalizeTaskRemindContext_(updatedTitle, act.remind_context);
-              sheet.getRange(t.rowIndex, 8).setValue(newRemind);
+              if (newRemind !== String(t.remindContext || '').trim()) {
+                sheet.getRange(t.rowIndex, 8).setValue(newRemind);
+                hasChanges = true;
+              }
             }
             // doc_url / project_name が指定・解決された場合のみ関連URL（列9）を更新
             const resolvedDocUrl = resolveTaskDocUrl_(act, extraProjectUrlMapOpt, getProjectEntriesCached);
             let urlLinked = false;
             if (resolvedDocUrl !== null) {
-              sheet.getRange(t.rowIndex, 9).setValue(resolvedDocUrl);
+              if (resolvedDocUrl !== String(t.docUrl || '').trim()) {
+                sheet.getRange(t.rowIndex, 9).setValue(resolvedDocUrl);
+                hasChanges = true;
+              }
               urlLinked = Boolean(resolvedDocUrl);
             }
-            const formattedTitle = formatTaskTitleWithBadge(updatedTitle);
-            results.push(`📝 タスク更新: ${formattedTitle}${updatedDue ? ` (期限: ${updatedDue})` : ''}${urlLinked ? ' 🔗 資料連携' : ''}`);
+
+            if (hasChanges) {
+              const formattedTitle = formatTaskTitleWithBadge(updatedTitle);
+              results.push(`📝 タスク更新: ${formattedTitle}${updatedDue ? ` (期限: ${updatedDue})` : ''}${urlLinked ? ' 🔗 資料連携' : ''}`);
+            } else {
+              Logger.log(`[タスク更新スキップ] 変更内容がないため通知を省略しました (ID: ${t.id})`);
+            }
             break;
           }
         }

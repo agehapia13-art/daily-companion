@@ -26,21 +26,11 @@ function isArchiveProjectFolderName_(folderName) {
  * @private
  */
 function resolveProjectRootCategory_(rawCategory) {
+  const matched = (typeof findProjectCategoryEntry === 'function')
+    ? findProjectCategoryEntry(rawCategory)
+    : null;
+  if (matched) return matched;
   const categories = SYSTEM_CONSTANTS.PROJECT_ROOT_CATEGORIES || [];
-  const cleaned = String(rawCategory || '').replace(/[\[\]\s]/g, '').trim();
-
-  for (let i = 0; i < categories.length; i++) {
-    const c = categories[i];
-    if (c.folderName === cleaned || c.prefix === cleaned) {
-      return c;
-    }
-  }
-  for (let i = 0; i < categories.length; i++) {
-    const c = categories[i];
-    if (cleaned.includes(c.prefix) || c.prefix.includes(cleaned) && cleaned.length >= 2) {
-      return c;
-    }
-  }
   // デフォルトフォールバック（実務・手続）
   return categories[3] || { prefix: '実務・手続', folderName: '04_実務・手続' };
 }

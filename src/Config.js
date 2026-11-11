@@ -59,6 +59,31 @@ const SYSTEM_CONSTANTS = {
 };
 
 /**
+ * カテゴリ文字列（「仕事」「[仕事]」「01_仕事」等）から7大カテゴリ定義を検索
+ * @param {string} rawCategory
+ * @return {{prefix: string, folderName: string}|null}
+ */
+function findProjectCategoryEntry(rawCategory) {
+  const categories = (SYSTEM_CONSTANTS && SYSTEM_CONSTANTS.PROJECT_ROOT_CATEGORIES) || [];
+  const cleaned = String(rawCategory || '').replace(/[\[\]\s]/g, '').trim();
+  if (!cleaned) return null;
+
+  for (let i = 0; i < categories.length; i++) {
+    const c = categories[i];
+    if (c.folderName === cleaned || c.prefix === cleaned) {
+      return c;
+    }
+  }
+  for (let i = 0; i < categories.length; i++) {
+    const c = categories[i];
+    if (cleaned.includes(c.prefix) || (c.prefix.includes(cleaned) && cleaned.length >= 2)) {
+      return c;
+    }
+  }
+  return null;
+}
+
+/**
  * スクリプトプロパティを取得・検証してオブジェクトとして返却
  * @return {Object} 各種設定値
  */

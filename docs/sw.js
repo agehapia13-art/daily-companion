@@ -1,5 +1,13 @@
-const CACHE_NAME = 'dc-pwa-v1';
-const PRECACHE_URLS = ['./', './index.html', './manifest.json', './icon.svg'];
+const CACHE_NAME = 'dc-pwa-v2';
+const PRECACHE_URLS = [
+  './',
+  './index.html',
+  './manifest.json',
+  './icon.svg',
+  './apple-touch-icon.png',
+  './icon-192.png',
+  './icon-512.png'
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

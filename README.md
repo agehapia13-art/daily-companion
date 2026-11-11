@@ -136,7 +136,7 @@
   - **画像入力 ＆ iOSショートカット共有シート連携**: 写真ライブラリ選択・カメラ直接撮影（`capture="environment"`）・貼り付け・D&D に加え、クライアント側 `<canvas>` JPEG 自動リサイズ・軽量化を搭載。また `apiBufferCompanionImage` により iOS/macOS の「ショートカット」から共有シート画像を事前バッファリング（30分TTL）し、アプリ起動時に待機画像としてシームレスに合流可能（個別キャンセルは `apiRemoveBufferedImage`）。
   - **モデルルーティングの忠実性**: 画像付きメッセージも通常ターン同様 `memory.backend_model` 設定に従属し、`executeAndPersistCompanionTurn_` を通じて LINE と完全に同一の伴走ロジックで処理・永続化。
 - **GitHub Pages × LIFF 連携**:
-  - **公開URL**: `https://agehapia13-art.github.io/daily-companion/`（`docs/manifest.json`・`docs/sw.js`・`docs/icon.svg` によるホーム画面追加・スタンドアロンPWA動作に対応）
+  - **公開URL**: `https://agehapia13-art.github.io/daily-companion/`（`docs/manifest.json`・`docs/sw.js`・`docs/icon.svg`・`apple-touch-icon.png`・`icon-192.png`・`icon-512.png` によるホーム画面追加・スタンドアロンPWA動作に対応）
   - **LIFF初回認証の整流化 ＆ 自動リカバリーリトライ**: LINE内ブラウザ・リッチメニュー（`tab=tasks|shopping|input|memory`）・直接PWA起動のいずれでもURLパラメータ / `liff.state` / `localStorage` をシームレスに引き継ぎ、設定モーダルからの手動接続・再同期にも対応。
 
 ### 12. ログ基盤 ＆ トークン追跡（30日ローリング保持）
@@ -170,11 +170,14 @@
 ├── appsscript.json       # タイムゾーン (Asia/Tokyo) およびV8ランタイム設定
 ├── service-account.json  # Google Cloud サービスアカウント秘密鍵 (Git管理対象外)
 ├── docs/
-│   ├── index.html        # GitHub Pages配信用PWAアプリ (scripts/build-dashboard.jsで自動生成)
-│   ├── manifest.json     # PWA Web App Manifest (standalone / relative scope)
-│   ├── sw.js             # PWA Service Worker (オフライン起動キャッシュ & 通知クリック復帰)
-│   ├── icon.svg          # PWA アプリアイコン
-│   └── .nojekyll         # GitHub Pages高速配信用設定
+│   ├── index.html            # GitHub Pages配信用PWAアプリ (scripts/build-dashboard.jsで自動生成)
+│   ├── manifest.json         # PWA Web App Manifest (standalone / relative scope)
+│   ├── sw.js                 # PWA Service Worker (オフライン起動キャッシュ & 通知クリック復帰)
+│   ├── icon.svg              # PWA SVGアイコン (ヘッダーロゴ準拠の葉っぱマーク)
+│   ├── apple-touch-icon.png  # iOSホーム画面用PNGアイコン (180x180, 自動生成)
+│   ├── icon-192.png          # Android / Web Manifest用PNGアイコン (192x192, 自動生成)
+│   ├── icon-512.png          # 高解像度・maskable用PNGアイコン (512x512, 自動生成)
+│   └── .nojekyll             # GitHub Pages高速配信用設定
 ├── src/                  # ★GAS本体コード (全機能のマスター。clasp push でGASへ同期)
 │   ├── appsscript.json   # GASデプロイ用マニフェスト
 │   ├── Config.js         # 設定・Script Properties検証・定数・モデル指定

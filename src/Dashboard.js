@@ -886,7 +886,8 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" type="image/svg+xml" href="./icon.svg">
-  <link rel="apple-touch-icon" href="./icon.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <style>
     :root {
@@ -3698,8 +3699,8 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
           if (reg && reg.showNotification) {
             return reg.showNotification('Daily Companion', {
               body: body,
-              icon: './icon.svg',
-              badge: './icon.svg',
+              icon: './icon-192.png',
+              badge: './icon-192.png',
               tag: 'dc-reply'
             });
           }

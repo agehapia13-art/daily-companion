@@ -174,6 +174,7 @@ function parseGeminiActionJson_(rawText, usage) {
     shopping_actions: [],
     input_stock_actions: [],
     routine_actions: [],
+    project_actions: [],
     _usage: usage
   };
 }
@@ -224,7 +225,7 @@ const LITE_RESPONSE_SCHEMA = {
     },
     db_target_type: {
       type: 'STRING',
-      enum: ['none', 'task_complete', 'task_add', 'task_update', 'task_delete', 'routine', 'calendar', 'shopping', 'input_stock', 'memory', 'other'],
+      enum: ['none', 'task_complete', 'task_add', 'task_update', 'task_delete', 'project_doc', 'routine', 'calendar', 'shopping', 'input_stock', 'memory', 'other'],
       description: '必要なDB操作の種別'
     },
     future_schedule_inquiry: {
@@ -284,16 +285,16 @@ function getDefaultPromptLite() {
 
 4. focused_task_ids（今着目・提案・操作すべきタスクの選別）:
    未完了タスク一覧の中から、ユーザーの最新発言・現在の時刻・状況・文脈を踏まえて、今まさに【完了・リスケ・更新・操作すべきタスク】または【提案・見通し・段取りの候補とすべきタスク】のIDを選出して配列で出力してください（例: ["T_..."]）。
-   - 【操作・完了・リスケ時】:
+   - 【操作・完了・リスケ・資料連携時】:
      * ユーザーが言及・完了報告したタスク（プロジェクトプレフィックスや表現の揺らぎ、一部の単語から該当タスクを柔軟に推論）
      * 「今日のタスク明日に回して」「残りは明日に」等の一括指示時は、当日以前（当日含む）が期限の未完了タスクをすべて選出
-     * 優先度・提案順序の指定（「〜を優先して」「早めに提案して」等）があったタスク
+     * 優先度・提案順序の指定（「〜を優先して」「早めに提案して」等）があったタスク、またはプロジェクトフォルダ・資料(Google Docs)の追記・紐付け対象となる関連タスク
    - 【提案・相談・見通し時】:
      * 期限が迫っている重要タスク、優先度指定のあるタスク、または現在の空き時間・状況・負荷に適した選択肢を文脈に応じて柔軟に選出
    - 不要または該当なしの場合は空配列 [] を出力。
 
 5. need_db_action（実データベース・メモリー操作の要否）:
-   - ユーザーがタスクの追加・完了・更新・削除、定期ルーティン追加、カレンダー予定の登録・変更、買い物メモの追加・購入済チェック、インプット作品の記録、生活習慣やプロファイル等のメモリー更新を求めている場合は true。
+   - ユーザーがタスクの追加・完了・更新・削除、定期ルーティン追加、プロジェクトフォルダやGoogle Docsの作成・追記・タスク紐付け、カレンダー予定の登録・変更、買い物メモの追加・購入済チェック、インプット作品の記録、生活習慣やプロファイル等のメモリー更新を求めている場合は true。
    - ★重要【完了報告のタスク昇格】: ユーザーが行動の完了を報告した際、未完了タスク一覧に該当するものがある場合も、タスク完了処理を実行するため true とする（食事など日常行動と混ざっていてもタスク該当があれば true）。
    - ★重要【自発的な願望・行動意志の直交4大プール手札化】:
      ユーザーが自発的に口にした欲求や行動意志（「〜したい」「〜する」「〜食べたい」「〜欲しい」「〜見たい」等）は、単なる雑談として流さず、客観的属性に応じて必ず手札化（need_db_action: true）すること：
@@ -306,7 +307,7 @@ function getDefaultPromptLite() {
    - 単なる日常行動の報告（「夕飯食べた」「ニュース見終えた」「風呂入る」など）で未完了タスクやDB更新が伴わない場合のみ false。
 
 6. db_target_type（必要なDB操作の種別）:
-   - "none"（操作不要）、"task_complete"（タスク完了）、"task_add"（単発タスク追加・目標のタスク化・外出体験）、"task_update"（タスク更新: 期限変更・優先度変更・検討事項やメモの更新等）、"task_delete"（タスク削除）、"routine"（毎日のタスク化・定期ルーティン・日課追加）、"calendar"（予定登録/変更）、"shopping"（買物メモ・食べたい食品・欲しい物）、"input_stock"（作品ストック: 映画/音楽/本/ゲーム等）、"memory"（生活習慣・プロファイル・辞書更新）、"other"（買物とタスクなど、2つ以上の異なるDB操作が同時に必要な場合・その他）。
+   - "none"（操作不要）、"task_complete"（タスク完了）、"task_add"（単発タスク追加・目標のタスク化・外出体験・既存プロジェクトへのタスク紐付け）、"task_update"（タスク更新: 期限変更・優先度変更・検討事項やメモの更新等）、"task_delete"（タスク削除）、"project_doc"（Google Driveのプロジェクトフォルダ新規作成・Google Docs新規作成・既存ドキュメントへの検討内容やメモの追記・既存タスクへの資料紐付け）、"routine"（毎日のタスク化・定期ルーティン・日課追加）、"calendar"（予定登録/変更）、"shopping"（買物メモ・食べたい食品・欲しい物）、"input_stock"（作品ストック: 映画/音楽/本/ゲーム等）、"memory"（生活習慣・プロファイル・辞書更新）、"other"（買物とタスクなど、2つ以上の異なるDB操作が同時に必要な場合・その他）。
 
 7. future_schedule_inquiry（未来日程・カレンダー照会の有無）:
    - 明日以降の予定、週末スケジュール、来週などの確認・照会、または未来のスケジュールを意識した相談が含まれている場合は true。当日のやり取りのみなら false。
@@ -342,7 +343,7 @@ function getDefaultPromptCore() {
 2. 行動選択肢の提示（カタリスト）:
    余白時間や状況に合わせ、5領域から今すぐ着手できる具体的な行動カード（2〜3枚）の提案。
 3. データ・予定の管理（JSONアクション）:
-   タスク・買物・インプットの記録・更新、およびGoogleカレンダーへの予定登録・削除。後述の直交4大プール原則に従い、日常の願望や行動意志を逃さず手札化する。
+   タスク・買物・インプットの記録・更新、Googleカレンダーへの予定登録・削除、およびGoogle Driveのプロジェクトフォルダ・Google Docsの作成／追記／タスク紐付け。後述の直交4大プール原則に従い、日常の願望や行動意志を逃さず手札化する。
 4. 情報の調査・リンク提供（Web検索）:
    Google検索を用いた事実・期日・店舗情報の確認、およびWebページやGoogleマップ等のURL提示。
 
@@ -478,6 +479,7 @@ function getDefaultPromptDb() {
      * [お出かけ]: 外出、下見、散策、買い物先での用事など
      形式: \`[大分類] 具体的な内容\` または \`[大分類] プロジェクト：具体的な内容\`（例: \`[制作・創作] REAPER：MCP連携の続き\`, \`[趣味・文化] 刀剣乱舞：回想回収\`, \`[家事・環境] メイクボックスの要件定義\`）。時間指定がある場合は末尾に \`（〜HH:mmまで）\` を明記する。
    - リマインド目安 (remind_context): 新規追加(add)や更新(update)の際、そのタスクを提案すべき最適なタイミング・状況（例: \`隙間15分・自室\`, \`夜・帰宅後\`, \`休日まとまった時間・PC\`, \`19時以降\` 等）を文脈から推論して必ず付与する。特に昼頃までの日中締切（\`〜11:59まで\` 等）があるタスクには \`締切前日夜 または 当日朝\` を設定する。また、外出・見学・旅行等の体験タスク追加時は、外的条件と連動できるよう \`休日お出かけ・晴れ\`、\`週末日中\` などの条件を設定する。
+   - ★既存プロジェクト自動紐付け (project_name): 新規追加(\`add\`)または更新(\`update\`)時、コンテキストの【既存プロジェクトフォルダ一覧（Drive連携）】や同時作成プロジェクトに関連するものがあれば、\`project_name\` にそのプロジェクトフォルダ名（例: \`2611_BFプラグイン購入検討\`）を指定して自動紐付けする。独立単発タスクの場合は省略すること。
    - ★タスク更新 (update) の差分パッチ原則: 変更するキーのみを出力してください（例: リスケなら \`task_id\` と \`due_date\` のみ出力）。指定のないキーはGAS側で既存値がそのまま保持されます。
    - ★一括リスケ指示への対応: 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭の了解だけで済ませず、コンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（\`due_date\` を翌日日付 \`YYYY-MM-DD\` に変更）を配列で確実に出力すること。
    - ★優先度・方針指定: ユーザーから「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の提案方針・優先度指定があった場合も、口頭の了解だけで済ませず必ず update を出力する。\`remind_context\` に優先度を反映した状況（例: \`直近の空き枠・最優先\`, \`休日PC・最優先\` 等）を設定し、\`memo\` に指定された背景・理由（例: \`昨今の情勢を考慮し優先度高め\` 等）を追記・更新する。
@@ -489,21 +491,29 @@ function getDefaultPromptDb() {
    - 個人メインカレンダーのみ操作可能（家族共用カレンダーは読み取り専用）。
    - 【出力最小化原則】: \`is_all_day: false\` や \`recurrence_days: []\` などのデフォルト値は省略する。同日の予定の場合、\`end_time\` は \`"HH:mm"\` 形式で出力してトークンを節約する。
    - 既存予定の変更時は、旧予定の \`delete\` と新予定の \`add\` をセットで出力する。
-4. 周期記録・生活習慣・辞書・プロファイル更新 (memory_updates):
+4. プロジェクトフォルダ・Google Docs操作 (project_actions):
+   - 階層ルール: マイドライブ直下の7大カテゴリフォルダ（\`仕事\`, \`制作・創作\`, \`家事・環境\`, \`実務・手続\`, \`趣味・文化\`, \`身体・ケア\`, \`お出かけ\`）配下に \`YYMM_プロジェクト名\` フォルダを置き、Google Docsはその中へ格納する。
+   - アクション: \`create_project\`（フォルダ＆Doc新規作成）、\`add_doc\`（既存プロジェクトへDoc追加）、\`append_doc\`（連携済みGoogle Docへの追記）。既存タスクと紐付ける場合は \`task_id\` を指定し、同時に新規タスクを作る場合は \`task_actions\` 側に \`project_name\` を指定する。
+5. 周期記録・生活習慣・辞書・プロファイル更新 (memory_updates):
    - ユーザーが \`cycle_stamps\` の登録活動（爪切り、外歩き・散歩、室内運動・フィットネス、読書、ピアノ、ギター、楽曲制作・DTM、ビジネスインプット等）を実施した報告があった場合は、\`cycle_stamps_updates\` に \`"項目名: YYYY-MM-DD"\` を出力して当日日付へ更新する。
    - ユーザーから食事・入浴・睡眠・余白や趣味などの生活リズムやこだわりについて変更・追加の指定があった場合は、\`lifestyle_habits\` に \`"[トピック名]: 更新後の内容"\` を出力して該当トピックを更新する。
    - ユーザーから住居・家族構成・勤務形態・通勤時間などの恒久的生活基盤について変更が指示された場合のみ、\`profile\` に更新後のプロファイル全文を出力する。
-5. 操作結果の二重復唱防止（トークン節約）:
+6. 操作結果の二重復唱防止（トークン節約）:
    - カレンダー登録やタスク操作（更新・完了等）を行った際は、システム通知が自動表示されるため、返信本文（\`reply_text\`）内で全予定や全タスクを箇条書きで二重復唱しないこと（「カレンダーに反映しました！」「〜件のタスクをリスケしました」等、要点を1〜2文でスッキリ完結させる）。
 
 {
   "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "image_summary": "（※画像添付時のみ）画像の客観的な内容要約",
   "task_actions": [
-    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安（例: 夜・自室 / 休日PC 等）" },
-    { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" },
+    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安（例: 夜・自室 / 休日PC 等）", "project_name": "（※既存/同時作成プロジェクトへ紐付ける場合のみ）" },
+    { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD", "project_name": "（※紐付け先変更時のみ）" },
     { "action": "complete", "task_id": "T_..." },
     { "action": "delete", "task_id": "T_..." }
+  ],
+  "project_actions": [
+    { "action": "create_project", "category": "7大カテゴリ名", "project_name": "YYMM_プロジェクト名", "doc_title": "資料タイトル", "initial_content": "初期本文（任意）", "task_id": "（※既存タスクへ紐付ける場合のみ）" },
+    { "action": "add_doc", "project_name": "既存プロジェクト名", "doc_title": "資料タイトル", "initial_content": "初期本文（任意）", "task_id": "（※既存タスクへ紐付ける場合のみ）" },
+    { "action": "append_doc", "project_name": "既存プロジェクト名", "task_id": "（※対象タスクがある場合）", "content": "追記テキスト" }
   ],
   "calendar_actions": [
     { "action": "add", "title": "予定名", "start_time": "YYYY-MM-DDTHH:mm:ss", "end_time": "HH:mm" },
@@ -533,7 +543,7 @@ function getDefaultPromptDb() {
 
 /**
  * DB操作種別に応じた最小限のJSONスキーマ・仕様モジュールを返す（Flashの入力トークン節約）
- * @param {string} dbTargetType 'task_complete' | 'task_add' | 'task_update' | 'task_delete' | 'calendar' | 'shopping' | 'input_stock' | 'other'
+ * @param {string} dbTargetType 'task_complete' | 'task_add' | 'task_update' | 'task_delete' | 'project_doc' | 'calendar' | 'shopping' | 'input_stock' | 'other'
  * @param {string=} customDbPrompt カスタムDBプロンプト（設定されていれば'other'時に優先）
  * @return {string}
  * @private
@@ -548,13 +558,15 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
     - 例（リスケのみ）: { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }
     - 例（優先度・リマインド変更）: { "action": "update", "task_id": "T_...", "remind_context": "直近の空き枠・最優先", "memo": "..." }
     - 例（タイトル変更）: { "action": "update", "task_id": "T_...", "new_title": "新タイトル" }
+    - 例（既存プロジェクト資料紐付け）: { "action": "update", "task_id": "T_...", "project_name": "2611_〇〇" }
+  * 追加(add): コンテキストの【既存プロジェクトフォルダ一覧（Drive連携）】に関連する既存プロジェクトがある場合は project_name を指定して自動紐付け（独立タスクなら省略）。
 - 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭了解だけでなくコンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（due_date を翌日日付 YYYY-MM-DD に変更）を配列で出力してください。
 {
   "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "task_actions": [
     { "action": "complete", "task_id": "T_..." },
     { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" },
-    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" },
+    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安", "project_name": "（※関連既存プロジェクトがある場合のみ）" },
     { "action": "delete", "task_id": "T_..." }
   ]
 }`;
@@ -574,10 +586,11 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
 タスクを新規追加する場合は、以下のJSONキーを出力してください：
 - 命名規則: 必ず7大生活プリフィックス（[仕事], [制作・創作], [家事・環境], [実務・手続], [趣味・文化], [身体・ケア], [お出かけ]）のいずれかを先頭に角括弧で付与し、「[大分類] 具体的な内容」または「[大分類] プロジェクト：具体的な内容」の形式で命名。時間指定がある場合は末尾に「（〜HH:mmまで）」を明記。
 - リマインド目安 (remind_context): そのタスクを提案すべき最適なタイミング・状況（例: 「夜・自室」「休日PC」等）を文脈から推論して必ず設定。
+- 既存プロジェクト自動紐付け (project_name): コンテキストの【既存プロジェクトフォルダ一覧（Drive連携）】に明確に関連する既存プロジェクトがある場合は、そのフォルダ名（例: "2611_BFプラグイン購入検討"）を指定して自動紐付けすること。独立タスクなら省略する。
 {
   "reply_text": "【必須】ユーザーへの返信文",
   "task_actions": [
-    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安" }
+    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安", "project_name": "（※既存プロジェクトに関連する場合のみ）" }
   ]
 }`;
   }
@@ -588,6 +601,7 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
   * 例（リスケのみ）: { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }
   * 例（優先度・リマインド変更）: { "action": "update", "task_id": "T_...", "remind_context": "直近の空き枠・最優先", "memo": "..." }
   * 例（タイトル変更）: { "action": "update", "task_id": "T_...", "new_title": "新タイトル" }
+  * 例（資料・プロジェクト紐付け）: { "action": "update", "task_id": "T_...", "project_name": "2611_〇〇" }
 - 「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の指定があった場合も、口頭の了解だけで済ませず必ず update を出力し、remind_context（例: 「直近の空き枠・最優先」「休日PC・最優先」等）と memo（背景・理由）を更新してください。
 - 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭了解だけでなくコンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（due_date を翌日日付 YYYY-MM-DD に変更）を配列で出力してください。
 {
@@ -604,6 +618,27 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
   "reply_text": "【必須】ユーザーへの返信文",
   "task_actions": [
     { "action": "delete", "task_id": "T_..." }
+  ]
+}`;
+  }
+  if (dbTargetType === 'project_doc') {
+    return `【データベース操作仕様: Google Drive プロジェクトフォルダ＆Google Docs連携】
+プロジェクトフォルダ作成・Google Docs作成・Docへの追記・タスク紐付けを行う場合は、以下のJSONキーを出力してください：
+- 7大カテゴリ（マイドライブ直下）: 仕事 / 制作・創作 / 家事・環境 / 実務・手続 / 趣味・文化 / 身体・ケア / お出かけ
+- フォルダ命名規則: 必ず YYMM_プロジェクト名 形式（例: 2611_〇〇）とし、親カテゴリ直下にファイルを直置きしない。
+- 操作種別:
+  * create_project: 新規プロジェクトフォルダ（＆Google Doc）作成。既存タスクに紐付ける場合は task_id（または target_task_title）を指定。同時に新規タスクも追加する場合は task_actions の add 側にも同じ project_name を指定する。
+  * add_doc: コンテキストの【既存プロジェクトフォルダ一覧（Drive連携）】内の既存フォルダに新しいGoogle Docを追加。
+  * append_doc: 既存のGoogle Doc（または [📄資料連携済] タスクに紐付いたDoc）末尾に検討事項・メモ・URL等を追記（project_name または task_id / target_task_title と content を指定）。
+{
+  "reply_text": "【必須】ユーザーへの返信文（※URLや詳細の二重復唱は不要、1〜2文で簡潔に）",
+  "project_actions": [
+    { "action": "create_project", "category": "7大カテゴリ名", "project_name": "YYMM_プロジェクト名", "doc_title": "資料タイトル", "initial_content": "初期本文（任意）", "task_id": "（※既存タスクへ紐付ける場合のみ）" },
+    { "action": "add_doc", "project_name": "既存プロジェクト名", "doc_title": "資料タイトル", "initial_content": "初期本文（任意）", "task_id": "（※関連タスクへ紐付ける場合のみ）" },
+    { "action": "append_doc", "project_name": "既存プロジェクト名", "task_id": "（※対象タスクがある場合）", "content": "追記内容" }
+  ],
+  "task_actions": [
+    { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "YYYY-MM-DD", "memo": "補足", "remind_context": "提案目安", "project_name": "YYMM_プロジェクト名" }
   ]
 }`;
   }
@@ -720,8 +755,16 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed,
 
   // Liteがスマートにタスクを選別・キュレーションできるよう、未完了タスク概要を注入
   if (uncompletedTasks && uncompletedTasks.length > 0) {
-    const taskLines = uncompletedTasks.map(t => `- [${t.id}] ${t.title}${t.dueDate ? ' (期限: ' + t.dueDate + ')' : ''}${t.remindContext ? ' 【リマインド目安: ' + t.remindContext + '】' : ''}`).join('\n');
+    const taskLines = uncompletedTasks.map(t => `- [${t.id}] ${t.title}${t.dueDate ? ' (期限: ' + t.dueDate + ')' : ''}${t.remindContext ? ' 【リマインド目安: ' + t.remindContext + '】' : ''}${t.docUrl ? ' [📄資料連携済]' : ''}`).join('\n');
     userContent += `【現在の未完了タスク一覧（キュレーション対象）】:\n${taskLines}\n\n`;
+  }
+
+  // 新規タスク追加時の自動紐付け判定やDocs追記ルーティングのため、既存プロジェクト一覧もRichに注入
+  if (memory && memory.project_folders && typeof formatProjectsForAiPrompt === 'function') {
+    const projSummary = formatProjectsForAiPrompt(memory.project_folders);
+    if (projSummary && projSummary !== 'なし') {
+      userContent += `【既存プロジェクトフォルダ一覧（Drive連携）】:\n${projSummary}\n\n`;
+    }
   }
 
   userContent += `=== 本日の会話履歴 (時系列) ===\n${todayLogsText || '（本日初回の発言）'}\n\n`;
@@ -922,6 +965,10 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     matchedCompletedTasks = allUncompletedTasks.filter(t => isTaskMatchingUserText_(t.title, userText));
   }
 
+  // プロジェクトフォルダ / Google Docs 操作意図の補助判定
+  const hasProjectTopicWord = /(フォルダ|ドキュメント|Google\s*Docs?|Docs|資料|プロジェクト|ドライブ|Drive)/.test(userText || '');
+  const hasProjectActionWord = /(フォルダ|ドキュメント|Google\s*Docs?|Docs|資料|プロジェクト|ドライブ|Drive).*(作|追加|更新|追記|整理|作成|紐付|連携)|((追記|書き足|書き加).*ドキュメント|(ドキュメント|資料|Docs)に)/.test(userText || '');
+
   const needDbModule = Boolean(liteResult.need_db_action) ||
     (tags.indexOf('DB依頼') !== -1) ||
     hasImages ||
@@ -929,6 +976,7 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     isCompletionTone ||
     isRescheduleTone ||
     (matchedCompletedTasks.length > 0) ||
+    hasProjectActionWord ||
     /(✅|タスク追加|タスク更新|タスク完了|タスク削除|予定追加|予定変更|カレンダー登録|買物追加|ルーティン|日課|定期|メモして|覚えて|記録して|反映して)/.test(userText);
   const needSearch = (tags.indexOf('事実質問') !== -1);
   const needWeather = (Boolean(liteResult.weather_relevance) || phase === 'PHASE_C' || isRelief);
@@ -961,16 +1009,21 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   }
 
   // 3-3. DB操作仕様 ＆ JSONスキーマ（ピンポイント・マイクロスキーマ適用で大幅節約）
+  let effectiveTargetType = (liteResult && liteResult.db_target_type) ? liteResult.db_target_type : 'none';
   if (needDbModule) {
     const isCompletionWord = /(終|終わ|完了|できた|片付|回した|引いた|飲んだ|やった|クリア)/.test(userText || '');
     const isUpdateWord = /(リスケ|延期|明日に|変えて|更新|優先|回して|回しといて)/.test(userText || '');
     const isAddWord = /(タスク追加|タスク化|入れておいて|追加して)/.test(userText || '');
     const isBatchReschedule = isUpdateWord && /(今日|残り|全部|すべて)/.test(userText || '');
     const isMultipleTaskOps = (isCompletionWord && isUpdateWord) || (isCompletionWord && isAddWord) || (isUpdateWord && isAddWord) || isBatchReschedule;
+    const isProjectIntent = (effectiveTargetType === 'project_doc') || hasProjectActionWord;
 
-    let effectiveTargetType = (liteResult && liteResult.db_target_type) ? liteResult.db_target_type : 'none';
-    if (isMultipleTaskOps) {
+    if (isProjectIntent && isMultipleTaskOps) {
+      effectiveTargetType = 'other';
+    } else if (isMultipleTaskOps && !isProjectIntent) {
       effectiveTargetType = 'task_all';
+    } else if (isProjectIntent && (effectiveTargetType === 'none' || effectiveTargetType === 'task_add' || effectiveTargetType === 'task_update')) {
+      effectiveTargetType = 'project_doc';
     } else if (isCompletionWord && (matchedCompletedTasks.length > 0 || effectiveTargetType === 'none')) {
       effectiveTargetType = 'task_complete';
     } else if (isUpdateWord && effectiveTargetType === 'none') {
@@ -984,7 +1037,7 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     // 複数ジャンルの同時DB操作安全網: 買物とタスク/機材/検討が混在する場合は総合スキーマ(other)を適用
     const hasShoppingClue = /(買|食べたい|欲しい|買物|スイーツ|日用品)/.test(userText || '') || effectiveTargetType === 'shopping';
     const hasTaskOrToolClue = /(プラグイン|機材|ツール|ソフト|タスク|検討|調査|やってみる|進める)/.test(userText || '') ||
-      effectiveTargetType === 'task_add' || effectiveTargetType === 'task_update' || (matchedCompletedTasks.length > 0);
+      effectiveTargetType === 'task_add' || effectiveTargetType === 'task_update' || effectiveTargetType === 'project_doc' || (matchedCompletedTasks.length > 0);
     if (hasShoppingClue && hasTaskOrToolClue) {
       effectiveTargetType = 'other';
     }
@@ -1150,6 +1203,16 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   // 着目・関連タスク一覧（Liteによって選別されたタスクのみピンポイント注入）
   if (tasksToInject.length > 0) {
     contextLines.push(`【着目・関連タスク】: ${formatUncompletedTasksForContext(tasksToInject, precomputed.todayDate)}`);
+  }
+
+  // 既存プロジェクトフォルダ一覧の条件付き注入（新規タスク自動紐付け判定 ＆ Docs/フォルダ操作時）
+  const needProjectContext = hasProjectTopicWord ||
+    (needDbModule && ['task_add', 'task_update', 'task_all', 'task_mixed', 'project_doc', 'routine', 'other'].indexOf(effectiveTargetType) !== -1);
+  if (needProjectContext && memory && memory.project_folders && typeof formatProjectsForAiPrompt === 'function') {
+    const projSummary = formatProjectsForAiPrompt(memory.project_folders);
+    if (projSummary && projSummary !== 'なし') {
+      contextLines.push(`【既存プロジェクトフォルダ一覧（Drive連携）】:\n${projSummary}`);
+    }
   }
 
   if (unboughtShopping.length > 0) {

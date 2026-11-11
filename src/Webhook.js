@@ -113,7 +113,8 @@ function doPost(e) {
             calendar_actions: [],
             shopping_actions: [],
             input_stock_actions: [],
-            routine_actions: []
+            routine_actions: [],
+            project_actions: []
           };
         }
 
@@ -121,7 +122,7 @@ function doPost(e) {
         const stripManualNoticeLines = (text) => {
           return String(text || '').split('\n').filter(line => {
             const trimmed = line.trim();
-            return !/^(📝\s*タスク追加|📝\s*タスク更新|✅\s*タスク完了|🗑️\s*タスク破棄|📅\s*カレンダー|🛒\s*買物|🎬\s*インプット|🔄\s*ルーティン)/.test(trimmed);
+            return !/^(📝\s*タスク追加|📝\s*タスク更新|✅\s*タスク完了|🗑️\s*タスク破棄|📅\s*カレンダー|🛒\s*買物|🎬\s*インプット|🔄\s*ルーティン|📁\s*フォルダ作成|📄\s*資料|🔗\s*タスク紐付)/.test(trimmed);
           }).join('\n').trim();
         };
 
@@ -129,8 +130,18 @@ function doPost(e) {
         const executedNotices = [];
 
         try {
+          let createdProjectUrlMap = {};
+          if (aiResult.project_actions && aiResult.project_actions.length > 0 && typeof applyProjectActions === 'function') {
+            const projRes = applyProjectActions(aiResult.project_actions);
+            if (projRes && projRes.notices) {
+              executedNotices.push.apply(executedNotices, projRes.notices);
+            }
+            if (projRes && projRes.createdUrlMap) {
+              createdProjectUrlMap = projRes.createdUrlMap;
+            }
+          }
           if (aiResult.task_actions && aiResult.task_actions.length > 0) {
-            const taskRes = applyTaskActions(aiResult.task_actions);
+            const taskRes = applyTaskActions(aiResult.task_actions, createdProjectUrlMap);
             executedNotices.push.apply(executedNotices, taskRes);
           }
           if (aiResult.calendar_actions && aiResult.calendar_actions.length > 0) {

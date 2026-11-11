@@ -31,15 +31,18 @@ function setupSpreadsheet() {
     formatHeaderRow_(logsSheet);
   }
 
-  // 2. tasks タブ（全8列対応: リマインド目安追加）
-  const taskHeaders = ['タスクID', 'タスク名', '期限', 'ステータス(未完了/完了/破棄)', '登録日', '完了日', 'メモ', 'リマインド目安'];
+  // 2. tasks タブ（全9列対応: リマインド目安・関連URL追加）
+  const taskHeaders = ['タスクID', 'タスク名', '期限', 'ステータス(未完了/完了/破棄)', '登録日', '完了日', 'メモ', 'リマインド目安', '関連URL'];
   let tasksSheet = ss.getSheetByName(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
   if (!tasksSheet) tasksSheet = ss.insertSheet(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
   if (tasksSheet.getLastRow() === 0) {
     tasksSheet.appendRow(taskHeaders);
     formatHeaderRow_(tasksSheet);
-  } else if (tasksSheet.getLastColumn() < 8) {
-    tasksSheet.getRange(1, 8).setValue('リマインド目安');
+  } else if (tasksSheet.getLastColumn() < 9) {
+    if (tasksSheet.getLastColumn() < 8) {
+      tasksSheet.getRange(1, 8).setValue('リマインド目安');
+    }
+    tasksSheet.getRange(1, 9).setValue('関連URL');
     formatHeaderRow_(tasksSheet);
   }
 
@@ -670,6 +673,9 @@ function formatActionSummary_(res) {
   }
   if (res.routine_actions && res.routine_actions.length > 0) {
     actions.push('routine_actions: ' + JSON.stringify(res.routine_actions));
+  }
+  if (res.project_actions && res.project_actions.length > 0) {
+    actions.push('project_actions: ' + JSON.stringify(res.project_actions));
   }
   if (res.memory_updates && Object.keys(res.memory_updates).length > 0) {
     actions.push('memory_updates: ' + JSON.stringify(res.memory_updates));

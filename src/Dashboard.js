@@ -213,7 +213,8 @@ function apiGetDashboardData(authKey) {
       createdDate: t.createdDate,
       completedDate: t.completedDate,
       elapsedDays: elapsedDays,
-      memo: t.memo || ''
+      memo: t.memo || '',
+      docUrl: t.docUrl || ''
     };
   });
 
@@ -342,15 +343,19 @@ function apiAddTask(authKey, payload) {
 
   const dueDate = (payload.dueDate || '').trim();
   const memo = (payload.memo || '').trim();
+  const docUrl = (payload.docUrl || '').trim();
+  const remindContext = (typeof normalizeTaskRemindContext_ === 'function')
+    ? normalizeTaskRemindContext_(fullTitle, '')
+    : '';
 
-  appendRowSafely_(sheet, [taskId, fullTitle, dueDate, '未完了', todayStr, '', memo]);
+  appendRowSafely_(sheet, [taskId, fullTitle, dueDate, '未完了', todayStr, '', memo, remindContext, docUrl]);
   return { success: true, taskId: taskId };
 }
 
 /**
- * タスクの内容（タイトル・期限・メモ）を編集
+ * タスクの内容（タイトル・期限・メモ・関連URL）を編集
  * @param {string} authKey
- * @param {Object} payload { taskId, fullTitle, dueDate, memo }
+ * @param {Object} payload { taskId, fullTitle, dueDate, memo, docUrl }
  * @return {Object}
  */
 function apiEditTask(authKey, payload) {
@@ -364,6 +369,7 @@ function apiEditTask(authKey, payload) {
       if (payload.fullTitle) sheet.getRange(row, 2).setValue(payload.fullTitle.trim());
       sheet.getRange(row, 3).setValue((payload.dueDate || '').trim());
       if (payload.memo !== undefined) sheet.getRange(row, 7).setValue((payload.memo || '').trim());
+      if (payload.docUrl !== undefined) sheet.getRange(row, 9).setValue((payload.docUrl || '').trim());
       return { success: true };
     }
   }
@@ -1051,6 +1057,20 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       border: 1px dashed #D5CBB8;
     }
 
+    .badge-doc-link {
+      background: #E8F0F8;
+      color: #2C5E8A;
+      border: 1px solid #C6D9EB;
+      text-decoration: none;
+      font-weight: 600;
+      transition: background 0.15s ease;
+    }
+
+    .badge-doc-link:hover {
+      background: #D7E6F4;
+      text-decoration: underline;
+    }
+
     .card-memo {
       margin-top: 6px;
       font-size: 0.78rem;
@@ -1622,6 +1642,10 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       <div class="form-group">
         <label class="form-label">メモ（任意）</label>
         <input type="text" id="newTaskMemo" class="organic-input" style="width:100%;" placeholder="補足メモ...">
+      </div>
+      <div class="form-group">
+        <label class="form-label">関連資料 / フォルダURL（任意・Google Docs / Drive）</label>
+        <input type="url" id="newTaskDocUrl" class="organic-input" style="width:100%;" placeholder="https://docs.google.com/...">
       </div>
       <button id="taskModalSubmitBtn" class="btn-primary" style="width:100%; padding:12px; font-size:0.95rem;" onclick="submitNewTask()">タスクを登録する</button>
       <button id="taskModalDeleteBtn" class="btn-secondary" style="width:100%; margin-top:8px; padding:10px; color:var(--terracotta); border-color:var(--terracotta-light); background:var(--terracotta-light); display:none;" onclick="discardEditingTask()">🗑️ このタスクを破棄する</button>
@@ -2199,6 +2223,15 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
         ? '<span class="badge badge-aged">🌱 登録から' + t.elapsedDays + '日</span>'
         : '';
 
+      // 関連資料リンクバッジ（Google Docs / Drive フォルダ）
+      let docBadge = '';
+      if (t.docUrl && /^https?:\/\//i.test(t.docUrl)) {
+        const isDoc = t.docUrl.indexOf('docs.google.com/document') !== -1;
+        const isFolder = t.docUrl.indexOf('/folders/') !== -1;
+        const docLabel = isDoc ? '📄 資料を開く' : (isFolder ? '📁 フォルダを開く' : '🔗 関連資料');
+        docBadge = '<a class="badge badge-doc-link" href="' + escapeHtml(t.docUrl) + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">' + docLabel + '</a>';
+      }
+
       const memoHtml = t.memo
         ? '<div class="card-memo">' + escapeHtml(t.memo) + '</div>'
         : '';
@@ -2213,7 +2246,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
             '<div class="card-title">' + escapeHtml(t.cleanTitle || t.fullTitle) + '</div>' +
           '</div>' +
           '<div class="card-meta">' +
-            prefixBadge + dueBadge + timeBadge + agedBadge +
+            prefixBadge + dueBadge + timeBadge + agedBadge + docBadge +
           '</div>' +
           memoHtml +
         '</div>' +
@@ -2288,6 +2321,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
         document.getElementById('newTaskTitle').value = target ? ((target.cleanTitle || target.fullTitle) + (target.timeHint ? '（' + target.timeHint + '）' : '')) : '';
         document.getElementById('newTaskDueDate').value = (target && target.dueDate) ? target.dueDate : '';
         document.getElementById('newTaskMemo').value = (target && target.memo) ? target.memo : '';
+        document.getElementById('newTaskDocUrl').value = (target && target.docUrl) ? target.docUrl : '';
       } else {
         titleEl.textContent = '🌿 新しいタスクを追加';
         submitBtn.textContent = 'タスクを登録する';
@@ -2297,6 +2331,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
         document.getElementById('newTaskTitle').value = '';
         document.getElementById('newTaskDueDate').value = '';
         document.getElementById('newTaskMemo').value = '';
+        document.getElementById('newTaskDocUrl').value = '';
       }
 
       document.getElementById('taskModal').classList.add('open');
@@ -2319,6 +2354,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
       const title = document.getElementById('newTaskTitle').value.trim();
       const dueDate = document.getElementById('newTaskDueDate').value.trim();
       const memo = document.getElementById('newTaskMemo').value.trim();
+      const docUrl = document.getElementById('newTaskDocUrl').value.trim();
       const editingId = state.editingTaskId;
 
       if (!title) {
@@ -2334,7 +2370,7 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
           fullTitle = prefix + '：' + fullTitle;
         }
         showToast('💾 タスクを更新しています...');
-        callServerApi('apiEditTask', state.authKey, { taskId: editingId, fullTitle, dueDate, memo })
+        callServerApi('apiEditTask', state.authKey, { taskId: editingId, fullTitle, dueDate, memo, docUrl })
           .then(() => {
             showToast('🌿 タスクを更新しました');
             loadData();
@@ -2344,11 +2380,12 @@ function buildDashboardTemplate(initialTab, validKey, liffId) {
           });
       } else {
         showToast('🌱 タスクを追加しています...');
-        callServerApi('apiAddTask', state.authKey, { prefix, title, dueDate, memo })
+        callServerApi('apiAddTask', state.authKey, { prefix, title, dueDate, memo, docUrl })
           .then(() => {
             document.getElementById('newTaskTitle').value = '';
             document.getElementById('newTaskDueDate').value = '';
             document.getElementById('newTaskMemo').value = '';
+            document.getElementById('newTaskDocUrl').value = '';
             showToast('🌿 タスクを追加しました');
             loadData();
           })

@@ -45,7 +45,17 @@ const SYSTEM_CONSTANTS = {
   DEFAULT_COORDINATES: {
     HOME: { lat: 35.3970, lon: 139.6179, name: '自宅(横浜市磯子区)' },
     WORK: { lat: 35.6580, lon: 139.7016, name: '職場(渋谷)' }
-  }
+  },
+  // プロジェクトDriveフォルダ 7大カテゴリ（マイドライブ直下）
+  PROJECT_ROOT_CATEGORIES: [
+    { prefix: '仕事', folderName: '01_仕事' },
+    { prefix: '制作・創作', folderName: '02_制作・創作' },
+    { prefix: '家事・環境', folderName: '03_家事・環境' },
+    { prefix: '実務・手続', folderName: '04_実務・手続' },
+    { prefix: '趣味・文化', folderName: '05_趣味・文化' },
+    { prefix: '身体・ケア', folderName: '06_身体・ケア' },
+    { prefix: 'お出かけ', folderName: '07_お出かけ' }
+  ]
 };
 
 /**

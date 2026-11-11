@@ -397,7 +397,7 @@ function getTasks(filterStatus) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
 
-  const numCols = Math.max(7, Math.min(sheet.getLastColumn(), 8));
+  const numCols = Math.max(7, Math.min(sheet.getLastColumn(), 9));
   const values = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
   const tasks = values.map((row, index) => ({
     rowIndex: index + 2,
@@ -408,7 +408,8 @@ function getTasks(filterStatus) {
     createdDate: row[4] ? Utilities.formatDate(new Date(row[4]), 'Asia/Tokyo', 'yyyy-MM-dd') : '',
     completedDate: row[5] ? Utilities.formatDate(new Date(row[5]), 'Asia/Tokyo', 'yyyy-MM-dd') : '',
     memo: String(row[6] || ''),
-    remindContext: row[7] ? String(row[7]).trim() : ''
+    remindContext: row[7] ? String(row[7]).trim() : '',
+    docUrl: row[8] ? String(row[8]).trim() : ''
   }));
 
   if (filterStatus) {
@@ -466,15 +467,68 @@ function normalizeTaskRemindContext_(title, rawRemindContext) {
 }
 
 /**
- * Geminiレスポンスに基づくタスク操作を適用（8列目「リマインド目安」対応）
+ * タスクアクション（doc_url / project_name）から関連Google Docs / フォルダURLを解決
+ * @param {Object} act
+ * @param {Object=} extraProjectUrlMapOpt 同一ターンで作成されたプロジェクト名 -> URL マップ
+ * @param {Function=} getEntriesFnOpt 遅延取得用プロジェクト台帳ゲッター
+ * @return {string|null} 解決されたURL（空文字明示時は''、未指定・未解決時はnull）
+ * @private
+ */
+function resolveTaskDocUrl_(act, extraProjectUrlMapOpt, getEntriesFnOpt) {
+  if (!act) return null;
+  if (act.doc_url !== undefined) {
+    return String(act.doc_url || '').trim();
+  }
+  const projQuery = act.project_name ? String(act.project_name).trim() : '';
+  if (!projQuery) return null;
+
+  const qNoDate = projQuery.replace(/^\d{4}_/, '').trim();
+  if (extraProjectUrlMapOpt && typeof extraProjectUrlMapOpt === 'object') {
+    if (extraProjectUrlMapOpt[projQuery]) return extraProjectUrlMapOpt[projQuery];
+    const mapKeys = Object.keys(extraProjectUrlMapOpt);
+    for (let k = 0; k < mapKeys.length; k++) {
+      const key = mapKeys[k];
+      if (key.replace(/^\d{4}_/, '').trim() === qNoDate && extraProjectUrlMapOpt[key]) {
+        return extraProjectUrlMapOpt[key];
+      }
+    }
+  }
+
+  if (typeof getEntriesFnOpt === 'function' && typeof findProjectEntry === 'function' && typeof getProjectEntryResourceUrl === 'function') {
+    const entries = getEntriesFnOpt();
+    const entry = findProjectEntry(entries, projQuery);
+    if (entry) {
+      const url = getProjectEntryResourceUrl(entry);
+      if (url) return url;
+    }
+  }
+  return null;
+}
+
+/**
+ * Geminiレスポンスに基づくタスク操作を適用（8列目「リマインド目安」・9列目「関連URL」対応）
  * @param {Array<Object>} actions
+ * @param {Object=} extraProjectUrlMapOpt 同一ターンで作成されたプロジェクトURLマップ
  * @return {Array<string>} 適用結果のメッセージリスト
  */
-function applyTaskActions(actions) {
+function applyTaskActions(actions, extraProjectUrlMapOpt) {
   if (!actions || !Array.isArray(actions) || actions.length === 0) return [];
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
   const todayStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const results = [];
+
+  let cachedProjectEntries = null;
+  const getProjectEntriesCached = () => {
+    if (cachedProjectEntries === null) {
+      if (typeof parseProjectFoldersIndex === 'function') {
+        const mem = getMemory() || {};
+        cachedProjectEntries = parseProjectFoldersIndex(mem.project_folders || '');
+      } else {
+        cachedProjectEntries = [];
+      }
+    }
+    return cachedProjectEntries;
+  };
 
   for (let i = 0; i < actions.length; i++) {
     const act = actions[i];
@@ -485,9 +539,11 @@ function applyTaskActions(actions) {
       const dueDate = act.due_date || '';
       const memo = act.memo ? String(act.memo).trim() : '';
       const remindContext = normalizeTaskRemindContext_(act.title, act.remind_context);
-      appendRowSafely_(sheet, [taskId, act.title, dueDate, '未完了', todayStr, '', memo, remindContext]);
+      const resolvedUrl = resolveTaskDocUrl_(act, extraProjectUrlMapOpt, getProjectEntriesCached);
+      const docUrl = resolvedUrl || '';
+      appendRowSafely_(sheet, [taskId, act.title, dueDate, '未完了', todayStr, '', memo, remindContext, docUrl]);
       const formattedTitle = formatTaskTitleWithBadge(act.title);
-      results.push(`📝 タスク追加: ${formattedTitle}${dueDate ? ` (期限: ${dueDate})` : ''}`);
+      results.push(`📝 タスク追加: ${formattedTitle}${dueDate ? ` (期限: ${dueDate})` : ''}${docUrl ? ' 🔗 資料連携' : ''}`);
     } else if (act.action === 'update') {
       const tasks = getTasks();
       const searchTitle = act.target_title || (!act.new_title ? act.title : '') || '';
@@ -518,8 +574,15 @@ function applyTaskActions(actions) {
               const newRemind = normalizeTaskRemindContext_(updatedTitle, act.remind_context);
               sheet.getRange(t.rowIndex, 8).setValue(newRemind);
             }
+            // doc_url / project_name が指定・解決された場合のみ関連URL（列9）を更新
+            const resolvedDocUrl = resolveTaskDocUrl_(act, extraProjectUrlMapOpt, getProjectEntriesCached);
+            let urlLinked = false;
+            if (resolvedDocUrl !== null) {
+              sheet.getRange(t.rowIndex, 9).setValue(resolvedDocUrl);
+              urlLinked = Boolean(resolvedDocUrl);
+            }
             const formattedTitle = formatTaskTitleWithBadge(updatedTitle);
-            results.push(`📝 タスク更新: ${formattedTitle}${updatedDue ? ` (期限: ${updatedDue})` : ''}`);
+            results.push(`📝 タスク更新: ${formattedTitle}${updatedDue ? ` (期限: ${updatedDue})` : ''}${urlLinked ? ' 🔗 資料連携' : ''}`);
             break;
           }
         }
@@ -1099,8 +1162,9 @@ function formatUncompletedTasksForContext(uncompletedTasks, todayDate) {
       }
     }
     const remindPart = (t.remindContext && t.remindContext.trim()) ? ` [目安:${t.remindContext.trim()}]` : '';
+    const docPart = (t.docUrl && t.docUrl.trim()) ? ' [📄資料連携済]' : '';
     const memoPart = (t.memo && t.memo.trim()) ? ` (メモ:${t.memo.trim()})` : '';
-    return `[${t.id}] ${t.title}${duePart}${remindPart}${memoPart}${warningTag}`;
+    return `[${t.id}] ${t.title}${duePart}${remindPart}${docPart}${memoPart}${warningTag}`;
   });
   return taskLines.join(' / ');
 }

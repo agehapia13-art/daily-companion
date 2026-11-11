@@ -6,6 +6,18 @@
 
 const MEMORY_KEY_PROJECT_ROOT_IDS = 'project_root_ids';
 const MEMORY_KEY_PROJECT_FOLDERS = 'project_folders';
+const PROJECT_ARCHIVE_FOLDER_NAME = '_completed';
+
+/**
+ * 完了アーカイブ専用フォルダ（_completed / completed 等）として進行中プロジェクト台帳の走査対象外にすべきか判定
+ * @param {string} folderName
+ * @return {boolean}
+ * @private
+ */
+function isArchiveProjectFolderName_(folderName) {
+  const normalized = String(folderName || '').trim().toLowerCase();
+  return normalized === PROJECT_ARCHIVE_FOLDER_NAME || normalized === 'completed';
+}
 
 /**
  * カテゴリ文字列（「制作・創作」「02_制作・創作」「[制作・創作]」等）から公式7大親フォルダ情報を解決
@@ -263,8 +275,9 @@ function getProjectEntryResourceUrl(entry) {
 }
 
 /**
- * 7大親フォルダ直下（第1階層のみ）をスキャンして memory.project_folders を最新同期
+ * 7大親フォルダ直下（進行中プロジェクト階層のみ）をスキャンして memory.project_folders を最新同期
  * 手動でPC等から追加・リネーム・削除したプロジェクトフォルダも自動追従する
+ * （各カテゴリ直下の _completed 等の完了アーカイブ専用フォルダは走査対象外）
  * @return {Array<Object>}
  */
 function syncProjectFoldersIndex() {
@@ -289,7 +302,7 @@ function syncProjectFoldersIndex() {
     const catEntries = [];
     while (subFolders.hasNext()) {
       const sub = subFolders.next();
-      if (sub.isTrashed()) continue;
+      if (sub.isTrashed() || isArchiveProjectFolderName_(sub.getName())) continue;
 
       // フォルダ内のGoogle Docsを検索し、代表ドキュメント1件を選定（名前一致または最新更新順）
       const docs = sub.getFilesByType(MimeType.GOOGLE_DOCS);

@@ -16,21 +16,13 @@ function dailyMidnightBatch() {
   const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const targetDateStr = Utilities.formatDate(yesterday, 'Asia/Tokyo', 'yyyy-MM-dd');
 
-  // 前日および当日未明（03:00まで）のログを集約
-  const logsYesterday = getLogs(targetDateStr);
-  const logsTodayEarly = getLogs(todayStr).filter(l => {
-    const tStr = l.timestampStr || '';
-    return tStr.includes(' 00:') || tStr.includes(' 01:') || tStr.includes(' 02:');
-  });
-  const logs = logsYesterday.concat(logsTodayEarly);
-
+  // 前日03:00〜当日02:59の1日境界でログ・完了タスク・消化ストック・対象日カレンダー予定を抽出
   const tasks = getTasks();
-  const inputStock = getInputStockList();
+  const windowData = getDailyReportWindowData_(targetDateStr, tasks);
+  const logs = windowData.logs;
+  const completedTasks = windowData.completedTasks;
+  const consumedInputs = windowData.consumedInputs;
   const memory = getMemory();
-
-  // 前日および日付変更後〜午前3時までに完了したタスク・消化したインプット・対象日カレンダー予定を抽出
-  const completedTasks = tasks.filter(t => t.status === '完了' && (t.completedDate === targetDateStr || t.completedDate === todayStr));
-  const consumedInputs = inputStock.filter(inp => inp.status === '完' && (inp.consumedDate === targetDateStr || inp.consumedDate === todayStr));
   const targetDateEvents = (typeof getTodayEventsList === 'function') ? getTodayEventsList(yesterday) : [];
 
   let isDailyReportSuccess = false;

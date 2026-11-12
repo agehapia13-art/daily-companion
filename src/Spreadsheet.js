@@ -392,6 +392,28 @@ function sortTasksByUrgency_(tasks, todayStrOpt) {
  * @param {string} filterStatus オプション（未完了 / 完了 / 破棄）
  * @return {Array<Object>}
  */
+function formatSheetDateAndTimestamp_(val) {
+  if (!val) return { dateStr: '', timestampStr: '' };
+  if (val instanceof Date) {
+    return {
+      dateStr: Utilities.formatDate(val, 'Asia/Tokyo', 'yyyy-MM-dd'),
+      timestampStr: Utilities.formatDate(val, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss')
+    };
+  }
+  const s = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return { dateStr: s, timestampStr: '' };
+  }
+  const d = new Date(s);
+  if (isNaN(d.getTime())) {
+    return { dateStr: s, timestampStr: '' };
+  }
+  return {
+    dateStr: Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd'),
+    timestampStr: Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss')
+  };
+}
+
 function getTasks(filterStatus) {
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
   const lastRow = sheet.getLastRow();
@@ -399,18 +421,22 @@ function getTasks(filterStatus) {
 
   const numCols = Math.max(7, Math.min(sheet.getLastColumn(), 9));
   const values = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
-  const tasks = values.map((row, index) => ({
-    rowIndex: index + 2,
-    id: String(row[0]),
-    title: String(row[1]),
-    dueDate: row[2] ? Utilities.formatDate(new Date(row[2]), 'Asia/Tokyo', 'yyyy-MM-dd') : '',
-    status: String(row[3]),
-    createdDate: row[4] ? Utilities.formatDate(new Date(row[4]), 'Asia/Tokyo', 'yyyy-MM-dd') : '',
-    completedDate: row[5] ? Utilities.formatDate(new Date(row[5]), 'Asia/Tokyo', 'yyyy-MM-dd') : '',
-    memo: String(row[6] || ''),
-    remindContext: row[7] ? String(row[7]).trim() : '',
-    docUrl: row[8] ? String(row[8]).trim() : ''
-  }));
+  const tasks = values.map((row, index) => {
+    const completedInfo = formatSheetDateAndTimestamp_(row[5]);
+    return {
+      rowIndex: index + 2,
+      id: String(row[0]),
+      title: String(row[1]),
+      dueDate: row[2] ? Utilities.formatDate(new Date(row[2]), 'Asia/Tokyo', 'yyyy-MM-dd') : '',
+      status: String(row[3]),
+      createdDate: row[4] ? Utilities.formatDate(new Date(row[4]), 'Asia/Tokyo', 'yyyy-MM-dd') : '',
+      completedDate: completedInfo.dateStr,
+      completedTimestampStr: completedInfo.timestampStr,
+      memo: String(row[6] || ''),
+      remindContext: row[7] ? String(row[7]).trim() : '',
+      docUrl: row[8] ? String(row[8]).trim() : ''
+    };
+  });
 
   if (filterStatus) {
     const filtered = tasks.filter(t => t.status === filterStatus);
@@ -694,8 +720,9 @@ function applyTaskActions(actions, extraProjectUrlMapOpt) {
           const matchById = act.task_id && t.id === act.task_id;
           const matchByTitle = act.title && (t.title.includes(act.title) || act.title.includes(t.title));
           if (matchById || matchByTitle) {
+            const completedAtStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
             sheet.getRange(t.rowIndex, 4).setValue('完了');
-            sheet.getRange(t.rowIndex, 6).setValue(todayStr);
+            sheet.getRange(t.rowIndex, 6).setValue(completedAtStr);
             const formattedTitle = formatTaskTitleWithBadge(t.title);
             results.push(`✅ タスク完了: ${formattedTitle}`);
             break;
@@ -866,14 +893,18 @@ function getInputStockList(filterStatus) {
   if (lastRow <= 1) return [];
 
   const values = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
-  const list = values.map((row, index) => ({
-    rowIndex: index + 2,
-    type: String(row[0]),
-    title: String(row[1]),
-    memo: String(row[2]),
-    status: String(row[3]),
-    consumedDate: row[4] ? Utilities.formatDate(new Date(row[4]), 'Asia/Tokyo', 'yyyy-MM-dd') : ''
-  }));
+  const list = values.map((row, index) => {
+    const consumedInfo = formatSheetDateAndTimestamp_(row[4]);
+    return {
+      rowIndex: index + 2,
+      type: String(row[0]),
+      title: String(row[1]),
+      memo: String(row[2]),
+      status: String(row[3]),
+      consumedDate: consumedInfo.dateStr,
+      consumedTimestampStr: consumedInfo.timestampStr
+    };
+  });
 
   if (filterStatus) {
     return list.filter(item => item.status === filterStatus);
@@ -889,7 +920,6 @@ function getInputStockList(filterStatus) {
 function applyInputStockActions(actions) {
   if (!actions || !Array.isArray(actions) || actions.length === 0) return [];
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.INPUT_STOCK);
-  const todayStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const results = [];
 
   for (let i = 0; i < actions.length; i++) {
@@ -904,8 +934,9 @@ function applyInputStockActions(actions) {
       for (let j = 0; j < list.length; j++) {
         const item = list[j];
         if (item.status === '未' && item.title.includes(act.title)) {
+          const consumedAtStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
           sheet.getRange(item.rowIndex, 4).setValue('完');
-          sheet.getRange(item.rowIndex, 5).setValue(todayStr);
+          sheet.getRange(item.rowIndex, 5).setValue(consumedAtStr);
           results.push(`🎬 インプット完了: ${item.title}`);
           break;
         }
@@ -923,6 +954,114 @@ function applyInputStockActions(actions) {
     }
   }
   return results;
+}
+
+/**
+ * タイムスタンプ文字列が未明（00:00〜02:59）に該当するか判定
+ * @param {string} timestampStr 'yyyy-MM-dd HH:mm:ss'
+ * @return {boolean}
+ * @private
+ */
+function isEarlyMorningTimestampStr_(timestampStr) {
+  return /\s0[0-2]:/.test(String(timestampStr || '').trim());
+}
+
+/**
+ * 指定ログ群の完了通知行に対象タイトルの完了記録が含まれるか判定（日付のみ格納分の境界切り分け用）
+ * @param {Array<Object>} logsList
+ * @param {string} title
+ * @param {string} actionLabel '✅ タスク完了' | '🎬 インプット完了'
+ * @return {boolean}
+ * @private
+ */
+function hasActionCompletionInLogs_(logsList, title, actionLabel) {
+  if (!logsList || logsList.length === 0 || !title) return false;
+  const rawTitle = String(title).trim();
+  const badgedTitle = (typeof formatTaskTitleWithBadge === 'function')
+    ? formatTaskTitleWithBadge(rawTitle)
+    : rawTitle;
+  const plainBody = rawTitle.replace(/^\[[^\]]+\]\s*/, '').trim();
+
+  return logsList.some(l => {
+    const rawReply = `${String((l && l.aiReply) || '')}\n${(l && l.sender !== 'user') ? String(l.message || '') : ''}`;
+    const completionLines = rawReply.split('\n').filter(line => line.includes(actionLabel));
+    if (completionLines.length === 0) return false;
+    const joined = completionLines.join('\n');
+    return joined.includes(rawTitle) ||
+      (badgedTitle && joined.includes(badgedTitle)) ||
+      (plainBody && plainBody.length >= 2 && joined.includes(plainBody));
+  });
+}
+
+/**
+ * 完了タスク・消化ストックが 03:00〜翌02:59 の集計ウィンドウ内に属するか判定
+ * @private
+ */
+function isItemInDailyWindow_(item, dateKey, tsKey, title, actionLabel, targetDateStr, nextDateStr, logsTargetEarly, logsTargetDay, logsNextEarly) {
+  const itemDate = item[dateKey] || '';
+  if (itemDate !== targetDateStr && itemDate !== nextDateStr) return false;
+
+  const ts = String(item[tsKey] || '').trim();
+  const hasExplicitTime = ts.includes(' ') && !ts.endsWith(' 00:00:00');
+  if (hasExplicitTime) {
+    const isEarly = isEarlyMorningTimestampStr_(ts);
+    return itemDate === targetDateStr ? !isEarly : isEarly;
+  }
+
+  // 時刻情報がない既存データ・Webアプリ更新分のフォールバック:
+  // targetDate未明(00:00〜02:59)に完了ログがあり日中以降に再完了していなければ前日分とみなして除外
+  if (itemDate === targetDateStr) {
+    const inTargetEarly = hasActionCompletionInLogs_(logsTargetEarly, title, actionLabel);
+    const inTargetDay = hasActionCompletionInLogs_(logsTargetDay, title, actionLabel);
+    return !(inTargetEarly && !inTargetDay);
+  }
+
+  // nextDate側の日付のみデータは、未明(00:00〜02:59)の完了ログ一致または深夜バッチ時間帯(03時台まで)のみ採用
+  if (hasActionCompletionInLogs_(logsNextEarly, title, actionLabel)) return true;
+  const now = new Date();
+  const nowDateStr = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd');
+  const nowHour = parseInt(Utilities.formatDate(now, 'Asia/Tokyo', 'H'), 10);
+  return nowDateStr === nextDateStr && nowHour < 4;
+}
+
+/**
+ * 03:00〜翌02:59 の1日境界で対象日のログ・完了タスク・消化インプットを一括抽出（前日未明との二重計上を防止）
+ * @param {string} targetDateStr 'yyyy-MM-dd'
+ * @param {Array<Object>=} preloadedTasksOpt 事前取得済みタスク配列
+ * @return {Object} { nextDateStr, logs, completedTasks, consumedInputs }
+ */
+function getDailyReportWindowData_(targetDateStr, preloadedTasksOpt) {
+  const targetAnchor = new Date(`${targetDateStr}T12:00:00+09:00`);
+  const nextDateStr = Utilities.formatDate(
+    new Date(targetAnchor.getTime() + 24 * 60 * 60 * 1000),
+    'Asia/Tokyo',
+    'yyyy-MM-dd'
+  );
+
+  const logsTargetRaw = getLogs(targetDateStr);
+  const logsTargetEarly = logsTargetRaw.filter(l => isEarlyMorningTimestampStr_(l.timestampStr));
+  const logsTargetDay = logsTargetRaw.filter(l => !isEarlyMorningTimestampStr_(l.timestampStr));
+  const logsNextEarly = getLogs(nextDateStr).filter(l => isEarlyMorningTimestampStr_(l.timestampStr));
+  const logs = logsTargetDay.concat(logsNextEarly);
+
+  const tasks = preloadedTasksOpt || getTasks();
+  const completedTasks = tasks.filter(t =>
+    t.status === '完了' &&
+    isItemInDailyWindow_(t, 'completedDate', 'completedTimestampStr', t.title, '✅ タスク完了', targetDateStr, nextDateStr, logsTargetEarly, logsTargetDay, logsNextEarly)
+  );
+
+  const inputStock = getInputStockList();
+  const consumedInputs = inputStock.filter(inp =>
+    inp.status === '完' &&
+    isItemInDailyWindow_(inp, 'consumedDate', 'consumedTimestampStr', inp.title, '🎬 インプット完了', targetDateStr, nextDateStr, logsTargetEarly, logsTargetDay, logsNextEarly)
+  );
+
+  return {
+    nextDateStr: nextDateStr,
+    logs: logs,
+    completedTasks: completedTasks,
+    consumedInputs: consumedInputs
+  };
 }
 
 // ==========================================

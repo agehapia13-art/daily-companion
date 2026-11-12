@@ -513,12 +513,6 @@ function testMidnightBatchSimulation() {
 function testDailyReportDryRun(targetDateStrOpt) {
   const targetDateStr = targetDateStrOpt || '2026-11-01';
 
-  // 翌日未明（03:00まで）の日付を算出
-  const targetParts = targetDateStr.split('-');
-  const targetD = new Date(parseInt(targetParts[0], 10), parseInt(targetParts[1], 10) - 1, parseInt(targetParts[2], 10));
-  const nextD = new Date(targetD.getTime() + 24 * 60 * 60 * 1000);
-  const nextDateStr = Utilities.formatDate(nextD, 'Asia/Tokyo', 'yyyy-MM-dd');
-
   Logger.log('============================================================');
   Logger.log(`📊 【日報生成ドライラン検証】 対象日: ${targetDateStr}`);
   Logger.log('============================================================');
@@ -529,18 +523,10 @@ function testDailyReportDryRun(targetDateStrOpt) {
   let consumedInputs = [];
 
   try {
-    const logsDay = getLogs(targetDateStr);
-    const logsNextEarly = getLogs(nextDateStr).filter(l => {
-      const tStr = l.timestampStr || '';
-      return tStr.includes(' 00:') || tStr.includes(' 01:') || tStr.includes(' 02:');
-    });
-    logsTarget = logsDay.concat(logsNextEarly);
-
-    const tasks = getTasks();
-    completedTasks = tasks.filter(t => t.status === '完了' && (t.completedDate === targetDateStr || t.completedDate === nextDateStr));
-
-    const inputStock = getInputStockList();
-    consumedInputs = inputStock.filter(inp => inp.status === '完' && (inp.consumedDate === targetDateStr || inp.consumedDate === nextDateStr));
+    const windowData = getDailyReportWindowData_(targetDateStr);
+    logsTarget = windowData.logs;
+    completedTasks = windowData.completedTasks;
+    consumedInputs = windowData.consumedInputs;
 
     Logger.log(`📥 スプレッドシート取得結果: ログ ${logsTarget.length}件 / 完了タスク ${completedTasks.length}件 / 消化ストック ${consumedInputs.length}件`);
   } catch (err) {

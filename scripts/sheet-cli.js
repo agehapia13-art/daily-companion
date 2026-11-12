@@ -37,6 +37,7 @@ const PROMPT_KEYS = [
   'prompt_phase_b',
   'prompt_phase_c',
   'prompt_phase_d',
+  'prompt_schedule',
   'prompt_db',
   'prompt_relief'
 ];
@@ -177,6 +178,7 @@ async function main() {
         prompt_phase_b: sandbox.getDefaultPromptPhaseB(),
         prompt_phase_c: sandbox.getDefaultPromptPhaseC(),
         prompt_phase_d: sandbox.getDefaultPromptPhaseD(),
+        prompt_schedule: sandbox.getDefaultPromptSchedule(),
         prompt_db: sandbox.getDefaultPromptDb(),
         prompt_relief: sandbox.getDefaultPromptRelief()
       };
@@ -184,7 +186,7 @@ async function main() {
       for (const [key, val] of Object.entries(prompts)) {
         await setMemory(key, val);
       }
-      console.log('🎉 全8モジュールのプロンプトをスプレッドシートの memory シートに同期しました！');
+      console.log('🎉 全9モジュールのプロンプトをスプレッドシートの memory シートに同期しました！');
       break;
     }
     case 'get-memory': {

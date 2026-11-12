@@ -42,6 +42,7 @@ const updatesToApply = {
   'prompt_phase_b': sandbox.getDefaultPromptPhaseB(),
   'prompt_phase_c': sandbox.getDefaultPromptPhaseC(),
   'prompt_phase_d': sandbox.getDefaultPromptPhaseD(),
+  'prompt_schedule': sandbox.getDefaultPromptSchedule(),
   'prompt_db': sandbox.getDefaultPromptDb(),
   'prompt_relief': sandbox.getDefaultPromptRelief(),
   'custom_system_prompt': updatedCustomPrompt

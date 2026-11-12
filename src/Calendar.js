@@ -263,7 +263,7 @@ function getTodayEventsList(simulatedNowDate) {
  */
 function isUmbrellaEventTitle(title) {
   if (!title || typeof title !== 'string') return false;
-  return /(タスク|作業|整理|片付|片づけ|自由時間|フリー|予備|余白|バッファ|段取り)/i.test(title);
+  return /(タスク|作業|整理|片付|片づけ|自由時間|フリー|休息|休憩|予備|余白|バッファ|段取り)/i.test(title);
 }
 
 /**

@@ -114,6 +114,9 @@ function dailyMidnightBatch() {
     const currentDayOfMonth = now.getDate();
     const taskSheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
     const routineSheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.ROUTINES);
+    if (typeof ensureRoutinesSchema7Cols_ === 'function') {
+      ensureRoutinesSchema7Cols_(routineSheet);
+    }
 
     // 既存の未完了タスク名一覧を取得（重複ガード用）
     const existingUncompletedTasks = tasks.filter(t => t.status === '未完了');
@@ -123,16 +126,15 @@ function dailyMidnightBatch() {
       const r = routines[i];
       let shouldGenerate = false;
 
-      // すでに満了ステータスになっているルーティンはスキップ
-      if (r.type === 'expired' || (r.memo && r.memo.includes('[期間満了'))) {
+      // すでに完了・満了ステータスになっているルーティンはスキップ
+      if (r.status === '完了' || r.status === '期間満了' || r.type === 'expired' || (r.memo && r.memo.includes('[期間満了'))) {
         continue;
       }
 
       // 【期間限定ルーティンの自動満了ガード】（例: "〜11/07まで" 等）
       if (isRoutineExpired_(r, now, todayStr)) {
-        routineSheet.getRange(r.rowIndex, 2).setValue('expired');
-        const updatedMemo = r.memo ? `${r.memo} [期間満了:${todayStr}]` : `[期間満了:${todayStr}]`;
-        routineSheet.getRange(r.rowIndex, 5).setValue(updatedMemo);
+        routineSheet.getRange(r.rowIndex, 6).setValue('期間満了');
+        routineSheet.getRange(r.rowIndex, 7).setValue(todayStr);
         Logger.log(`期間限定ルーティンが満了日を過ぎたため自動停止しました: ${r.ruleName}`);
         continue;
       }
@@ -242,18 +244,24 @@ function dailyMidnightBatch() {
   }
 
   // ----------------------------------------------------
-  // 6. ログ整理 (直近30日分はスプレッドシートに保持し、30日を超えた古いログのみ安全に整理)
+  // 6. ローリング整理 (直近30日分は保持し、30日を超えた古いログ・完了/破棄タスク・完了/満了ルーティンのみ安全に整理)
   // ----------------------------------------------------
   try {
     if (isDailyReportSuccess) {
-      Logger.log('6. ログローリング整理処理開始 (直近30日保持・日報投稿成功確認済み)');
+      Logger.log('6. ローリング整理処理開始 (直近30日保持・日報投稿成功確認済み)');
       cleanOldLogs(30);
-      Logger.log('ログローリング整理完了');
+      if (typeof cleanOldTasks === 'function') {
+        cleanOldTasks(30);
+      }
+      if (typeof cleanOldRoutines === 'function') {
+        cleanOldRoutines(30);
+      }
+      Logger.log('ローリング整理完了');
     } else {
-      Logger.log('⚠️ Notion日報投稿が完了していないため、ログ整理を保留しました (データ保護)');
+      Logger.log('⚠️ Notion日報投稿が完了していないため、ローリング整理を保留しました (データ保護)');
     }
   } catch (clearErr) {
-    Logger.log('ログ整理エラー: ' + clearErr.message);
+    Logger.log('ローリング整理エラー: ' + clearErr.message);
   }
 
   Logger.log('=== 深夜統合バッチ終了 ===');

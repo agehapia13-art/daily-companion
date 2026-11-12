@@ -449,6 +449,46 @@ function getTasks(filterStatus) {
 }
 
 /**
+ * 指定日数（デフォルト30日）を超えた完了・破棄済みタスクを安全にパージ
+ * ※ステータスが「完了」または「破棄」かつ日付が基準日未満の行のみ削除し、「未完了」は絶対に保持する
+ * @param {number=} retentionDays 保持日数（デフォルト30日）
+ */
+function cleanOldTasks(retentionDays) {
+  const days = (typeof retentionDays === 'number' && retentionDays > 0) ? retentionDays : 30;
+  const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return;
+
+  const now = new Date();
+  const cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
+  const cutoffStr = Utilities.formatDate(cutoffDate, 'Asia/Tokyo', 'yyyy-MM-dd');
+
+  const colCount = Math.min(Math.max(sheet.getLastColumn(), 6), 9);
+  const values = sheet.getRange(2, 1, lastRow - 1, colCount).getValues();
+  const rowsToDelete = [];
+
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+    const status = String(row[3] || '').trim();
+    if (status !== '完了' && status !== '破棄') continue;
+
+    const refDateStr = formatSheetDateAndTimestamp_(row[5]).dateStr ||
+      formatSheetDateAndTimestamp_(row[4]).dateStr ||
+      formatSheetDateAndTimestamp_(row[2]).dateStr;
+    if (refDateStr && refDateStr < cutoffStr) {
+      rowsToDelete.push(i + 2);
+    }
+  }
+
+  for (let i = rowsToDelete.length - 1; i >= 0; i--) {
+    sheet.deleteRow(rowsToDelete[i]);
+  }
+  if (rowsToDelete.length > 0) {
+    Logger.log(`[cleanOldTasks] ${rowsToDelete.length} 件の古い完了・破棄タスク(${days}日超過)を削除しました`);
+  }
+}
+
+/**
  * タスクタイトルをバッジ風表示 [プレフィックス] タイトル に整形
  * （コロン重複 ": コスメ：" を防止し、視認性を高める）
  * 例: "コスメ：ファンデーションの確認" -> "[コスメ] ファンデーションの確認"
@@ -753,45 +793,139 @@ function applyTaskActions(actions, extraProjectUrlMapOpt) {
 // ==========================================
 
 /**
- * ルーティン一覧を取得
+ * routinesシートの7列ヘッダー（ステータス・完了日）を必要に応じて補完
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ */
+function ensureRoutinesSchema7Cols_(sheet) {
+  if (!sheet) return;
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(['ルール名', 'タイプ(day_of_week/day_of_month/interval_days)', '設定値', '最終生成日', 'メモ', 'ステータス(有効/完了/期間満了)', '完了日']);
+    return;
+  }
+  if (sheet.getLastColumn() < 7) {
+    sheet.getRange(1, 6).setValue('ステータス(有効/完了/期間満了)');
+    sheet.getRange(1, 7).setValue('完了日');
+  }
+}
+
+/**
+ * ルーティン一覧を取得（7列対応・旧5列およびレガシーexpired互換）
+ * @param {string=} filterStatus '有効' | '完了' | '期間満了' 等（省略時は全件）
  * @return {Array<Object>}
  */
-function getRoutines() {
+function getRoutines(filterStatus) {
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.ROUTINES);
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
 
-  const values = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
-  return values.map((row, index) => ({
-    rowIndex: index + 2,
-    ruleName: String(row[0]),
-    type: String(row[1]),
-    value: String(row[2]),
-    lastGeneratedDate: row[3] ? Utilities.formatDate(new Date(row[3]), 'Asia/Tokyo', 'yyyy-MM-dd') : '',
-    memo: String(row[4])
-  }));
+  const colCount = Math.min(Math.max(sheet.getLastColumn(), 5), 7);
+  const values = sheet.getRange(2, 1, lastRow - 1, colCount).getValues();
+  const routines = values.map((row, index) => {
+    const ruleName = String(row[0] || '');
+    const type = String(row[1] || '');
+    const value = String(row[2] || '');
+    const lastGeneratedDate = formatSheetDateAndTimestamp_(row[3]).dateStr;
+    const memo = String(row[4] || '');
+    let status = row[5] ? String(row[5]).trim() : '';
+    if (!status) {
+      status = (type === 'expired' || memo.includes('[期間満了')) ? '期間満了' : '有効';
+    }
+    let completedDate = formatSheetDateAndTimestamp_(row[6]).dateStr;
+    if (!completedDate && memo) {
+      const m = memo.match(/\[期間満了[:：]\s*(\d{4}-\d{2}-\d{2})\]/);
+      if (m) completedDate = m[1];
+    }
+    return {
+      rowIndex: index + 2,
+      ruleName: ruleName,
+      type: type,
+      value: value,
+      lastGeneratedDate: lastGeneratedDate,
+      memo: memo,
+      status: status,
+      completedDate: completedDate
+    };
+  });
+
+  if (filterStatus) {
+    return routines.filter(r => r.status === filterStatus);
+  }
+  return routines;
 }
 
 /**
- * ルーティン追加アクションを適用
+ * ルーティン追加・完了アクションを適用
  * @param {Array<Object>} actions
  * @return {Array<string>}
  */
 function applyRoutineActions(actions) {
   if (!actions || !Array.isArray(actions) || actions.length === 0) return [];
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.ROUTINES);
+  ensureRoutinesSchema7Cols_(sheet);
+  const todayStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const results = [];
 
   for (let i = 0; i < actions.length; i++) {
     const act = actions[i];
+    if (!act) continue;
     if (act.action === 'add' && act.title) {
       const type = act.type || 'day_of_week';
       const value = act.value || 'MON';
-      appendRowSafely_(sheet, [act.title, type, value, '', act.memo || '']);
+      appendRowSafely_(sheet, [act.title, type, value, '', act.memo || '', '有効', '']);
       results.push(`🔄 ルーティン追加: ${act.title} (${value})`);
+    } else if (act.action === 'complete') {
+      const targetName = String(act.title || act.ruleName || '').trim();
+      if (!targetName) continue;
+      const stripPrefix = s => String(s || '').replace(/^\[[^\]]+\]\s*/, '').trim();
+      const targetBody = stripPrefix(targetName);
+      const activeRoutines = getRoutines('有効');
+      let matched = activeRoutines.find(r => r.ruleName === targetName || stripPrefix(r.ruleName) === targetBody);
+      if (!matched && targetBody) {
+        matched = activeRoutines.find(r => r.ruleName.includes(targetBody) || targetBody.includes(stripPrefix(r.ruleName)));
+      }
+      if (matched) {
+        sheet.getRange(matched.rowIndex, 6).setValue('完了');
+        sheet.getRange(matched.rowIndex, 7).setValue(todayStr);
+        results.push(`🔄 ルーティン完了: ${matched.ruleName}`);
+      }
     }
   }
   return results;
+}
+
+/**
+ * 指定日数（デフォルト30日）を超えた完了・期間満了ルーティンを安全にパージ
+ * ※ステータスが「完了」「期間満了」（またはレガシーexpired）かつ完了日が基準日未満の行のみ削除し、「有効」は絶対に保持する
+ * @param {number=} retentionDays 保持日数（デフォルト30日）
+ */
+function cleanOldRoutines(retentionDays) {
+  const days = (typeof retentionDays === 'number' && retentionDays > 0) ? retentionDays : 30;
+  const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.ROUTINES);
+  if (sheet.getLastRow() <= 1) return;
+
+  const now = new Date();
+  const cutoffDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
+  const cutoffStr = Utilities.formatDate(cutoffDate, 'Asia/Tokyo', 'yyyy-MM-dd');
+
+  const routines = getRoutines();
+  const rowsToDelete = [];
+  for (let i = 0; i < routines.length; i++) {
+    const r = routines[i];
+    const isFinished = (r.status === '完了' || r.status === '期間満了' || r.type === 'expired');
+    if (!isFinished) continue;
+
+    const refDateStr = r.completedDate || r.lastGeneratedDate;
+    if (refDateStr && refDateStr < cutoffStr) {
+      rowsToDelete.push(r.rowIndex);
+    }
+  }
+
+  for (let i = rowsToDelete.length - 1; i >= 0; i--) {
+    sheet.deleteRow(rowsToDelete[i]);
+  }
+  if (rowsToDelete.length > 0) {
+    Logger.log(`[cleanOldRoutines] ${rowsToDelete.length} 件の古い完了・期間満了ルーティン(${days}日超過)を削除しました`);
+  }
 }
 
 /**
@@ -1612,7 +1746,7 @@ function getSpreadsheetContext(queryText, todayLogsText, simulatedNowDate) {
 
   // 4. ルーティン設定マスタは「ルーティン」「定期」「習慣」が話題に出た時のみオンデマンド注入
   if (queryText && /(ルーティン|定期|習慣)/.test(queryText)) {
-    const routines = getRoutines();
+    const routines = getRoutines('有効');
     if (routines.length > 0) {
       const routineItems = routines.map(r => `${r.ruleName}(${r.type}:${r.value})`);
       context += `登録済み定期ルーティン: ${routineItems.join(', ')}\n`;

@@ -46,15 +46,18 @@ function setupSpreadsheet() {
     formatHeaderRow_(tasksSheet);
   }
 
-  // 3. routines タブ
+  // 3. routines タブ（全7列対応: ステータス・完了日追加）
   let routinesSheet = ss.getSheetByName(SYSTEM_CONSTANTS.SHEET_NAMES.ROUTINES);
   if (!routinesSheet) routinesSheet = ss.insertSheet(SYSTEM_CONSTANTS.SHEET_NAMES.ROUTINES);
   if (routinesSheet.getLastRow() === 0) {
-    routinesSheet.appendRow(['ルール名', 'タイプ(day_of_week/day_of_month/interval_days)', '設定値', '最終生成日', 'メモ']);
+    routinesSheet.appendRow(['ルール名', 'タイプ(day_of_week/day_of_month/interval_days)', '設定値', '最終生成日', 'メモ', 'ステータス(有効/完了/期間満了)', '完了日']);
     formatHeaderRow_(routinesSheet);
-    routinesSheet.appendRow(['ギター基礎運指・クロマチック', 'day_of_week', 'MON,WED,FRI', '', '指先の感覚維持']);
-    routinesSheet.appendRow(['モニタースピーカーイヤーケア & 無音時間', 'day_of_week', 'SUN', '', '耳のリセット']);
-    routinesSheet.appendRow(['ギター弦交換・機材メンテナンス', 'interval_days', '21', '', '3週間周期メンテ']);
+    routinesSheet.appendRow(['[制作・創作] ギター基礎運指・クロマチック', 'day_of_week', 'MON,WED,FRI', '', '指先の感覚維持', '有効', '']);
+    routinesSheet.appendRow(['[身体・ケア] モニタースピーカーイヤーケア & 無音時間', 'day_of_week', 'SUN', '', '耳のリセット', '有効', '']);
+    routinesSheet.appendRow(['[制作・創作] ギター弦交換・機材メンテナンス', 'interval_days', '21', '', '3週間周期メンテ', '有効', '']);
+  } else if (routinesSheet.getLastColumn() < 7) {
+    ensureRoutinesSchema7Cols_(routinesSheet);
+    formatHeaderRow_(routinesSheet);
   }
 
   // 4. shopping タブ
@@ -82,7 +85,8 @@ function setupSpreadsheet() {
     memorySheet.appendRow(['キー', '値']);
     formatHeaderRow_(memorySheet);
     memorySheet.appendRow(['profile', 'サウンドディレクター / ゲーム・映像音響制作。自宅(横浜市磯子区)と職場(渋谷)。DTM・ギター演奏が日課。']);
-    memorySheet.appendRow(['backend_model', 'lite']);
+    memorySheet.appendRow(['backend_model', '3.5-lite']);
+    memorySheet.appendRow(['thinking_level', 'minimal']);
     memorySheet.appendRow(['weather_info', '自宅(磯子): 晴れ 最高22℃ 降水10% ｜ 職場(渋谷): 晴れ 最高23℃ 降水10%']);
     memorySheet.appendRow(['pressure_alert', 'FALSE']);
     memorySheet.appendRow(['cycle_stamps', '美容院: 2026-09-20, 機材メンテ: 2026-09-25']);
@@ -95,6 +99,7 @@ function setupSpreadsheet() {
     memorySheet.appendRow(['prompt_phase_b', '']);
     memorySheet.appendRow(['prompt_phase_c', '']);
     memorySheet.appendRow(['prompt_phase_d', '']);
+    memorySheet.appendRow(['prompt_schedule', '']);
     memorySheet.appendRow(['prompt_db', '']);
     memorySheet.appendRow(['prompt_relief', '']);
     memorySheet.appendRow(['custom_system_prompt', '']);
@@ -149,6 +154,7 @@ function syncDefaultPromptsToSpreadsheet() {
   setMemoryValue('prompt_phase_b', getDefaultPromptPhaseB());
   setMemoryValue('prompt_phase_c', getDefaultPromptPhaseC());
   setMemoryValue('prompt_phase_d', getDefaultPromptPhaseD());
+  setMemoryValue('prompt_schedule', getDefaultPromptSchedule());
   setMemoryValue('prompt_db', getDefaultPromptDb());
   setMemoryValue('prompt_relief', getDefaultPromptRelief());
   Logger.log('✅ スプレッドシートの memory シートに全プロンプトモジュールを保存しました！');
@@ -172,134 +178,132 @@ function syncSystemPromptToSpreadsheet() {
  * - 新システム（2モデル体制: Lite + Flash）と旧システム（単一Flash 6,400文字）の応答・トークン・アクションを並列比較します。
  */
 function testCustomScenario() {
-  // 周期スタンプ（外歩き・散歩）のリアルタイム更新＆深夜バッチ3点クロスチェックを本番同等 backend_model: lite で検証（完全ドライラン）
-  const currentMemory = getMemory();
-  const baseHabits = (currentMemory.lifestyle_habits || '').trim();
-  const updatedOutdoorRule = '③ 屋外（30分〜1時間 / 周期スタンプ「外歩き・散歩」対象）: 近所の散歩・外気浴のほか、出社・外出等で最寄り駅まで徒歩往復する日（片道15分強・往復30分超）も屋外歩行・運動の実績とみなす（駅ホーム到着・電車乗車・出社や外出の開始/帰宅報告も該当）。';
-  const mockLifestyleHabits = baseHabits.includes('③ 屋外')
-    ? baseHabits.replace(/③\s*屋外[^\n]*/, updatedOutdoorRule)
-    : `${baseHabits}\n${updatedOutdoorRule}`;
-
-  const baseStamps = (currentMemory.cycle_stamps || '').trim();
-  const stampsBeforeNov4 = baseStamps.replace(/外歩き・散歩[：:].*/, '外歩き・散歩: 2026-10-28');
-  const stampsAlreadyNov10 = baseStamps.replace(/外歩き・散歩[：:].*/, '外歩き・散歩: 2026-11-10');
+  // 0. 決定論的ユニット確認（境界イベント・Phase D分離・3.5-lite＆thinking_level解決）
+  const unitChecks = [
+    ['isUmbrellaEventTitle("自由時間")', isUmbrellaEventTitle('自由時間') === true],
+    ['isUmbrellaEventTitle("休息")', isUmbrellaEventTitle('休息') === true],
+    ['isUmbrellaEventTitle("休憩")', isUmbrellaEventTitle('休憩') === true],
+    ['isUmbrellaEventTitle("リモートワーク")', isUmbrellaEventTitle('リモートワーク') === false],
+    [
+      'determineActionPhase(pureDbOp -> PHASE_D)',
+      determineActionPhase({
+        action_intent: 'db_operation',
+        tags: ['DB依頼', '活動目標の表明'],
+        need_schedule_plan: false,
+        focused_task_ids: []
+      }, { isUmbrellaEvent: false }) === 'PHASE_D'
+    ],
+    [
+      'determineActionPhase(need_schedule_plan -> PHASE_C)',
+      determineActionPhase({
+        action_intent: 'db_operation',
+        tags: ['DB依頼'],
+        need_schedule_plan: true,
+        focused_task_ids: []
+      }, { isUmbrellaEvent: false }) === 'PHASE_C'
+    ],
+    [
+      'resolveBackendModel_("3.5-lite")',
+      resolveBackendModel_({ backend_model: '3.5-lite' }).model === 'gemini-3.5-flash-lite'
+    ],
+    [
+      'resolveThinkingConfig_("minimal")',
+      resolveThinkingConfig_('gemini-3.5-flash-lite', { thinking_level: 'minimal' }).thinkingLevel === 'minimal'
+    ]
+  ];
+  Logger.log('============================================================');
+  Logger.log('🧪 【検証0: ロジック単体チェック (完全ドライラン)】');
+  unitChecks.forEach(([label, ok]) => Logger.log(`${ok ? '✅' : '❌'} ${label}`));
 
   const mockTasks = [
     {
-      id: 'T_20261104_090000_001',
-      title: '[趣味・文化] モンスト メダル受け取り',
-      dueDate: '2026-11-04',
+      id: 'T_20261112_090000_001',
+      title: '[家事・環境] MacBook内部の清掃',
+      dueDate: '',
+      status: '未完了',
+      memo: 'エアダスターを使う',
+      remindContext: '休日・自室',
+      docUrl: ''
+    },
+    {
+      id: 'T_20261112_090000_002',
+      title: '[実務・手続] 生活伴走システム：同期スクリプト反映',
+      dueDate: '',
       status: '未完了',
       memo: '',
-      remindContext: '朝・出勤前',
+      remindContext: '隙間時間・PC作業時',
+      docUrl: ''
+    },
+    {
+      id: 'T_20261112_090000_003',
+      title: '[趣味・文化] モンスト：超究極・兵のミザリー周回',
+      dueDate: '2026-11-12',
+      status: '未完了',
+      memo: '毎日ルーティン',
+      remindContext: '日課・隙間時間',
       docUrl: ''
     }
   ];
 
-  // A-1: 駅到着 + タスク完了の混在ターン (task_complete と cycle_stamps_updates の両立)
+  // 1. 本業勤務中の休憩・疲労連鎖（11/12 14:24 -> 15:39 再現テスト / 3.5-lite + minimal）
   runPromptScenario({
-    name: '検証A-1: 駅到着＋タスク完了の混在ターン (2026-11-04 / model:lite)',
-    useLiteForBackend: true,
+    name: '検証1: 本業勤務中の休憩・一息連鎖（私生活タスク提案ゼロ＆反復抑止）',
     mockMemory: {
-      lifestyle_habits: mockLifestyleHabits,
-      cycle_stamps: stampsBeforeNov4
+      backend_model: '3.5-lite',
+      thinking_level: 'minimal'
+    },
+    mockTasks: mockTasks,
+    initialLogs: '12:55 User: お昼はサバ缶とご飯食べたよ\nAI: 栄養たっぷりで良いですね！午後のリモートワークも応援しています。',
+    turns: [
+      {
+        time: '2026-11-12 14:24:00',
+        user: 'あー、リモートワークでちょっと疲れた。小休憩中'
+      },
+      {
+        time: '2026-11-12 15:39:00',
+        user: 'ちょっと集中切れてきたから少し息抜き中〜'
+      }
+    ]
+  });
+
+  // 2. 純粋DB操作の PHASE_D 分離 ＆ ルーティン完了アクション検証
+  runPromptScenario({
+    name: '検証2: 純粋DB操作のPHASE_D分離 ＆ ルーティン完了',
+    mockMemory: {
+      backend_model: '3.5-lite',
+      thinking_level: 'minimal'
     },
     mockTasks: mockTasks,
     initialLogs: '',
     turns: [
       {
-        time: '2026-11-04 09:53:11',
-        user: '上大岡のホーム着いた　メダル受け取り完了'
+        time: '2026-11-12 20:00:00',
+        user: 'ハーゲンダッツ買いたいから買い物メモに入れといて'
+      },
+      {
+        time: '2026-11-12 20:05:00',
+        user: 'モンストの兵のミザリー、今日で期間終了したから定期ルーティンの方も完了にしといて'
       }
     ]
   });
 
-  // A-2: Phase B (出社出発送り出し + 周期スタンプ更新) → 同日帰宅時の重複抑止
+  // 3. 部分時間帯の段取り要求（帰宅後・夜） -> need_schedule_plan: true ＆ prompt_schedule 直交注入
   runPromptScenario({
-    name: '検証A-2: Phase B 出社送り出し＆スタンプ更新 → 同日重複更新抑止 (2026-11-10 / model:lite)',
-    useLiteForBackend: true,
+    name: '検証3: 部分時間帯（帰宅後〜就寝）の段取り設計 (need_schedule_plan + prompt_schedule)',
     mockMemory: {
-      lifestyle_habits: mockLifestyleHabits,
-      cycle_stamps: stampsBeforeNov4
+      backend_model: '3.5-lite',
+      thinking_level: 'minimal'
     },
+    mockTasks: mockTasks,
     initialLogs: '',
     turns: [
       {
-        time: '2026-11-10 09:59:53',
-        user: '電車に乗った　これから出社'
-      },
-      {
-        time: '2026-11-10 19:20:00',
-        user: 'これから帰るよ〜',
-        mockMemory: {
-          cycle_stamps: stampsAlreadyNov10
-        }
+        time: '2026-11-12 19:20:00',
+        user: '仕事終わった！今日これから寝るまでのタイスケ（段取り）組んで。ゲームも少し遊びたいしご飯とお風呂も済ませたい'
       }
     ]
   });
 
-  // A-3: 有給休暇日の誤更新防止 (カレンダー上に「♪出社」が残っていても外出扱いしない)
-  runPromptScenario({
-    name: '検証A-3: 有給休暇日のリアルタイム誤検知防止 (2026-11-11 / model:lite)',
-    useLiteForBackend: true,
-    mockMemory: {
-      lifestyle_habits: mockLifestyleHabits,
-      cycle_stamps: stampsAlreadyNov10
-    },
-    initialLogs: '01:33 User: 明日は休みとった〜',
-    turns: [
-      {
-        time: '2026-11-11 10:30:00',
-        user: 'おはよう　今日は休みとったから家でゆっくりする'
-      }
-    ]
-  });
-
-  // B: 深夜バッチ analyzeMemoryUpdates 3点クロスチェック検証 (完全ドライラン)
-  Logger.log('============================================================');
-  Logger.log('🧪 【検証B: 深夜バッチ analyzeMemoryUpdates 3点クロスチェック】');
-  Logger.log('============================================================');
-
-  const commuteBatchRes = analyzeMemoryUpdates(
-    [
-      { timestampStr: '2026-11-10 09:59:53', sender: 'user', message: '電車に乗った　これから出社' },
-      { timestampStr: '2026-11-10 22:55:00', sender: 'user', message: '懇親会やりきって帰宅したよ！' }
-    ],
-    stampsBeforeNov4,
-    currentMemory.weekly_summary,
-    currentMemory.rolling_memory,
-    currentMemory.profile,
-    currentMemory.dictionary,
-    '2026-11-10',
-    {
-      lifestyleHabits: mockLifestyleHabits,
-      targetEvents: ['[共用] 11:00〜19:00 ♪出社', '19:30〜22:00 懇親会'],
-      completedTasks: [{ title: '[仕事] 懇親会の進行準備', completedDate: '2026-11-10' }]
-    }
-  );
-  Logger.log('\n--- 🌙 Case B-1: 2026-11-10 実出社日 (期待: 外歩き・散歩 -> 2026-11-10) ---');
-  Logger.log('cycle_stamps:\n' + (commuteBatchRes.cycle_stamps || '（なし）'));
-
-  const mockRollingWithLeave = `${(currentMemory.rolling_memory || '').replace(/- 2026-11-10:[\s\S]*/, '').trim()}\n- 2026-11-10: 出社日。懇親会を無事やり切った。翌日は休暇を取得しており起床時間を楽しみに眠りについた。`;
-  const leaveBatchRes = analyzeMemoryUpdates(
-    [
-      { timestampStr: '2026-11-11 01:33:36', sender: 'user', message: '明日は休みとった〜　ゆっくり寝る！' }
-    ],
-    stampsAlreadyNov10,
-    currentMemory.weekly_summary,
-    mockRollingWithLeave,
-    currentMemory.profile,
-    currentMemory.dictionary,
-    '2026-11-11',
-    {
-      lifestyleHabits: mockLifestyleHabits,
-      targetEvents: ['[共用] 11:00〜19:00 ♪出社'],
-      completedTasks: []
-    }
-  );
-  Logger.log('\n--- 🌙 Case B-2: 2026-11-11 カレンダー♪出社残留×有休申告 (期待: 2026-11-10維持 / rolling_memoryが休暇扱い) ---');
-  Logger.log('cycle_stamps:\n' + (leaveBatchRes.cycle_stamps || '（なし）'));
-  Logger.log('rolling_memory (末尾):\n' + String(leaveBatchRes.rolling_memory || '').split('\n').slice(-2).join('\n'));
   Logger.log('💡 完全ドライランのため、スプレッドシートの書き換えは行っていません。');
 }
 
@@ -346,6 +350,7 @@ function runPromptScenario(scenario) {
     prompt_phase_b: '', // コード最新の getDefaultPromptPhaseB() を確実に評価
     prompt_phase_c: '', // コード最新の getDefaultPromptPhaseC() を確実に評価
     prompt_phase_d: '', // コード最新の getDefaultPromptPhaseD() を確実に評価
+    prompt_schedule: '', // コード最新の getDefaultPromptSchedule() を確実に評価
     prompt_relief: '', // コード最新の getDefaultPromptRelief() を確実に評価
     prompt_db: '', // コード最新の getDefaultPromptDb() を確実に評価
     _testCalendarExcludeDate: scenario.excludeCalendarDate || ''

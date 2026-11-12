@@ -203,6 +203,24 @@ function testCustomScenario() {
       }, { isUmbrellaEvent: false }) === 'PHASE_C'
     ],
     [
+      'determineActionPhase(sendoff + fatigue -> PHASE_B)',
+      determineActionPhase({
+        action_intent: 'immediate_sendoff',
+        tags: ['単発行動の開始', '体調・疲労の訴え'],
+        need_schedule_plan: false,
+        focused_task_ids: []
+      }, { isUmbrellaEvent: false }) === 'PHASE_B'
+    ],
+    [
+      'determineActionPhase(friction -> PHASE_C)',
+      determineActionPhase({
+        action_intent: 'proactive_proposal',
+        tags: ['体調・疲労の訴え'],
+        need_schedule_plan: false,
+        focused_task_ids: []
+      }, { isUmbrellaEvent: false }) === 'PHASE_C'
+    ],
+    [
       'resolveBackendModel_("3.5-lite")',
       resolveBackendModel_({ backend_model: '3.5-lite' }).model === 'gemini-3.5-flash-lite'
     ],
@@ -219,7 +237,7 @@ function testCustomScenario() {
     {
       id: 'T_20261112_090000_001',
       title: '[家事・環境] MacBook内部の清掃',
-      dueDate: '',
+      dueDate: '2026-11-12',
       status: '未完了',
       memo: 'エアダスターを使う',
       remindContext: '休日・自室',
@@ -245,12 +263,53 @@ function testCustomScenario() {
     }
   ];
 
-  // 1. 本業勤務中の休憩・疲労連鎖（11/12 14:24 -> 15:39 再現テスト / 3.5-lite + minimal）
+  // 1. 最新ログ再現: 体調の一言＋これから風呂入ってくる -> PHASE_B で自然な1〜2文送り出し
   runPromptScenario({
-    name: '検証1: 本業勤務中の休憩・一息連鎖（私生活タスク提案ゼロ＆反復抑止）',
+    name: '検証1: 最新ログ再現（痛み止め＋これから風呂 -> PHASE_B自然送り出し）',
     mockMemory: {
       backend_model: '3.5-lite',
-      thinking_level: 'minimal'
+      thinking_level: 'minimal',
+      custom_system_prompt: '【口調・話し方】\n丁寧な敬体（です・ます調）で、落ち着いた頼れる伴走者として自然に応答する。\n情緒的な慰めや定型の労い・前置きは最小限にとどめ、さっぱりとした等身大の距離感で、要点へ端的に入る。'
+    },
+    mockTasks: mockTasks,
+    initialLogs: '18:47 User: 「生活伴走システム：終了ルーティンの完了フラグ自動化検討」 を完了\nAI: お疲れ様でした。',
+    turns: [
+      {
+        time: '2026-11-12 20:12:00',
+        user: 'ちょっと頭痛がするので痛み止め飲んだ　これから風呂入ってくる'
+      }
+    ]
+  });
+
+  // 2. 着手摩擦2パターンの出し分け（やることが決まっている vs 決まっていない脱力）
+  runPromptScenario({
+    name: '検証2: 着手摩擦の出し分け（対象あり最初の一歩 vs 対象なし脱力カード）',
+    mockMemory: {
+      backend_model: '3.5-lite',
+      thinking_level: 'minimal',
+      custom_system_prompt: '【口調・話し方】\n丁寧な敬体（です・ます調）で、落ち着いた頼れる伴走者として自然に応答する。\n情緒的な慰めや定型の労い・前置きは最小限にとどめ、さっぱりとした等身大の距離感で、要点へ端的に入る。'
+    },
+    mockTasks: mockTasks,
+    initialLogs: '',
+    turns: [
+      {
+        time: '2026-11-12 20:30:00',
+        user: 'MacBook内部の清掃やらなきゃだけど腰が重いなあ…'
+      },
+      {
+        time: '2026-11-12 21:00:00',
+        user: 'なんかだるくて動きたくないな…'
+      }
+    ]
+  });
+
+  // 3. 本業休憩の境界保護 ＆ 残存タスク照会
+  runPromptScenario({
+    name: '検証3: 本業休憩の境界保護 ＆ 残存タスク照会',
+    mockMemory: {
+      backend_model: '3.5-lite',
+      thinking_level: 'minimal',
+      custom_system_prompt: '【口調・話し方】\n丁寧な敬体（です・ます調）で、落ち着いた頼れる伴走者として自然に応答する。\n情緒的な慰めや定型の労い・前置きは最小限にとどめ、さっぱりとした等身大の距離感で、要点へ端的に入る。'
     },
     mockTasks: mockTasks,
     initialLogs: '12:55 User: お昼はサバ缶とご飯食べたよ\nAI: 栄養たっぷりで良いですね！午後のリモートワークも応援しています。',
@@ -260,46 +319,26 @@ function testCustomScenario() {
         user: 'あー、リモートワークでちょっと疲れた。小休憩中'
       },
       {
-        time: '2026-11-12 15:39:00',
-        user: 'ちょっと集中切れてきたから少し息抜き中〜'
+        time: '2026-11-12 19:30:00',
+        user: '今日のタスクあと何残ってる？'
       }
     ]
   });
 
-  // 2. 純粋DB操作の PHASE_D 分離 ＆ ルーティン完了アクション検証
+  // 4. 客観的不調時の prompt_relief 単独適用（Phase C等との競合排除）
   runPromptScenario({
-    name: '検証2: 純粋DB操作のPHASE_D分離 ＆ ルーティン完了',
+    name: '検証4: 客観的不調時の prompt_relief 単独適用（Phase競合排除）',
     mockMemory: {
       backend_model: '3.5-lite',
-      thinking_level: 'minimal'
+      thinking_level: 'minimal',
+      custom_system_prompt: '【口調・話し方】\n丁寧な敬体（です・ます調）で、落ち着いた頼れる伴走者として自然に応答する。\n情緒的な慰めや定型の労い・前置きは最小限にとどめ、さっぱりとした等身大の距離感で、要点へ端的に入る。'
     },
     mockTasks: mockTasks,
     initialLogs: '',
     turns: [
       {
         time: '2026-11-12 20:00:00',
-        user: 'ハーゲンダッツ買いたいから買い物メモに入れといて'
-      },
-      {
-        time: '2026-11-12 20:05:00',
-        user: 'モンストの兵のミザリー、今日で期間終了したから定期ルーティンの方も完了にしといて'
-      }
-    ]
-  });
-
-  // 3. 部分時間帯の段取り要求（帰宅後・夜） -> need_schedule_plan: true ＆ prompt_schedule 直交注入
-  runPromptScenario({
-    name: '検証3: 部分時間帯（帰宅後〜就寝）の段取り設計 (need_schedule_plan + prompt_schedule)',
-    mockMemory: {
-      backend_model: '3.5-lite',
-      thinking_level: 'minimal'
-    },
-    mockTasks: mockTasks,
-    initialLogs: '',
-    turns: [
-      {
-        time: '2026-11-12 19:20:00',
-        user: '仕事終わった！今日これから寝るまでのタイスケ（段取り）組んで。ゲームも少し遊びたいしご飯とお風呂も済ませたい'
+        user: 'ちょっと熱っぽくて頭ガンガンする、でも同期スクリプトやらなきゃかな…'
       }
     ]
   });

@@ -231,6 +231,71 @@ function testCustomScenario() {
     { nowStr: '2026-11-13(Fri) 20:45' },
     '明日の東京の天気は？'
   );
+  const unitCandidateTasks = [
+    { id: 'T_done', title: '[趣味・文化] モンスト周回', dueDate: '2026-11-14', remindContext: '' },
+    { id: 'T_later', title: '[趣味・文化] いつかやる', dueDate: '', remindContext: '' },
+    { id: 'T_prio', title: '⭐[優先] [家事・環境] パスワード移行', dueDate: '', remindContext: '最優先' }
+  ];
+  const unitHabitsMemory = {
+    backend_model: '3.5-lite',
+    thinking_level: 'low',
+    lifestyle_habits: '[運動・身体ケア] YouTubeストレッチ / Switchフィットネス\n[余白・趣味] 水彩画 / 小説',
+    cycle_stamps: 'ゲーム: 2026-11-10'
+  };
+  const dummyPhaseCFallbackPayload = buildNewSystemFlashPayload(
+    '「モンスト周回」 完了',
+    [],
+    '',
+    unitHabitsMemory,
+    { tags: ['完了報告'], action_intent: 'proactive_proposal', db_target_type: 'task_complete', focused_task_ids: ['T_done'], matched_cycle_stamps: [] },
+    'PHASE_C',
+    { now: new Date(2026, 10, 14, 11, 46, 0), nowStr: '2026-11-14(Sat) 11:46', todayDate: new Date(2026, 10, 14), elapsedStr: '8分', boundaryInfo: { summaryText: '固定予定なし' }, todayEvents: [], habitTopics: [] },
+    unitCandidateTasks
+  );
+  const dummyPhaseCShoppingPayload = buildNewSystemFlashPayload(
+    '牛乳を買い物メモに追加して',
+    [],
+    '',
+    unitHabitsMemory,
+    { tags: ['DB依頼'], action_intent: 'proactive_proposal', db_target_type: 'shopping', need_db_action: true, focused_task_ids: ['T_prio'], matched_cycle_stamps: [] },
+    'PHASE_C',
+    { now: new Date(2026, 10, 14, 15, 10, 0), nowStr: '2026-11-14(Sat) 15:10', todayDate: new Date(2026, 10, 14), elapsedStr: '10分', boundaryInfo: { summaryText: '固定予定なし' }, todayEvents: [], habitTopics: [] },
+    unitCandidateTasks
+  );
+  const dummyPhaseCDoneCyclePayload = buildNewSystemFlashPayload(
+    '「モンスト周回」 完了',
+    [],
+    '',
+    unitHabitsMemory,
+    { tags: ['完了報告', 'DB依頼'], action_intent: 'proactive_proposal', db_target_type: 'other', need_db_action: true, focused_task_ids: ['T_done', 'T_prio'], matched_cycle_stamps: ['ゲーム'] },
+    'PHASE_C',
+    { now: new Date(2026, 10, 14, 11, 53, 0), nowStr: '2026-11-14(Sat) 11:53', todayDate: new Date(2026, 10, 14), elapsedStr: '7分', boundaryInfo: { summaryText: '固定予定なし' }, todayEvents: [], habitTopics: [] },
+    unitCandidateTasks
+  );
+  const dummyPhaseCStatedGoalPayload = buildNewSystemFlashPayload(
+    'この後システム改善やるね',
+    [],
+    '',
+    unitHabitsMemory,
+    { tags: ['活動目標の表明'], action_intent: 'support_stated_goal', db_target_type: 'none', focused_task_ids: [], matched_cycle_stamps: [] },
+    'PHASE_C',
+    { now: new Date(2026, 10, 14, 11, 46, 0), nowStr: '2026-11-14(Sat) 11:46', todayDate: new Date(2026, 10, 14), elapsedStr: '8分', boundaryInfo: { summaryText: '固定予定なし' }, todayEvents: [], habitTopics: [] },
+    unitCandidateTasks
+  );
+  const dummyPhaseDWorkPayload = buildNewSystemFlashPayload(
+    '「モンスト周回」 完了',
+    [],
+    '',
+    unitHabitsMemory,
+    { tags: ['完了報告', 'DB依頼'], action_intent: 'db_operation', db_target_type: 'task_complete', focused_task_ids: ['T_done'], matched_cycle_stamps: [] },
+    'PHASE_D',
+    { now: new Date(2026, 10, 13, 10, 7, 0), nowStr: '2026-11-13(Fri) 10:07', todayDate: new Date(2026, 10, 13), elapsedStr: '20分', boundaryInfo: { summaryText: 'リモートワーク中' }, todayEvents: [], habitTopics: [] },
+    unitCandidateTasks
+  );
+  const relaxedJsonParsed = parseGeminiActionJson_(
+    '{\n  "reply_text": \'読了お疲れ様！次は "ストレッチ" か本でも。\',\n  "task_actions": [{ "action": "complete", "task_id": "T_done" }],\n  "memory_updates": { "cycle_stamps_updates": "読書（本・漫画）: 2026-11-14" }\n}',
+    {}
+  );
 
   const unitChecks = [
     ['isUmbrellaEventTitle("自由時間")', isUmbrellaEventTitle('自由時間') === true],
@@ -272,6 +337,93 @@ function testCustomScenario() {
         need_schedule_plan: false,
         focused_task_ids: []
       }, { isUmbrellaEvent: false }) === 'PHASE_C'
+    ],
+    [
+      'determineActionPhase(空き時間の完了トランジション -> PHASE_C)',
+      determineActionPhase({
+        action_intent: 'general_dialogue',
+        tags: ['完了報告'],
+        matched_habit_topic: '余白・趣味',
+        need_schedule_plan: false,
+        focused_task_ids: []
+      }, { isDuringEvent: false, isUmbrellaEvent: false, minutesUntilNext: 180 }) === 'PHASE_C'
+    ],
+    [
+      'determineActionPhase(深夜/就寝移行の完了 -> PHASE_D)',
+      determineActionPhase({
+        action_intent: 'general_dialogue',
+        tags: ['完了報告', '雑談'],
+        matched_habit_topic: '睡眠',
+        need_schedule_plan: false,
+        focused_task_ids: []
+      }, { isDuringEvent: false, isUmbrellaEvent: false, minutesUntilNext: 0 }) === 'PHASE_D'
+    ],
+    [
+      'determineActionPhase(本業・固定予定中の完了 -> PHASE_D)',
+      determineActionPhase({
+        action_intent: 'general_dialogue',
+        tags: ['完了報告'],
+        matched_habit_topic: '家事',
+        need_schedule_plan: false,
+        focused_task_ids: []
+      }, { isDuringEvent: true, isUmbrellaEvent: false, minutesUntilNext: 0 }) === 'PHASE_D'
+    ],
+    [
+      'determineActionPhase(空き時間の未定状態・行動提案 -> PHASE_C)',
+      determineActionPhase({
+        action_intent: 'proactive_proposal',
+        tags: ['雑談'],
+        matched_habit_topic: 'none',
+        need_schedule_plan: false,
+        focused_task_ids: []
+      }, { isDuringEvent: false, isUmbrellaEvent: false, minutesUntilNext: 300 }) === 'PHASE_C'
+    ],
+    [
+      'determineActionPhase(空き時間のトラブル対応等 -> PHASE_D)',
+      determineActionPhase({
+        action_intent: 'general_dialogue',
+        tags: ['雑談'],
+        matched_habit_topic: 'none',
+        need_schedule_plan: false,
+        focused_task_ids: []
+      }, { isDuringEvent: false, isUmbrellaEvent: false, minutesUntilNext: 300 }) === 'PHASE_D'
+    ],
+    [
+      'determineActionPhase(空き時間のDB依頼(未継続・次未定) -> PHASE_C)',
+      determineActionPhase({
+        action_intent: 'db_operation',
+        tags: ['DB依頼'],
+        previous_action_status: '該当なし',
+        need_schedule_plan: false,
+        focused_task_ids: []
+      }, { isDuringEvent: false, isUmbrellaEvent: false, minutesUntilNext: 180 }) === 'PHASE_C'
+    ],
+    [
+      'determineActionPhase(継続中アクション中のDB依頼・雑談 -> PHASE_A)',
+      determineActionPhase({
+        action_intent: 'db_operation',
+        tags: ['DB依頼'],
+        previous_action_status: '継続中',
+        need_schedule_plan: false,
+        focused_task_ids: []
+      }, { isDuringEvent: false, isUmbrellaEvent: false, minutesUntilNext: 180 }) === 'PHASE_A' &&
+      determineActionPhase({
+        action_intent: 'general_dialogue',
+        tags: ['雑談'],
+        previous_action_status: '継続中',
+        need_schedule_plan: false,
+        focused_task_ids: []
+      }, { isDuringEvent: true, isUmbrellaEvent: true, minutesUntilNext: 120 }) === 'PHASE_A'
+    ],
+    [
+      'determineActionPhase(包括枠内の完了 -> PHASE_C)',
+      determineActionPhase({
+        action_intent: 'general_dialogue',
+        tags: ['完了報告'],
+        matched_habit_topic: '余白・趣味',
+        need_schedule_plan: false,
+        focused_task_ids: []
+      }, { isDuringEvent: true, isUmbrellaEvent: true, minutesUntilNext: 60 }) === 'PHASE_C'
     ],
     [
       'resolveBackendModel_("3.5-lite")',
@@ -338,77 +490,180 @@ function testCustomScenario() {
       dummyWsPayload.generationConfig.responseMimeType === undefined &&
       dummyWsPayload.generationConfig.thinkingConfig.thinkingLevel === 'medium' &&
       dummyWsFallbackPayload.contents[0].parts[0].text.indexOf('明日の東京の天気は？') !== -1
+    ],
+    [
+      'buildNewSystemFlashPayload(PHASE_C完了トランジション次手候補フォールバック & lifestyle_habits非タスク供給 & 目標/D抑止)',
+      dummyPhaseCFallbackPayload.contents[0].parts[0].text.indexOf('T_prio') !== -1 &&
+      dummyPhaseCFallbackPayload.contents[0].parts[0].text.indexOf('T_done') !== -1 &&
+      dummyPhaseCFallbackPayload.contents[0].parts[0].text.indexOf('【生活習慣・活動定義 (lifestyle_habits)】') !== -1 &&
+      dummyPhaseCStatedGoalPayload.contents[0].parts[0].text.indexOf('【生活習慣・活動定義 (lifestyle_habits)】') === -1 &&
+      dummyPhaseDWorkPayload.contents[0].parts[0].text.indexOf('T_prio') === -1 &&
+      dummyPhaseDWorkPayload.contents[0].parts[0].text.indexOf('【生活習慣・活動定義 (lifestyle_habits)】') === -1
+    ],
+    [
+      'getDefaultPromptPhaseC(非タスク行動必須ミックス触媒指針 & 曖昧待機禁止)',
+      getDefaultPromptPhaseC().indexOf('非タスク行動を必ず1〜2件含め') !== -1 &&
+      getDefaultPromptPhaseC().indexOf('希望がある場合は') === -1
+    ],
+    [
+      'buildNewSystemFlashPayload(PHASE_C×DB併用出力リマインド & 周期スタンプ併用microschema正規化)',
+      dummyPhaseCShoppingPayload.systemInstruction.parts[0].text.indexOf('【出力構成のリマインド（フェーズC × 用件併用時）】') !== -1 &&
+      dummyPhaseCStatedGoalPayload.systemInstruction.parts[0].text.indexOf('【出力構成のリマインド（フェーズC × 用件併用時）】') === -1 &&
+      dummyPhaseDWorkPayload.systemInstruction.parts[0].text.indexOf('【出力構成のリマインド（フェーズC × 用件併用時）】') === -1 &&
+      dummyPhaseCDoneCyclePayload.systemInstruction.parts[0].text.indexOf('【データベース操作仕様: タスク完了】') !== -1 &&
+      dummyPhaseCDoneCyclePayload.systemInstruction.parts[0].text.indexOf('cycle_stamps_updates') !== -1 &&
+      dummyPhaseCDoneCyclePayload.systemInstruction.parts[0].text.indexOf('calendar_actions') === -1
+    ],
+    [
+      'parseGeminiActionJson_(シングルクォート準JSON救済 & アクション保持)',
+      relaxedJsonParsed.reply_text === '読了お疲れ様！次は "ストレッチ" か本でも。' &&
+      Array.isArray(relaxedJsonParsed.task_actions) &&
+      relaxedJsonParsed.task_actions.length === 1 &&
+      relaxedJsonParsed.memory_updates &&
+      relaxedJsonParsed.memory_updates.cycle_stamps_updates === '読書（本・漫画）: 2026-11-14'
     ]
   ];
   Logger.log('============================================================');
   Logger.log('🧪 【検証0: ロジック単体チェック (完全ドライラン)】');
   unitChecks.forEach(([label, ok]) => Logger.log(`${ok ? '✅' : '❌'} ${label}`));
 
-  const mockTasks = [
-    {
-      id: 'T_20261024_143202_622',
-      title: '[お出かけ] 旧前田家本邸 洋館見学',
-      dueDate: '',
-      status: '未完了',
-      memo: '目黒区駒場公園内。体調が万全な時に見学へ行く',
-      remindContext: '休日お出かけ・晴れ',
-      docUrl: ''
-    },
+  const mockTasksTurn1 = [
     {
       id: 'T_20261103_200621_731',
       title: '[家事・環境] 私物の整理',
-      dueDate: '2026-11-13',
+      dueDate: '2026-11-14',
       status: '未完了',
       memo: '',
       remindContext: '週末のまとまった時間',
       docUrl: ''
     },
     {
-      id: 'T_20261113_090000_003',
+      id: 'T_20261113_190000_002',
+      title: '[実務・手続] Amazonアカウント：早希ちゃんに相談する（〜21:00まで）',
+      dueDate: '2026-11-14',
+      status: '未完了',
+      memo: '',
+      remindContext: '〜21:00まで',
+      docUrl: ''
+    },
+    {
+      id: 'T_20261107_100000_003',
+      title: '[趣味・文化] 読書：天使1/2方程式を読む',
+      dueDate: '',
+      status: '未完了',
+      memo: '',
+      remindContext: '余白時間・リラックス',
+      docUrl: ''
+    },
+    {
+      id: 'T_20261113_090000_004',
       title: '[趣味・文化] モンスト：超究極・兵のミザリー周回',
-      dueDate: '2026-11-13',
+      dueDate: '2026-11-14',
       status: '未完了',
       memo: '毎日ルーティン',
       remindContext: '日課・隙間時間',
       docUrl: ''
+    },
+    {
+      id: 'T_20261110_180000_005',
+      title: '⭐[優先] [家事・環境] Chrome・iCloud・Notionのパスワードを1Passwordへ順次移行',
+      dueDate: '',
+      status: '未完了',
+      memo: '最優先で少しずつ進める',
+      remindContext: 'PC作業できる時間',
+      docUrl: ''
     }
   ];
 
-  // 課題となった体調報告＋複雑な指示2個（Web検索＋三連休＋複数DB / 夜の時間設計＋体調配慮）を後段3モデルで比較
-  const daytimeLogs = [
-    '08:55 User: おはよう　眠いわけじゃないんだけど、身体起こすのめんどい😮‍💨',
-    'AI: おはようございます。リモートワーク開始まで約1時間ですので、無理に慌てずゆっくり身体を起こしていきましょう。',
-    '11:03 User: 「刀剣乱舞：江戸城潜入調査を進める」 を完了',
-    'AI: 江戸城潜入調査、完了にしておきました。',
-    '11:27 User: うわー仕事中にリファレンス探しでゲームミュージック聴いてたらレトロゲームやりたくなる〜〜〜そんな時間はない〜〜〜！！！！！',
-    'AI: リファレンス探しでゲーム音楽に触れると余計に遊びたくなりますよね。今はリモートワーク中ですので、退勤後の楽しみにとっておきましょう。'
+  // Turn2ではTurn1で完了したミザリー周回を除いた残存タスク状態を模擬
+  const mockTasksAfterMisery = mockTasksTurn1.filter(t => t.id !== 'T_20261113_090000_004');
+
+  const holidayInitialLogs = [
+    '11:38 User: おはよう',
+    'AI: おはようございます。今日は特に時間指定の予定はない休日ですね。自分のペースで過ごしつつ、気になるところから進めていきましょう。'
   ].join('\n');
 
-  const comparisonTurns = [
-    {
-      time: '2026-11-13 16:15:00',
-      user: '今は落ち着いたけど激しい腹痛と下痢アリ。生理近いかもな'
-    },
-    {
-      time: '2026-11-13 20:45:00',
-      user: '次の三連休の日曜に「旧前田家本邸 洋館見学」を仮置きしたいんだけど、11月の日曜やってるか開館状況とか軽く調べて、問題なさそうなら午後に仮置きしてタスクの期限も揃えといて。あとゴミ袋と柔軟剤なくなったから買物メモに追加よろ'
-    },
-    {
-      time: '2026-11-13 20:50:00',
-      user: '今日の夕方お腹の波もあったし少し疲れ気味なんだけど、風呂は22時までに入って23時には寝たい。「私物の整理」は明日やるとして、今夜の残りで「モンスト：超究極・兵のミザリー周回」と少しギター練習もしたいんだよね。無理ない夜の段取り組める？'
-    }
-  ];
-
+  // シナリオ1: 固定予定のない休日（終日家族予定のみ）における完了トランジション（PHASE_C）＆就寝前安全境界
   runPromptScenario({
-    name: '課題改善検証 (前段3.1-lite[low] × 後段3.5-lite[low])',
+    name: '休日空き時間完了トランジション検証 (11/14 再現)',
     mockMemory: {
       backend_model: '3.5-lite',
       thinking_level: 'low',
       custom_system_prompt: customStylePrompt
     },
-    mockTasks: mockTasks,
-    initialLogs: daytimeLogs,
-    turns: comparisonTurns
+    initialLogs: holidayInitialLogs,
+    turns: [
+      {
+        time: '2026-11-14 11:46:55',
+        user: '「モンスト：超究極・兵のミザリー周回」 完了',
+        mockTasks: mockTasksTurn1
+      },
+      {
+        time: '2026-11-14 11:53:01',
+        user: '「読書：天使1/2方程式を読む」 完了',
+        mockTasks: mockTasksAfterMisery
+      },
+      {
+        time: '2026-11-14 23:45:00',
+        user: 'もう歯磨きも終わったし、そろそろおやすみ',
+        mockTasks: mockTasksAfterMisery.filter(t => t.id !== 'T_20261107_100000_003')
+      }
+    ]
+  });
+
+  // シナリオ2: 本業勤務中の完了報告に対する境界保護検証（PHASE_D維持・提案非介入確認）
+  runPromptScenario({
+    name: '境界保護検証 (平日リモートワーク中の完了報告 -> PHASE_D)',
+    mockMemory: {
+      backend_model: '3.5-lite',
+      thinking_level: 'low',
+      custom_system_prompt: customStylePrompt
+    },
+    mockTasks: [
+      {
+        id: 'T_20261113_110000_001',
+        title: '[家事・環境] MacBook：手入れ・清掃',
+        dueDate: '2026-11-13',
+        status: '未完了',
+        memo: '',
+        remindContext: 'デスク作業時',
+        docUrl: ''
+      },
+      ...mockTasksAfterMisery
+    ],
+    initialLogs: '',
+    turns: [
+      {
+        time: '2026-11-13 10:07:08',
+        user: '「MacBook：手入れ・清掃」 を完了'
+      }
+    ]
+  });
+
+  // シナリオ3: 休日余白時間の非タスク含む提案（挨拶/DB依頼 -> PHASE_C）と突発トラブル保護（-> PHASE_D）
+  runPromptScenario({
+    name: '休日余白提案(挨拶/DB依頼->PHASE_C非タスク併用) ＆ トラブル保護(->PHASE_D)',
+    mockMemory: {
+      backend_model: '3.5-lite',
+      thinking_level: 'low',
+      custom_system_prompt: customStylePrompt
+    },
+    mockTasks: [...mockTasksAfterMisery],
+    initialLogs: '',
+    turns: [
+      {
+        time: '2026-11-14 11:38:08',
+        user: 'おはよう'
+      },
+      {
+        time: '2026-11-14 12:03:26',
+        user: 'パソコンのモニターからパチパチと異音が😱 寿命か……'
+      },
+      {
+        time: '2026-11-14 15:10:00',
+        user: '牛乳を買い物メモに追加して'
+      }
+    ]
   });
 
   Logger.log('💡 完全ドライランのため、スプレッドシートの書き換えは行っていません。');

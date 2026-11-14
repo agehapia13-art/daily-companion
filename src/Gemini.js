@@ -177,6 +177,91 @@ function extractTokenStats_(usage) {
  * @param {string} rawText
  * @param {Object|null} usage
  * @return {Object}
+/**
+ * シングルクォート文字列リテラルや文字列内の生改行を含む準JSONテキストを標準JSONへ正規化する
+ * @param {string} raw
+ * @return {string}
+ * @private
+ */
+function normalizeRelaxedJsonStrings_(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  let out = '';
+  let inDouble = false;
+  let inSingle = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (inDouble) {
+      if (ch === '\\' && i + 1 < raw.length) {
+        const next = raw[i + 1];
+        out += (next === "'") ? "'" : ('\\' + next);
+        i++;
+      } else if (ch === '"') {
+        inDouble = false;
+        out += '"';
+      } else if (ch === '\n') {
+        out += '\\n';
+      } else if (ch !== '\r') {
+        out += ch;
+      }
+      continue;
+    }
+    if (inSingle) {
+      if (ch === '\\' && i + 1 < raw.length) {
+        const next = raw[i + 1];
+        out += (next === "'") ? "'" : ('\\' + next);
+        i++;
+      } else if (ch === "'") {
+        inSingle = false;
+        out += '"';
+      } else if (ch === '"') {
+        out += '\\"';
+      } else if (ch === '\n') {
+        out += '\\n';
+      } else if (ch !== '\r') {
+        out += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inDouble = true;
+      out += '"';
+    } else if (ch === "'") {
+      inSingle = true;
+      out += '"';
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/**
+ * JSON文字列を通常パース・準JSON正規化の両面から安全にパースする
+ * @param {string} candidate
+ * @param {Object=} usage
+ * @return {Object|null}
+ * @private
+ */
+function tryParseActionObject_(candidate, usage) {
+  if (!candidate) return null;
+  const attempts = [candidate, normalizeRelaxedJsonStrings_(candidate)];
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      const parsed = JSON.parse(attempts[i]);
+      if (parsed && typeof parsed === 'object') {
+        parsed._usage = usage;
+        return parsed;
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
+/**
+ * 行動・DB操作をJSON構造化出力で受け取るヘルパー
+ * @param {string} rawText
+ * @param {Object=} usage
+ * @return {Object}
  * @private
  */
 function parseGeminiActionJson_(rawText, usage) {
@@ -187,14 +272,11 @@ function parseGeminiActionJson_(rawText, usage) {
     cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
   }
 
-  // 1. 直接パース試行
-  try {
-    const parsed = JSON.parse(cleaned);
-    if (parsed && typeof parsed === 'object') {
-      parsed._usage = usage;
-      return parsed;
-    }
-  } catch (err) {}
+  // 1. 直接パース試行（シングルクォート文字列等の準JSON正規化リトライ含む）
+  const directParsed = tryParseActionObject_(cleaned, usage);
+  if (directParsed) {
+    return directParsed;
+  }
 
   // 2. 救済抽出: 末尾の '}' から逆順にバランスする開始 '{' を探索して完全なJSONオブジェクトを抽出
   // （思考メモやフォーマット要件の復唱テキストが前置されていても安全に救済）
@@ -213,14 +295,11 @@ function parseGeminiActionJson_(rawText, usage) {
       }
     }
     if (targetStart !== -1) {
-      try {
-        const candidate = cleaned.substring(targetStart, lastBrace + 1);
-        const sub = JSON.parse(candidate);
-        if (sub && typeof sub === 'object') {
-          sub._usage = usage;
-          return sub;
-        }
-      } catch (e2) {}
+      const candidate = cleaned.substring(targetStart, lastBrace + 1);
+      const subParsed = tryParseActionObject_(candidate, usage);
+      if (subParsed) {
+        return subParsed;
+      }
     }
   }
 
@@ -287,7 +366,7 @@ const LITE_RESPONSE_SCHEMA = {
     focused_task_ids: {
       type: 'ARRAY',
       items: { type: 'STRING' },
-      description: '今着目・提案・操作すべきタスクのID（一日の段取り相談時は最大6〜8件、通常提案・操作時は最大3〜4件。該当なしは空配列）'
+      description: '今着目・提案・操作すべきタスクのID（一日の段取り相談時は最大6〜8件、通常提案や余白時間帯の完了トランジション時は完了対象＋次候補を含め最大3〜4件、純粋なDB操作のみ時は対象のみ。該当なしは空配列）'
     },
     need_db_action: {
       type: 'BOOLEAN',
@@ -367,22 +446,22 @@ function getDefaultPromptLite() {
      * "該当なし": 直前に行動開始の宣言がない、または本日初回の発言である場合。
 
 3. action_intent（対話の主目的・演出スタンス）:
-   - ★最優先【生活領域と本業・固定予定の境界保護】: 本システムは私生活（5領域）の伴走専用であり、本業の業務管理は行わない。本業の勤務中（仕事・出社・リモートワーク・会議等）や進行中の固定予定の最中に、ユーザーから疲労の一息や雑談・愚痴だけが発せられた場合、ユーザー自身が明確に「休み時間・空き時間に私生活で何をするか／退勤後の段取り」を相談していない限り、私生活タスクや余暇の提案へ持ち込まず必ず "general_dialogue" とすること（※「自由時間」「休息」「休憩」「タスク消化」などの余白・自由枠にある時を除く）。
+   - ★最優先【生活領域と本業・固定予定の境界保護】: 本システムは私生活（5領域）の伴走専用であり、本業の業務管理は行わない。本業の勤務中（仕事・出社・リモートワーク・会議等）や進行中の固定予定の最中に、ユーザーから疲労の一息や雑談・愚痴・事務連絡だけが発せられた場合、ユーザー自身が明確に「休み時間・空き時間に私生活で何をするか／退勤後の段取り」を相談していない限り、私生活タスクや余暇の提案へ持ち込まず必ず "general_dialogue" または "db_operation" とすること（※「自由時間」「休息」「休憩」「タスク消化」などの余白・自由枠にある時を除く）。
    - "immediate_sendoff": 風呂・食事・睡眠・移動・作業開始など、これから直ちに物理行動に向かう明確な宣言時（体調への一言が添えられていても、直ちに向かう宣言ならこちらを選ぶ。※「〜しなきゃだけど面倒」「動きたくない」等の着手摩擦・葛藤がある場合は immediate_sendoff ではなく proactive_proposal とすること）。
-   - "support_stated_goal": ユーザーが自発的にやりたいことや目標を決めている場合（別の選択肢を押し付けず、その意志を尊重し就寝・健康と両立する引き際を見立てる）。※単なる買物メモ・タスク登録・完了・更新などDB反映のみが目的の発言は db_operation とする。
-   - "proactive_proposal": 一段落して余白が発生した、カレンダーが「タスク消化」「作業枠」「自由時間」「休息」「休憩」などの包括枠にある、何をして過ごすか・段取りを相談している、または私生活で脱力・着手摩擦（「動きたくない」「だるい」「〜やらなきゃだけど腰が重い」等）を訴えている場合。
-   - "db_operation": タスク完了や追加、カレンダー登録などDB操作が主目的の場合。
-   - "general_dialogue": 日常の雑談、感想、状況報告、残存タスクや予定の確認、本業勤務中の疲労の吐露・一息。
+   - "support_stated_goal": ユーザーがこれからやりたいこと・次にすべきことをすでに具体的に決めている場合（本発言での「この後〜する／やりたい」等の表明に加え、本日の直近会話履歴で「〜をやる」と宣言済みかつまだ着手・完了していない状態も含む。別の選択肢を押し付けず、その意志・予定を尊重して就寝・健康と両立する引き際を見立てる）。※単なる買物メモ・将来用タスクの登録・期限変更・過去の事後記録など「今すぐ次の時間をどう過ごすか」がまだ決まったわけではない場合、私生活の余白時間帯なら下の proactive_proposal とする。
+   - "proactive_proposal": 【私生活の余白時間帯の基本スタンス】本業・固定予定の進行中、就寝移行時、直前行動が「継続中」の状態、目の前の突発トラブルや急性不調への向き合い最中、または上記 immediate_sendoff / support_stated_goal のいずれにも該当しない私生活の余白時間帯（時間指定の固定予定がない空き時間、または「タスク消化」「作業枠」「自由時間」「休息」「休憩」等の包括枠）における発話全般。直後の完了トランジション・過ごし方相談・着手摩擦に限らず、次にすべきことが未定の状態での挨拶（「おはよう」等）・何気ない雑談・一息、ならびに次手未定のまま行われるDB登録/更新依頼・事実質問に対しても、次手の提案（非タスク行動含む）を添えるためこちらを選ぶ。
+   - "db_operation": 本業・固定予定の進行中、直前行動が「継続中」、就寝移行時、またはすでに次にやることを決めている状態で行われる、次の過ごし方提案を要しない純粋なDB操作自体が主目的の場合。
+   - "general_dialogue": 本業勤務中・固定予定中の雑談や一息、直前行動が「継続中」の合間の会話、目の前の突発トラブルや急性の体調不調へ向き合っている最中の発話、または就寝前の静かな挨拶。
 
 4. focused_task_ids（今着目・提案・操作すべきタスクの選別）:
    未完了タスク一覧の中から、ユーザーの最新発言・現在の時刻・状況・文脈を踏まえて、今まさに【完了・リスケ・更新・操作すべきタスク】または【提案・見通し・段取りの候補とすべきタスク】のIDを選出して配列で出力してください（例: ["T_..."]）。
-   - ★重要【境界保護】: 本業の勤務中・固定予定の進行中で、私生活タスクの提案・確認・スケジュール調整を求められていない雑談・一息（「仕事疲れた」「ちょっと休憩」等）では、未完了タスクを勝手に選出せず必ず空配列 [] を出力すること。
+   - ★重要【境界保護】: 本業の勤務中・固定予定の進行中や、目の前のトラブル・体調不調へ向き合っている最中（action_intent が "general_dialogue" や本業中 "db_operation" の時）で、私生活タスクの提案・調整を求められていない発話では、未完了タスクを勝手に選出せず必ず空配列 [] を出力すること。
    - 【操作・完了・リスケ・資料連携時】:
-     * ユーザーが言及・完了報告したタスク（プロジェクトプレフィックスや表現の揺らぎ、一部の単語から該当タスクを柔軟に推論）
+     * ユーザーが言及・完了報告したタスク（プロジェクトプレフィックスや表現の揺らぎ、一部の単語から該当タスクを柔軟に推論。※なお、action_intent が "proactive_proposal" となる私生活の余白時間帯の完了報告・DB依頼・質問では、操作対象タスクIDだけにとどめず下記の提案候補タスク1〜3件も必ず併せて選出すること）
      * 「今日のタスク明日に回して」「残りは明日に」等の一括指示時は、当日以前（当日含む）が期限の未完了タスクをすべて選出
      * 優先度・提案順序の指定（「〜を優先して」「早めに提案して」等）があったタスク、カレンダー予定の追加・移動と連動して期限を揃えるべき関連タスク、またはプロジェクトフォルダ・資料(Google Docs)の追記・紐付け対象となる関連タスク
-   - 【提案・相談・見通し時】:
-     * 期限が迫っている重要タスク、優先度指定のあるタスク、または現在の空き時間・状況・負荷に適した選択肢（脱力時は数分でできる低負荷なもの）を文脈に応じて柔軟に選出
+   - 【提案・相談・未定余白・見通し時（完了報告・挨拶・DB依頼/質問後の余白含む）】:
+     * 期限が迫っている重要タスク、優先度指定（⭐等）のあるタスク、または現在の空き時間・状況・負荷・リマインド目安に適した選択肢（脱力時は数分でできる低負荷なもの）を文脈に応じて柔軟に選出（1〜3件）
    - 不要または該当なしの場合は空配列 [] を出力。
 
 5. need_db_action（実データベース・メモリー操作の要否）:
@@ -394,7 +473,7 @@ function getDefaultPromptLite() {
      * ② 作品の消費（映画、音楽、本、ゲーム等） → db_target_type: "input_stock"
      * ③ 日時確定の予定 → db_target_type: "calendar"
      * ④ 本人が行うあらゆる行動・実践（外出、制作、調査、家事、身の回りの手入れ等、規模や所要時間の大小を問わず） → db_target_type: "task_add"
-     * ※2つ以上の異なるプール操作が同時に必要な場合は必ず db_target_type: "other" を出力すること。
+     * ※2つ以上の異なるプール操作（例: 買物追加とタスク追加）が同時に必要な場合は必ず db_target_type: "other" を出力すること（ただし matched_cycle_stamps による周期スタンプ自動更新との併用だけでは "other" にせず、主操作側 e.g. "task_complete" のままにすること）。
    - ★重要【既存タスクの方針・状態変更】: 対話や段取りの中で、既存タスクの優先度・提案タイミング・実施時期（先送り含む）・補足メモ等の更新方針が定まった場合も必ず true とする。
    - 単なる日常行動の報告（「夕飯食べた」「ニュース見終えた」「風呂入る」など）で未完了タスクやDB更新が伴わない場合のみ false。
 
@@ -409,8 +488,8 @@ function getDefaultPromptLite() {
    - "calendar"（予定登録/変更）
    - "shopping"（買物メモ・食べたい食品・欲しい物）
    - "input_stock"（作品ストック: 映画/音楽/本/ゲーム等）
-   - "memory"（生活習慣・周期スタンプ・プロファイル・辞書更新）
-   - "other"（買物とタスクなど、2つ以上の異なるDB操作が同時に必要な場合・その他）
+   - "memory"（生活習慣・周期スタンプ明示変更・プロファイル・辞書更新 ※自動検出のみの周期スタンプ併用は含めない）
+   - "other"（買物とタスクなど、2つ以上の異なるDBプール操作が同時に必要な場合・その他 ※自動検出のみの周期スタンプ併用は含めない）
 
 7. future_schedule_inquiry / schedule_range_start / schedule_range_end（未来日程・動的カレンダー取得期間）:
    - future_schedule_inquiry: 明日以降の予定、週末スケジュール、来週・来月などの確認・照会、または未来のスケジュールを意識した相談・登録依頼が含まれている場合は true。当日のやり取りのみなら false。
@@ -418,7 +497,7 @@ function getDefaultPromptLite() {
 
 8. need_schedule_plan（タイムスケジュール・段取り組み立ての要否）:
    - 一日全体や帰宅後〜就寝など、時刻を区切ったタイムスケジュール表や過ごし方の段取りを明確に組み立てるよう求められた場合のみ true。
-   - 単発の相談・現状確認・着手摩擦・単発の選択肢提案・純粋なDB操作のみの場合は false。
+   - 単発の相談・現状確認・着手摩擦・単発の選択肢提案・通常の挨拶（「おはよう」等）や雑談・純粋なDB操作のみの場合は false。
 
 9. location（現在地の特定）:
    - 会話文脈、カレンダー予定、時間帯から現在地を推論し、"自宅" / "職場" / "移動中" / "外出先" のいずれかを出力。
@@ -496,13 +575,13 @@ function getDefaultPromptPhaseB() {
  * @return {string}
  */
 function getDefaultPromptPhaseC() {
-  return `【現在の行動フェーズ: フェーズC（余白・着手摩擦・目標への触媒伴走）】
-- 行動の切れ目や余白の相談、着手摩擦、あるいはこの後〜今後の行動意志が表れています。対等な伴走者として状況に応じて応答してください：
+  return `【現在の行動フェーズ: フェーズC（余白・行動の切れ目・着手摩擦・目標への触媒伴走）】
+- 行動の一区切り、今なにも進めておらず次の予定・行動も決まっていない余白時間（挨拶・雑談・DB操作や質問の後を含む）、着手摩擦、あるいはこれから取り組む行動意志がある状態です。対等な伴走者として状況に応じて応答してください：
 
-1. 余白時間・過ごし方相談・作業枠の切れ目の時:
-   - 姿勢・場所・負荷・時間などの希望がある場合は、それに合う手元カード（着目タスク、スキル、文化・娯楽、身体ケア等）から今すぐ動ける選択肢を2〜3枚提案する。
-   - ⚠️期限超過・📅本日期限・最優先のタスクがある場合は、主提案に無理にこじつけず見通しとして自然に添える（希望条件がない純粋な相談や作業枠内では、重要タスクから1件促してよい）。
-   - 同日中にすでに提案済みの項目は繰り返さず、就寝前は低負荷な過ごし方や休息を中心にする。
+1. 今していることがなく、次にすべきことも決まっていない余白状態の時（完了直後・挨拶・雑談・DB操作や質問の後・作業枠内など）:
+   - 用件（労い・DB処理の確認・質問への回答等）がある場合は1〜2文で簡潔に済ませた上で、「ご自分のペースでゆっくり（心地よい時間を）お過ごしください」等の曖昧な言葉だけで会話を閉じず、【時間の鏡】の残り時間を踏まえて「次の一歩」の触媒として機能する。
+   - 提案内容が未完了タスクの消化だけに偏らないよう、5領域全体の選択肢（lifestyle_habits の運動・身体ケア・余白趣味や生活リズム、input_stock の未消化作品、cycle_stamps の未実施や経過日数が空いた活動、skill_options、対人/外出）から**非タスク行動を必ず1〜2件含め**、必要に応じて【着目・関連タスク】の優先・期限タスクとバランスよく組み合わせて計2〜3件（枠が短い・優先事項がある時は1〜2件）軽やかに提示し、どれを選ぶかは本人に委ねる（※姿勢・場所・負荷等の希望がある時はそれに合うカードを主提案とし、⚠️期限超過・📅本日期限・最優先のタスクは見通しとして無理なく添える）。
+   - 同日中にすでに提案済みの項目は繰り返さず、就寝が近い時間帯は低負荷な過ごし方や休息の支度を中心にする。
 
 2. やることが決まっているが着手摩擦で動けない時:
    - 急かしたり別のタスク・選択肢を提案したりせず、本人が意識している対象について「最初の一歩」だけを1つ軽く差し出し、動くかどうかは委ねる。
@@ -510,8 +589,8 @@ function getDefaultPromptPhaseC() {
 3. やることが決まっておらず脱力している時:
    - 無理に重い課題を勧めず（だらけた動画鑑賞や仮眠への逃避も勧めない）、今の姿勢のまま数分で片付く最も軽い手元カードを2〜3個差し出し、動くかどうかは委ねる。
 
-4. 今すぐではなく「この後・今後〜したい」という行動意志の表明時:
-   - 本人の意志を尊重して応援しつつ、【時間の鏡】を踏まえて食事・入浴・睡眠などの生活リズムと両立する引き際やタイミングをそっと添える（急ぎの期限タスクがある場合のみ軽く触れる）。`;
+4. 次にすべきことがすでに決まっている時（「この後・今後〜したい」という行動意志の表明、または本日の会話で宣言済みの未着手目標がある時）:
+   - 別の選択肢を押し付けず本人の意志を尊重して応援しつつ、【時間の鏡】を踏まえて食事・入浴・睡眠などの生活リズムと両立する引き際やタイミングをそっと添える（急ぎの期限タスクがある場合のみ軽く触れる）。`;
 }
 
 /**
@@ -624,10 +703,10 @@ ${getTaskProjectLinkRule_()}
    - ユーザーから食事・入浴・睡眠・余白や趣味などの生活リズムやこだわりについて変更・追加の指定があった場合は、\`lifestyle_habits\` に \`"[トピック名]: 更新後の内容"\` を出力して該当トピックを更新する。
    - ユーザーから住居・家族構成・勤務形態・通勤時間などの恒久的生活基盤について変更が指示された場合のみ、\`profile\` に更新後のプロファイル全文を出力する。
 6. 操作結果の二重復唱防止（トークン節約）:
-   - カレンダー登録やタスク操作（更新・完了等）を行った際は、システム通知が自動表示されるため、返信本文（\`reply_text\`）内で全予定や全タスクを箇条書きで二重復唱しないこと（「カレンダーに反映しました！」「〜件のタスクをリスケしました」等、要点を1〜2文でスッキリ完結させる）。
+   - カレンダー登録やタスク操作（更新・完了等）を行った際は、システム通知が自動表示されるため、返信本文（\`reply_text\`）内で全予定や全タスクを箇条書きで二重復唱しないこと（「カレンダーに反映しました！」「〜件のタスクをリスケしました」等、操作確認の部分は1〜2文でスッキリ伝える ※余白時間の次手提案が求められているフェーズでは提案を省略しない）。
 
 {
-  "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
+  "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。操作確認部分は1〜2文で簡潔に）",
   "image_summary": "（※画像添付時のみ）画像の客観的な内容要約",
   "task_actions": [
     { "action": "add", "title": "[大分類] 具体的な内容", "due_date": "（※期限指定がある場合のみ YYYY-MM-DD。未指定時は省略）", "memo": "補足", "remind_context": "提案目安（例: 夜・自室 / 休日PC 等）", "project_name": "（※同領域かつ主題が直接一致する既存/同時作成プロジェクトがある場合のみ。該当なしはキー省略）" },
@@ -696,7 +775,7 @@ ${prefixGuide}
 ${projectLinkRule}
 - 【実施時期・期限の変更同期】: 一括・個別を問わず、対象タスクの実施日や期限を変更・先送りする方針が定まった時は、口頭の了解だけで済ませず、【着目・関連タスク】のうち現在の期限が目標日と異なる対象すべてについて \`update\`（\`due_date: "YYYY-MM-DD"\`）を配列で出力すること（すでに目標日と一致している場合は更新不要）。
 {
-  "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
+  "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。操作確認部分は1〜2文で簡潔に）",
   "task_actions": [
     { "action": "complete", "task_id": "T_..." },
     { "action": "update", "task_id": "T_...", "due_date": "（※期限変更時のみ YYYY-MM-DD）", "category": "（※カテゴリ変更時のみ: 7大カテゴリ名）", "new_title": "（※タイトル文言変更時のみ）" },
@@ -742,7 +821,7 @@ ${prefixGuide}
 - 「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の指定があった場合も、口頭の了解だけで済ませず必ず update を出力し、remind_context（例: 「直近の空き枠・最優先」「休日PC・最優先」等）と memo（背景・理由）を更新してください。
 - 【実施時期・期限の変更同期】: 一括・個別を問わず、対象タスクの実施日や期限を変更・先送りする方針が定まった時は、口頭の了解だけで済ませず、【着目・関連タスク】のうち現在の期限が目標日と異なる対象すべてについて \`update\`（\`due_date: "YYYY-MM-DD"\`）を配列で出力すること（すでに目標日と一致している場合は更新不要）。
 {
-  "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
+  "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。操作確認部分は1〜2文で簡潔に）",
   "task_actions": [
     { "action": "update", "task_id": "T_...", "due_date": "（※期限変更時のみ YYYY-MM-DD）", "category": "（※カテゴリ変更時のみ: 7大カテゴリ名）", "new_title": "（※タイトル文言変更時のみ）" }
   ]
@@ -773,7 +852,7 @@ ${prefixGuide}
   * add_doc: コンテキストの【既存プロジェクトフォルダ一覧（Drive連携）】内の既存フォルダに新しいGoogle Docを追加。
   * append_doc: 既存のGoogle Doc（または [📄資料連携済] タスクに紐付いたDoc）末尾に検討事項・候補・URL等を追記（project_name または task_id / target_task_title と content を指定）。
 {
-  "reply_text": "【必須】ユーザーへの返信文（※URLや詳細の二重復唱は不要、1〜2文で簡潔に）",
+  "reply_text": "【必須】ユーザーへの返信文（※URLや詳細の二重復唱は不要。確認部分は1〜2文で簡潔に）",
   "project_actions": [
     { "action": "create_project", "category": "7大カテゴリ名", "project_name": "YYMM_プロジェクト名", "doc_title": "資料タイトル", "initial_content": "初期本文（任意）", "task_id": "（※既存タスクへ紐付ける場合のみ）" },
     { "action": "add_doc", "project_name": "既存プロジェクト名", "doc_title": "資料タイトル", "initial_content": "初期本文（任意）", "task_id": "（※関連タスクへ紐付ける場合のみ）" },
@@ -801,7 +880,7 @@ ${prefixGuide}
   * 同日の予定の場合、end_time は "HH:mm" 形式（例: "14:00"）で出力してトークンを節約すること。
   * 削除時、delete_series: false は省略可。
 {
-  "reply_text": "【必須】ユーザーへの返信文（※登録した予定一覧の箇条書き復唱は不要。『カレンダーに反映しました！』等1〜2文で簡潔に完結）",
+  "reply_text": "【必須】ユーザーへの返信文（※登録した予定一覧の箇条書き復唱は不要。『カレンダーに反映しました！』等、確認部分は1〜2文で簡潔に）",
   "calendar_actions": [
     { "action": "add", "title": "予定名", "start_time": "YYYY-MM-DDTHH:mm:ss", "end_time": "HH:mm" },
     { "action": "delete", "title": "予定名", "date": "YYYY-MM-DD" }
@@ -1114,8 +1193,8 @@ function determineActionPhase(liteResult, boundaryInfo) {
     return 'PHASE_B';
   }
 
-  // 2. 過ごし方相談（何をするかの見直し・タイスケ・やること相談）、段取り設計、または純粋DB操作以外の活動目標表明 -> フェーズC
-  // ※「〜買いたいからリスト入れて」「〜タスク追加して」等の純粋DB依頼 (db_operation かつ 過ごし方相談/段取り要求なし) は フェーズD へ流してスリム化
+  // 2. 過ごし方相談（何をするかの見直し・タイスケ・やること相談）、段取り設計、行動目標、または提案意図 -> フェーズC
+  // ※純粋なDB依頼 (db_operation) に「活動目標の表明」タグだけが誤付与された場合でも、次の余白時間判定(3.)で勤務中・継続中と切り分ける
   const hasGoalTag = tags.indexOf('活動目標の表明') !== -1;
   const isPureDbOp = (intent === 'db_operation') && !isScheduleConsultation && !needSchedulePlan;
 
@@ -1124,25 +1203,29 @@ function determineActionPhase(liteResult, boundaryInfo) {
     return 'PHASE_C';
   }
 
-  // 3. カレンダーが包括的タスク枠（タスク消化、作業、整理枠等）の最中にある場合
-  // ※単一の具体的行為（お絵描き、Reaper制作、会議等）ではなく、複数のタスクを消化するためのコンテナ枠。
-  // ユーザーが特定作業への没頭を明言していない限り、タスク着手・推進を後押しする「触媒（PHASE_C）」として扱う。
-  if (isUmbrella) {
-    // 完了報告があった場合、または純粋DB依頼以外で提案候補タスク/余白がある場合はPHASE_C
-    if (tags.indexOf('完了報告') !== -1) {
-      return 'PHASE_C';
-    }
-    if (!isPureDbOp && ((liteResult && liteResult.focused_task_ids && liteResult.focused_task_ids.length > 0) || prevStatus !== '継続中')) {
-      return 'PHASE_C';
-    }
-  }
+  // 3. 私生活の余白時間帯・直前行動が継続中かどうかの切り分け
+  // ※本業・固定予定の進行中、就寝移行（睡眠トピック・就寝目安以降）、および直前行動が継続中（未完了）の際は余計な提案へ逸らさない
+  const isDuringEvent = Boolean(boundaryInfo && boundaryInfo.isDuringEvent);
+  const minutesUntilNext = (boundaryInfo && typeof boundaryInfo.minutesUntilNext === 'number')
+    ? boundaryInfo.minutesUntilNext
+    : 0;
+  const habitTopic = (liteResult && liteResult.matched_habit_topic) ? liteResult.matched_habit_topic : 'none';
+  const isSleepTransition = (habitTopic === '睡眠');
+  const isOpenFreeTime = !isDuringEvent && minutesUntilNext > 0 && !isSleepTransition;
+  const hasCompletionReport = tags.indexOf('完了報告') !== -1;
 
-  // 4. 直前行動が継続中（具体的没頭作業のモメンタム保護） -> フェーズA（受託専念）
-  if (prevStatus === '継続中') {
+  // 4. 直前行動が継続中（具体的没頭作業のモメンタム保護）かつ完了報告でない場合 -> フェーズA（受託専念）
+  if (prevStatus === '継続中' && !hasCompletionReport) {
     return 'PHASE_A';
   }
 
-  // それ以外（通常対話、完了受諾、DB操作等） -> フェーズD
+  // 未継続かつ非睡眠の私生活余白（包括枠または空き時間）における完了トランジションやDB依頼 -> フェーズC
+  // ※突発トラブル対応や本業中雑談などの general_dialogue（非完了）はフェーズDに留める
+  if (!isSleepTransition && (isUmbrella || isOpenFreeTime) && (hasCompletionReport || intent === 'db_operation')) {
+    return 'PHASE_C';
+  }
+
+  // それ以外（勤務中・固定予定中の対話/DB、トラブル向き合い、就寝前挨拶等） -> フェーズD
   return 'PHASE_D';
 }
 
@@ -1242,6 +1325,21 @@ function isTaskMatchingUserText_(taskTitle, userText) {
 }
 
 /**
+ * 余白トランジション時のフォールバック候補選別用にタスクの優先度スコアを返す
+ * @param {Object} task
+ * @param {string} todayDateStr YYYY-MM-DD
+ * @return {number} 2: 優先明示, 1: 当日以前期限, 0: 通常
+ * @private
+ */
+function getFreeTimeTaskPriorityRank_(task, todayDateStr) {
+  if (!task) return 0;
+  const meta = `${task.title || ''} ${task.remindContext || ''} ${task.memo || ''}`;
+  if (/(⭐|最優先|優先度高)/.test(meta)) return 2;
+  if (task.dueDate && todayDateStr && task.dueDate <= todayDateStr) return 1;
+  return 0;
+}
+
+/**
  * 新システムの後段 Flash 用リクエストペイロードを動的アセンブルで構築
  * @param {string} userText
  * @param {Array<GoogleAppsScript.Base.Blob>} imageBlobs
@@ -1259,6 +1357,8 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   // タスクや娯楽よりも休息を優先すべき客観的体調（発熱、激痛、強い倦怠感など）の場合に引き算セーフティを発動
   const isRelief = (liteResult.health_status === '不調');
   const hasStatedGoal = (tags.indexOf('活動目標の表明') !== -1) || (liteResult && liteResult.action_intent === 'support_stated_goal');
+  const needSchedulePlan = Boolean(liteResult && liteResult.need_schedule_plan);
+  const todayDateStr = Utilities.formatDate(precomputed.todayDate || new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
 
   // 未完了タスク一覧の取得（未完了タスクの照合およびFlashへの選別注入に使用）
   const allUncompletedTasks = uncompletedTasksOpt || getTasks('未完了');
@@ -1308,6 +1408,21 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     const fuzzy = (allUncompletedTasks || []).filter(t => isTaskMatchingUserText_(t.title, userText));
     fuzzy.forEach(t => { if (t && t.id) taskMap[t.id] = t; });
   }
+  // ③ フェーズC（余白・触媒）で完了一致以外の未完了候補が0件となった場合の次手候補フォールバック
+  if (phase === 'PHASE_C' && !isRelief && !hasStatedGoal && !needSchedulePlan && allUncompletedTasks && allUncompletedTasks.length > 0) {
+    const matchedIdSet = {};
+    matchedCompletedTasks.forEach(t => { if (t && t.id) matchedIdSet[t.id] = true; });
+    const remainingIds = Object.keys(taskMap).filter(id => !matchedIdSet[id]);
+    const onlyCompletedTargetSelected = isCompletionTone && Object.keys(taskMap).length <= 1 && remainingIds.length <= 1;
+    if (remainingIds.length === 0 || (matchedCompletedTasks.length === 0 && onlyCompletedTargetSelected)) {
+      allUncompletedTasks
+        .filter(t => t && t.id && !matchedIdSet[t.id] && !taskMap[t.id])
+        .slice()
+        .sort((a, b) => getFreeTimeTaskPriorityRank_(b, todayDateStr) - getFreeTimeTaskPriorityRank_(a, todayDateStr))
+        .slice(0, 3)
+        .forEach(t => { taskMap[t.id] = t; });
+    }
+  }
 
   const tasksToInject = Object.keys(taskMap).map(id => taskMap[id]);
   const hasLinkedDocInFocusedTasks = tasksToInject.some(t => Boolean(t && t.docUrl && String(t.docUrl).trim() !== ''));
@@ -1318,7 +1433,6 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   const hasContentAppendClue = /(https?:\/\/|追加|追記|メモ|候補|リスト|まとめ|案|書|残|入れ)/.test(userText || '');
   const isScheduleOrPriorityOnly = !hasContentAppendClue && /(期限|リスケ|延期|明日に|別日に|後日に|優先|締切|回して|回しといて|カテゴリ|分類|領域|タイトル|タスク名)/.test(userText || '');
 
-  const needSchedulePlan = Boolean(liteResult && liteResult.need_schedule_plan);
   const isRoutineTopicWord = /(ルーティン|定期|習慣)/.test(userText || '');
 
   const needDbModule = Boolean(liteResult.need_db_action) ||
@@ -1332,7 +1446,6 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   const needSearch = (tags.indexOf('事実質問') !== -1);
   const needWeather = (Boolean(liteResult.weather_relevance) || phase === 'PHASE_C' || isRelief);
 
-  const todayDateStr = Utilities.formatDate(precomputed.todayDate || new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const matchedStampLabels = (liteResult && Array.isArray(liteResult.matched_cycle_stamps))
     ? liteResult.matched_cycle_stamps.map(s => String(s || '').trim()).filter(Boolean)
     : [];
@@ -1424,6 +1537,14 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
       effectiveTargetType = 'other';
     }
 
+    // 周期スタンプ自動併用だけで "other" 扱いになった完了レポートは軽量なタスク完了マイクロスキーマへ正規化
+    const hasOtherPoolClue = hasShoppingClue ||
+      /(予定|カレンダー|ルーティン|日課|定期|生活習慣|プロファイル|辞書)/.test(userText || '') ||
+      isProjectIntent;
+    if (effectiveTargetType === 'other' && hasPendingCycleStamps && matchedCompletedTasks.length > 0 && !hasOtherPoolClue) {
+      effectiveTargetType = isMultipleTaskOps ? 'task_all' : 'task_complete';
+    }
+
     const usesFullDbSchema = !(effectiveTargetType !== 'none' && effectiveTargetType !== 'other' && !hasImages);
     if (!usesFullDbSchema) {
       promptModules.push(getMicroDbSchema_(effectiveTargetType, memory.prompt_db, { hasRelatedTasks: tasksToInject.length > 0 }));
@@ -1444,6 +1565,14 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     promptModules.push(`【出力JSONスキーマ ＆ 周期スタンプ更新】\n${cycleStampGuidance}\n{\n  "reply_text": "【必須】ユーザーへの返信文",\n  "memory_updates": {\n    "cycle_stamps_updates": "${stampExampleLines}"\n  }\n}`);
   } else {
     promptModules.push(`【出力JSONスキーマ】\n{ "reply_text": "【必須】ユーザーへの返信文" }`);
+  }
+
+  // フェーズC（未定余白・触媒）× 用件併用時（DB操作や外部検索が後段にある場合）の最終出力契約
+  if (phase === 'PHASE_C' && !isRelief && !hasStatedGoal && (needDbModule || needSearch)) {
+    promptModules.push(
+      '【出力構成のリマインド（フェーズC × 用件併用時）】\n' +
+      '- 本ターンはフェーズC（未定の余白状態）です。`reply_text` をDB操作確認や質問回答（1〜2文）だけで終わらせず、確認・回答の直後に必ずコンテキスト内の非タスク選択肢（身体ケア・趣味・未消化作品・スキル・生活リズム）を1〜2件以上含む次の過ごし方候補（計2〜3件）まで続けて出力してください（※「ご自分のペースで〜お過ごしください」等の曖昧な言葉で締めない）。'
+    );
   }
 
   // カスタムレイアウト指示（常時末尾）
@@ -1467,8 +1596,8 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     contextLines.push(`【月報通知フラグ】: TRUE`);
   }
 
-  // 3-4. 生活習慣メモリーのオンデマンド注入（段取り組み立て時・周期スタンプ更新候補・memory操作時は全体基準、通常時は該当トピックのみ）
-  if ((needSchedulePlan || hasPendingCycleStamps || effectiveTargetType === 'memory') && memory.lifestyle_habits && memory.lifestyle_habits.trim() !== '') {
+  // 3-4. 生活習慣メモリーのオンデマンド注入（段取り組み立て時・非目標のフェーズC・周期スタンプ更新候補・memory操作時は全体基準、通常時は該当トピックのみ）
+  if ((needSchedulePlan || hasPendingCycleStamps || effectiveTargetType === 'memory' || (phase === 'PHASE_C' && !isRelief && !hasStatedGoal)) && memory.lifestyle_habits && memory.lifestyle_habits.trim() !== '') {
     contextLines.push(`【生活習慣・活動定義 (lifestyle_habits)】:\n${memory.lifestyle_habits.trim()}`);
   } else if (liteResult.matched_habit_topic && liteResult.matched_habit_topic !== 'none' && memory.lifestyle_habits) {
     const habitEntry = extractHabitEntryByTopic(memory.lifestyle_habits, liteResult.matched_habit_topic);
@@ -1524,7 +1653,7 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
   const unboughtShopping = needShopping ? getShoppingList('未買') : [];
 
   const needInput = needSchedulePlan ||
-    (phase === 'PHASE_C' && tags.indexOf('過ごし方相談') !== -1) ||
+    (phase === 'PHASE_C' && !isRelief && (!hasStatedGoal || tags.indexOf('過ごし方相談') !== -1)) ||
     (liteResult && (liteResult.db_target_type === 'input_stock' || liteResult.db_target_type === 'other')) ||
     /(映画|本|漫画|アニメ|音楽|ゲーム|見るもの|読むもの|消化)/.test(userText);
   const pendingInput = needInput ? getInputStockList('未') : [];
@@ -1547,11 +1676,10 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
       if (memory.ideal_self && memory.ideal_self.trim() !== '') {
         contextLines.push(`【ありたい人間像・生活指針（判断の羅針盤）】: ${memory.ideal_self.trim()}`);
       }
-      // ユーザーが明確な活動目標を表明していない時、またはタイスケ・過ごし方相談時に周期記録を提示候補として注入
+      // ユーザーが明確な活動目標を表明・決定していない時、またはタイスケ・過ごし方相談時に周期記録・スキル・趣味選択肢を提示候補として注入
       const isScheduleInquiry = (tags.indexOf('過ごし方相談') !== -1) || needSchedulePlan;
-      const hasDeclaredGoal = (tags.indexOf('活動目標の表明') !== -1);
-      if (!hasDeclaredGoal || isScheduleInquiry) {
-        if ((!hasDeclaredGoal || needSchedulePlan) && memory.skill_options && memory.skill_options.trim() !== '') {
+      if (!hasStatedGoal || isScheduleInquiry) {
+        if ((!hasStatedGoal || needSchedulePlan) && memory.skill_options && memory.skill_options.trim() !== '') {
           contextLines.push(`【能動的スキルアップメニュー (skill_options)】:\n${memory.skill_options.trim()}`);
         }
         if (memory.cycle_stamps && memory.cycle_stamps.trim() !== '') {

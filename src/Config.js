@@ -26,6 +26,8 @@ const SYSTEM_CONSTANTS = {
   GEMINI_LITE_ENDPOINT_BASE: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent',
   GEMINI_35_LITE_MODEL: 'gemini-3.5-flash-lite',
   GEMINI_35_LITE_ENDPOINT_BASE: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
+  GEMINI_HYDROGEN_MODEL: 'gemini-4-hydrogen',
+  GEMINI_HYDROGEN_ENDPOINT_BASE: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-4-hydrogen:generateContent',
   LINE_REPLY_ENDPOINT: 'https://api.line.me/v2/bot/message/reply',
   LINE_CONTENT_ENDPOINT_BASE: 'https://api-data.line.me/v2/bot/message',
   NOTION_API_BASE: 'https://api.notion.com/v1',

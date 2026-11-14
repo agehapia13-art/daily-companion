@@ -26,29 +26,109 @@ function evaluateHouseholdEvent(title) {
 }
 
 /**
- * 曜日と時間帯に応じた動的ウィンドウでカレンダー予定と日本の祝日を取得し、コンテキスト文字列として整形
- * - 日曜 18:00以降: 今日〜翌週日曜 23:59:59 (来週1週間全体)
- * - それ以外 (月〜土、日曜18時前): 今日〜翌週月曜 23:59:59 (今週 + 直近週末 + 週明け月曜)
+ * YYYY-MM-DD 形式の日付文字列をローカル日付オブジェクトへ安全に変換
+ * @param {string=} ymd
+ * @return {Date|null}
+ * @private
+ */
+function parseCalendarYmd_(ymd) {
+  const m = String(ymd || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10) - 1;
+  const d = parseInt(m[3], 10);
+  const dt = new Date(y, mo, d, 0, 0, 0);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo || dt.getDate() !== d) return null;
+  return dt;
+}
+
+/**
+ * 今後1年間の日本の祝日サマリーを取得（前段Liteの祝日・連休期間判定用・ScriptCache利用）
+ * @param {Date=} simulatedNowDate
+ * @return {string} 例: "2026-11-23(Mon):勤労感謝の日 / 2027-01-01(Fri):元日"
+ */
+function getUpcomingHolidaysSummary_(simulatedNowDate) {
+  const now = simulatedNowDate || new Date();
+  const baseStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  const startKey = Utilities.formatDate(baseStart, 'Asia/Tokyo', 'yyyy-MM-dd');
+  const cacheKey = `UPCOMING_HOLIDAYS_${startKey}`;
+
+  let cache = null;
+  try {
+    cache = CacheService.getScriptCache();
+    const cached = cache.get(cacheKey);
+    if (cached !== null && cached !== undefined) {
+      return cached === '__EMPTY__' ? '' : cached;
+    }
+  } catch (e) {}
+
+  try {
+    const holidayCal = CalendarApp.getCalendarById(SYSTEM_CONSTANTS.JAPAN_HOLIDAY_CALENDAR_ID);
+    if (!holidayCal) return '';
+    const endTime = new Date(baseStart.getFullYear(), baseStart.getMonth(), baseStart.getDate() + 366, 23, 59, 59);
+    const holidays = holidayCal.getEvents(baseStart, endTime);
+    const entries = holidays.map(h => {
+      const dateStr = Utilities.formatDate(h.getStartTime(), 'Asia/Tokyo', 'yyyy-MM-dd(E)');
+      return `${dateStr}:${String(h.getTitle() || '').trim()}`;
+    }).filter(Boolean);
+    const result = entries.join(' / ');
+    if (cache) {
+      try {
+        cache.put(cacheKey, result || '__EMPTY__', 21600);
+      } catch (ce) {}
+    }
+    return result;
+  } catch (e) {
+    Logger.log(`今後祝日サマリー取得エラー: ${e.message}`);
+    return '';
+  }
+}
+
+/**
+ * 曜日と時間帯、または動的指定期間に応じてカレンダー予定と日本の祝日を取得し、コンテキスト文字列として整形
+ * - rangeStartStr / rangeEndStr の指定がない場合:
+ *   * 日曜 18:00以降: 今日〜翌週日曜 23:59:59 (来週1週間全体)
+ *   * それ以外 (月〜土、日曜18時前): 今日〜翌週月曜 23:59:59 (今週 + 直近週末 + 週明け月曜)
+ * - rangeStartStr / rangeEndStr が指定された場合（最大62日間上限）:
+ *   * 指定された開始日〜終了日の範囲を動的に取得
  * @param {Date=} simulatedNowDate オプション: シミュレーション日時
  * @param {string=} excludeDateStr テスト用: コンテキストから除外したい特定日('YYYY-MM-DD')
+ * @param {string=} rangeStartStr オプション: 動的開始日('YYYY-MM-DD')
+ * @param {string=} rangeEndStr オプション: 動的終了日('YYYY-MM-DD')
  * @return {string}
  */
-function getCalendarAndHolidayContext(simulatedNowDate, excludeDateStr) {
+function getCalendarAndHolidayContext(simulatedNowDate, excludeDateStr, rangeStartStr, rangeEndStr) {
   const now = simulatedNowDate || new Date();
-  const startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  const customStart = parseCalendarYmd_(rangeStartStr);
+  const customEnd = parseCalendarYmd_(rangeEndStr);
 
-  const dayOfWeek = now.getDay(); // 0: 日, 1: 月, 2: 火, 3: 水, 4: 木, 5: 金, 6: 土
-  const currentHour = now.getHours();
+  let startTime = customStart || new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
   let endTime;
 
-  if (dayOfWeek === 0 && currentHour >= 18) {
-    // 日曜日の夕方18時以降: 来週1週間全体（翌週の日曜日23:59:59まで = +7日）
-    endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7, 23, 59, 59);
+  if (customEnd) {
+    endTime = new Date(customEnd.getFullYear(), customEnd.getMonth(), customEnd.getDate(), 23, 59, 59);
+    if (endTime < startTime) {
+      endTime = new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate(), 23, 59, 59);
+    }
+    const maxEndTime = new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate() + 62, 23, 59, 59);
+    if (endTime > maxEndTime) {
+      endTime = maxEndTime;
+    }
+  } else if (customStart) {
+    endTime = new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate() + 14, 23, 59, 59);
   } else {
-    // 通常（月〜土、または日曜18時前）: 直近の翌週月曜日23:59:59まで
-    // 月曜(1)なら+7日、火曜(2)なら+6日、...土曜(6)なら+2日、日曜(0)昼なら+1日
-    const daysUntilNextMonday = ((8 - dayOfWeek) % 7) || 7;
-    endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysUntilNextMonday, 23, 59, 59);
+    const dayOfWeek = now.getDay(); // 0: 日, 1: 月, 2: 火, 3: 水, 4: 木, 5: 金, 6: 土
+    const currentHour = now.getHours();
+
+    if (dayOfWeek === 0 && currentHour >= 18) {
+      // 日曜日の夕方18時以降: 来週1週間全体（翌週の日曜日23:59:59まで = +7日）
+      endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7, 23, 59, 59);
+    } else {
+      // 通常（月〜土、または日曜18時前）: 直近の翌週月曜日23:59:59まで
+      // 月曜(1)なら+7日、火曜(2)なら+6日、...土曜(6)なら+2日、日曜(0)昼なら+1日
+      const daysUntilNextMonday = ((8 - dayOfWeek) % 7) || 7;
+      endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysUntilNextMonday, 23, 59, 59);
+    }
   }
 
   const startStrLabel = Utilities.formatDate(startTime, 'Asia/Tokyo', 'yyyy-MM-dd(E)');

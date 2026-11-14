@@ -384,6 +384,15 @@ function executeAndPersistCompanionTurn_(params) {
       const routineRes = applyRoutineActions(aiResult.routine_actions);
       executedNotices.push.apply(executedNotices, routineRes);
     }
+    if (aiResult.memory_updates && aiResult.memory_updates.cycle_stamps_updates) {
+      const updatedStamps = updateCycleStampsSafely(aiResult.memory_updates.cycle_stamps_updates);
+      if (updatedStamps && updatedStamps.length > 0) {
+        Logger.log('周期スタンプ(cycle_stamps)を更新しました: ' + updatedStamps.join(', '));
+        updatedStamps.forEach(entry => {
+          executedNotices.push(`📌 周期スタンプ更新: ${entry}`);
+        });
+      }
+    }
   } catch (actionErr) {
     Logger.log('アクション先行適用エラー: ' + actionErr.message);
   }
@@ -426,11 +435,6 @@ function executeAndPersistCompanionTurn_(params) {
     appendLog(nowStr, 'user', loggedUserText, imgUrlString, loggedAiReply, logMeta);
 
     if (aiResult.memory_updates) {
-      if (aiResult.memory_updates.cycle_stamps_updates) {
-        if (updateCycleStampsSafely(aiResult.memory_updates.cycle_stamps_updates)) {
-          Logger.log('周期スタンプ(cycle_stamps)を更新しました: ' + aiResult.memory_updates.cycle_stamps_updates);
-        }
-      }
       if (aiResult.memory_updates.lifestyle_habits) {
         updateLifestyleHabitsSafely(aiResult.memory_updates.lifestyle_habits);
         Logger.log('生活習慣メモリー(lifestyle_habits)を更新しました');

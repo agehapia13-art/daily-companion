@@ -178,7 +178,60 @@ function syncSystemPromptToSpreadsheet() {
  * - 新システム（2モデル体制: Lite + Flash）と旧システム（単一Flash 6,400文字）の応答・トークン・アクションを並列比較します。
  */
 function testCustomScenario() {
-  // 0. 決定論的ユニット確認（境界イベント・Phase D分離・3.5-lite＆thinking_level解決）
+  const customStylePrompt = '【口調・話し方】\n丁寧な敬体（です・ます調）で、落ち着いた頼れる伴走者として自然に応答する。\n情緒的な慰めや定型の労い・前置きは最小限にとどめ、さっぱりとした等身大の距離感で、要点へ端的に入る。';
+
+  // 0. 決定論的ユニット確認（境界イベント・Phase D分離・3.5-lite＆low解決・動的カレンダー・JSON/Web検索分離）
+  const calMarch = getCalendarAndHolidayContext(new Date(2026, 10, 13, 10, 22, 0), '', '2027-03-01', '2027-03-31');
+  const calClamped = getCalendarAndHolidayContext(new Date(2026, 10, 13, 10, 22, 0), '', '2026-11-13', '2027-11-13');
+  const upcomingHolidays = getUpcomingHolidaysSummary_(new Date(2026, 10, 13, 10, 22, 0));
+  const calMicroWithTask = getMicroDbSchema_('calendar', '', { hasRelatedTasks: true });
+  const calMicroNoTask = getMicroDbSchema_('calendar', '', { hasRelatedTasks: false });
+  const dummyPayload = buildNewSystemFlashPayload(
+    'テスト雑談',
+    [],
+    '',
+    { backend_model: '3.5-lite', thinking_level: 'low' },
+    { tags: ['雑談'], action_intent: 'general_dialogue', focused_task_ids: [], matched_cycle_stamps: [] },
+    'PHASE_D',
+    { now: new Date(2026, 10, 13, 10, 0, 0), nowStr: '2026-11-13(Fri) 10:00', todayDate: new Date(2026, 10, 13), elapsedStr: '初回', boundaryInfo: { summaryText: 'なし' }, todayEvents: [], habitTopics: [] },
+    []
+  );
+  const dummySearchPayload = buildNewSystemFlashPayload(
+    'テスト事実質問',
+    [],
+    '',
+    { backend_model: '3.5-lite', thinking_level: 'low' },
+    { tags: ['事実質問'], action_intent: 'general_dialogue', focused_task_ids: [], matched_cycle_stamps: [] },
+    'PHASE_D',
+    {
+      now: new Date(2026, 10, 13, 10, 0, 0),
+      nowStr: '2026-11-13(Fri) 10:00',
+      todayDate: new Date(2026, 10, 13),
+      elapsedStr: '初回',
+      boundaryInfo: { summaryText: 'なし' },
+      todayEvents: [],
+      habitTopics: [],
+      webSearchContext: {
+        summaryText: 'テスト施設は10:00〜18:00開館です。',
+        queries: ['テスト施設 開館時間'],
+        chunksCount: 1,
+        sources: [{ title: '公式サイト', uri: 'https://example.com' }],
+        failed: false
+      }
+    },
+    []
+  );
+  const dummyWsPayload = buildGeminiWebSearchPayload_(
+    '旧前田家本邸洋館の11月の開館日・休館日・開館時間',
+    { nowStr: '2026-11-13(Fri) 20:45' },
+    '激しい腹痛アリ。あと買物メモに柔軟剤追加と開館日調べて'
+  );
+  const dummyWsFallbackPayload = buildGeminiWebSearchPayload_(
+    '',
+    { nowStr: '2026-11-13(Fri) 20:45' },
+    '明日の東京の天気は？'
+  );
+
   const unitChecks = [
     ['isUmbrellaEventTitle("自由時間")', isUmbrellaEventTitle('自由時間') === true],
     ['isUmbrellaEventTitle("休息")', isUmbrellaEventTitle('休息') === true],
@@ -225,8 +278,66 @@ function testCustomScenario() {
       resolveBackendModel_({ backend_model: '3.5-lite' }).model === 'gemini-3.5-flash-lite'
     ],
     [
-      'resolveThinkingConfig_("minimal")',
-      resolveThinkingConfig_('gemini-3.5-flash-lite', { thinking_level: 'minimal' }).thinkingLevel === 'minimal'
+      'resolveBackendModel_("hydrogen")',
+      resolveBackendModel_({ backend_model: 'hydrogen' }).model === 'gemini-4-hydrogen'
+    ],
+    [
+      'resolveThinkingConfig_("low")',
+      resolveThinkingConfig_('gemini-3.5-flash-lite', { thinking_level: 'low' }).thinkingLevel === 'low'
+    ],
+    [
+      'resolveThinkingConfig_("gemini-3.8-flash", minimal->low安全フォールバック)',
+      resolveThinkingConfig_('gemini-3.8-flash', { thinking_level: 'minimal' }).thinkingLevel === 'low'
+    ],
+    [
+      'resolveThinkingConfig_("gemini-4-hydrogen", minimal->low安全フォールバック)',
+      resolveThinkingConfig_('gemini-4-hydrogen', { thinking_level: 'minimal' }).thinkingLevel === 'low'
+    ],
+    [
+      'resolveThinkingConfig_("gemini-4-hydrogen", "xhigh")',
+      resolveThinkingConfig_('gemini-4-hydrogen', { thinking_level: 'xhigh' }).thinkingLevel === 'xhigh'
+    ],
+    [
+      'getCalendarAndHolidayContext(2027-03-01..2027-03-31)',
+      calMarch.indexOf('2027-03-01') !== -1 && calMarch.indexOf('2027-03-31') !== -1
+    ],
+    [
+      'getCalendarAndHolidayContext(62日安全クランプ)',
+      calClamped.indexOf('2027-01-14') !== -1 && calClamped.indexOf('2027-11-13') === -1
+    ],
+    [
+      'getUpcomingHolidaysSummary_(2026-11-23勤労感謝の日)',
+      upcomingHolidays.indexOf('2026-11-23') !== -1
+    ],
+    [
+      'getMicroDbSchema_("calendar", hasRelatedTasks:true/false)',
+      calMicroWithTask.indexOf('task_actions') !== -1 && calMicroNoTask.indexOf('task_actions') === -1
+    ],
+    [
+      'buildNewSystemFlashPayload(Web検索直交分離＆JSON専念・temperature非送信)',
+      !dummyPayload.tools &&
+      dummyPayload.generationConfig.responseMimeType === 'application/json' &&
+      dummyPayload.generationConfig.temperature === undefined &&
+      !dummySearchPayload.tools &&
+      dummySearchPayload.generationConfig.responseMimeType === 'application/json' &&
+      dummySearchPayload.generationConfig.temperature === undefined
+    ],
+    [
+      'buildNewSystemFlashPayload(needSearch直交注入と非注入)',
+      dummySearchPayload.systemInstruction.parts[0].text.indexOf('【外部情報の確認方針】') !== -1 &&
+      dummySearchPayload.contents[0].parts[0].text.indexOf('【外部Web検索結果（一次情報）') !== -1 &&
+      dummyPayload.systemInstruction.parts[0].text.indexOf('【外部情報の確認方針】') === -1 &&
+      dummyPayload.contents[0].parts[0].text.indexOf('【外部Web検索結果') === -1
+    ],
+    [
+      'buildGeminiWebSearchPayload_(search_query純粋化＆私的情報遮断)',
+      dummyWsPayload.contents[0].parts[0].text.indexOf('旧前田家本邸洋館の11月の開館日・休館日・開館時間') !== -1 &&
+      dummyWsPayload.contents[0].parts[0].text.indexOf('腹痛') === -1 &&
+      dummyWsPayload.contents[0].parts[0].text.indexOf('柔軟剤') === -1 &&
+      Boolean(dummyWsPayload.tools && dummyWsPayload.tools[0] && dummyWsPayload.tools[0].googleSearch) &&
+      dummyWsPayload.generationConfig.responseMimeType === undefined &&
+      dummyWsPayload.generationConfig.thinkingConfig.thinkingLevel === 'medium' &&
+      dummyWsFallbackPayload.contents[0].parts[0].text.indexOf('明日の東京の天気は？') !== -1
     ]
   ];
   Logger.log('============================================================');
@@ -235,27 +346,27 @@ function testCustomScenario() {
 
   const mockTasks = [
     {
-      id: 'T_20261112_090000_001',
-      title: '[家事・環境] MacBook内部の清掃',
-      dueDate: '2026-11-12',
-      status: '未完了',
-      memo: 'エアダスターを使う',
-      remindContext: '休日・自室',
-      docUrl: ''
-    },
-    {
-      id: 'T_20261112_090000_002',
-      title: '[実務・手続] 生活伴走システム：同期スクリプト反映',
+      id: 'T_20261024_143202_622',
+      title: '[お出かけ] 旧前田家本邸 洋館見学',
       dueDate: '',
       status: '未完了',
-      memo: '',
-      remindContext: '隙間時間・PC作業時',
+      memo: '目黒区駒場公園内。体調が万全な時に見学へ行く',
+      remindContext: '休日お出かけ・晴れ',
       docUrl: ''
     },
     {
-      id: 'T_20261112_090000_003',
+      id: 'T_20261103_200621_731',
+      title: '[家事・環境] 私物の整理',
+      dueDate: '2026-11-13',
+      status: '未完了',
+      memo: '',
+      remindContext: '週末のまとまった時間',
+      docUrl: ''
+    },
+    {
+      id: 'T_20261113_090000_003',
       title: '[趣味・文化] モンスト：超究極・兵のミザリー周回',
-      dueDate: '2026-11-12',
+      dueDate: '2026-11-13',
       status: '未完了',
       memo: '毎日ルーティン',
       remindContext: '日課・隙間時間',
@@ -263,84 +374,41 @@ function testCustomScenario() {
     }
   ];
 
-  // 1. 最新ログ再現: 体調の一言＋これから風呂入ってくる -> PHASE_B で自然な1〜2文送り出し
-  runPromptScenario({
-    name: '検証1: 最新ログ再現（痛み止め＋これから風呂 -> PHASE_B自然送り出し）',
-    mockMemory: {
-      backend_model: '3.5-lite',
-      thinking_level: 'minimal',
-      custom_system_prompt: '【口調・話し方】\n丁寧な敬体（です・ます調）で、落ち着いた頼れる伴走者として自然に応答する。\n情緒的な慰めや定型の労い・前置きは最小限にとどめ、さっぱりとした等身大の距離感で、要点へ端的に入る。'
-    },
-    mockTasks: mockTasks,
-    initialLogs: '18:47 User: 「生活伴走システム：終了ルーティンの完了フラグ自動化検討」 を完了\nAI: お疲れ様でした。',
-    turns: [
-      {
-        time: '2026-11-12 20:12:00',
-        user: 'ちょっと頭痛がするので痛み止め飲んだ　これから風呂入ってくる'
-      }
-    ]
-  });
+  // 課題となった体調報告＋複雑な指示2個（Web検索＋三連休＋複数DB / 夜の時間設計＋体調配慮）を後段3モデルで比較
+  const daytimeLogs = [
+    '08:55 User: おはよう　眠いわけじゃないんだけど、身体起こすのめんどい😮‍💨',
+    'AI: おはようございます。リモートワーク開始まで約1時間ですので、無理に慌てずゆっくり身体を起こしていきましょう。',
+    '11:03 User: 「刀剣乱舞：江戸城潜入調査を進める」 を完了',
+    'AI: 江戸城潜入調査、完了にしておきました。',
+    '11:27 User: うわー仕事中にリファレンス探しでゲームミュージック聴いてたらレトロゲームやりたくなる〜〜〜そんな時間はない〜〜〜！！！！！',
+    'AI: リファレンス探しでゲーム音楽に触れると余計に遊びたくなりますよね。今はリモートワーク中ですので、退勤後の楽しみにとっておきましょう。'
+  ].join('\n');
 
-  // 2. 着手摩擦2パターンの出し分け（やることが決まっている vs 決まっていない脱力）
-  runPromptScenario({
-    name: '検証2: 着手摩擦の出し分け（対象あり最初の一歩 vs 対象なし脱力カード）',
-    mockMemory: {
-      backend_model: '3.5-lite',
-      thinking_level: 'minimal',
-      custom_system_prompt: '【口調・話し方】\n丁寧な敬体（です・ます調）で、落ち着いた頼れる伴走者として自然に応答する。\n情緒的な慰めや定型の労い・前置きは最小限にとどめ、さっぱりとした等身大の距離感で、要点へ端的に入る。'
+  const comparisonTurns = [
+    {
+      time: '2026-11-13 16:15:00',
+      user: '今は落ち着いたけど激しい腹痛と下痢アリ。生理近いかもな'
     },
-    mockTasks: mockTasks,
-    initialLogs: '',
-    turns: [
-      {
-        time: '2026-11-12 20:30:00',
-        user: 'MacBook内部の清掃やらなきゃだけど腰が重いなあ…'
-      },
-      {
-        time: '2026-11-12 21:00:00',
-        user: 'なんかだるくて動きたくないな…'
-      }
-    ]
-  });
+    {
+      time: '2026-11-13 20:45:00',
+      user: '次の三連休の日曜に「旧前田家本邸 洋館見学」を仮置きしたいんだけど、11月の日曜やってるか開館状況とか軽く調べて、問題なさそうなら午後に仮置きしてタスクの期限も揃えといて。あとゴミ袋と柔軟剤なくなったから買物メモに追加よろ'
+    },
+    {
+      time: '2026-11-13 20:50:00',
+      user: '今日の夕方お腹の波もあったし少し疲れ気味なんだけど、風呂は22時までに入って23時には寝たい。「私物の整理」は明日やるとして、今夜の残りで「モンスト：超究極・兵のミザリー周回」と少しギター練習もしたいんだよね。無理ない夜の段取り組める？'
+    }
+  ];
 
-  // 3. 本業休憩の境界保護 ＆ 残存タスク照会
   runPromptScenario({
-    name: '検証3: 本業休憩の境界保護 ＆ 残存タスク照会',
+    name: '課題改善検証 (前段3.1-lite[low] × 後段3.5-lite[low])',
     mockMemory: {
       backend_model: '3.5-lite',
-      thinking_level: 'minimal',
-      custom_system_prompt: '【口調・話し方】\n丁寧な敬体（です・ます調）で、落ち着いた頼れる伴走者として自然に応答する。\n情緒的な慰めや定型の労い・前置きは最小限にとどめ、さっぱりとした等身大の距離感で、要点へ端的に入る。'
+      thinking_level: 'low',
+      custom_system_prompt: customStylePrompt
     },
     mockTasks: mockTasks,
-    initialLogs: '12:55 User: お昼はサバ缶とご飯食べたよ\nAI: 栄養たっぷりで良いですね！午後のリモートワークも応援しています。',
-    turns: [
-      {
-        time: '2026-11-12 14:24:00',
-        user: 'あー、リモートワークでちょっと疲れた。小休憩中'
-      },
-      {
-        time: '2026-11-12 19:30:00',
-        user: '今日のタスクあと何残ってる？'
-      }
-    ]
-  });
-
-  // 4. 客観的不調時の prompt_relief 単独適用（Phase C等との競合排除）
-  runPromptScenario({
-    name: '検証4: 客観的不調時の prompt_relief 単独適用（Phase競合排除）',
-    mockMemory: {
-      backend_model: '3.5-lite',
-      thinking_level: 'minimal',
-      custom_system_prompt: '【口調・話し方】\n丁寧な敬体（です・ます調）で、落ち着いた頼れる伴走者として自然に応答する。\n情緒的な慰めや定型の労い・前置きは最小限にとどめ、さっぱりとした等身大の距離感で、要点へ端的に入る。'
-    },
-    mockTasks: mockTasks,
-    initialLogs: '',
-    turns: [
-      {
-        time: '2026-11-12 20:00:00',
-        user: 'ちょっと熱っぽくて頭ガンガンする、でも同期スクリプトやらなきゃかな…'
-      }
-    ]
+    initialLogs: daytimeLogs,
+    turns: comparisonTurns
   });
 
   Logger.log('💡 完全ドライランのため、スプレッドシートの書き換えは行っていません。');
@@ -376,7 +444,8 @@ function testAllStandardScenario() {
  *   initialLogs?: string,
  *   mockMemory?: Object,
  *   mockTasks?: Array<Object>,
- *   turns: Array<{ time: string, user: string, mockMemory?: Object, mockTasks?: Array<Object> }>
+ *   turns: Array<{ time: string, user: string, mockMemory?: Object, mockTasks?: Array<Object> }>,
+ *   compareModels?: Array<{ label: string, backend_model: string, thinking_level?: string, isBaselineForHistory?: boolean }>
  * }} scenario
  */
 function runPromptScenario(scenario) {
@@ -401,11 +470,20 @@ function runPromptScenario(scenario) {
   let runningLogs = scenario.initialLogs || '';
   let cachedSheetTasks = null;
 
+  const hasCompareModels = Array.isArray(scenario.compareModels) && scenario.compareModels.length > 0;
+  const modelSpecs = hasCompareModels
+    ? scenario.compareModels
+    : [{ label: '', backend_model: testMemory.backend_model, thinking_level: testMemory.thinking_level, isBaselineForHistory: true }];
+  const isMultiCompare = modelSpecs.length > 1;
+
   const backendLabel = (typeof resolveBackendModel_ === 'function')
     ? resolveBackendModel_(testMemory).model
     : SYSTEM_CONSTANTS.GEMINI_MODEL;
+  const headerBackend = isMultiCompare
+    ? `後段${modelSpecs.length}モデル共通Lite比較: ${modelSpecs.map(s => s.backend_model).join(' / ')}`
+    : `後段: ${backendLabel}`;
   Logger.log('============================================================');
-  Logger.log(`🧪 【${scenario.name}】 [後段: ${backendLabel}] (${scenario.turns.length}ターン / 新システム単独ドライラン)`);
+  Logger.log(`🧪 【${scenario.name}】 [${headerBackend}] (${scenario.turns.length}ターン / 新システム単独ドライラン)`);
   Logger.log('============================================================');
 
   for (let i = 0; i < scenario.turns.length; i++) {
@@ -422,38 +500,129 @@ function runPromptScenario(scenario) {
       turnMemory._testMockTasks = turn.mockTasks || scenario.mockTasks;
     }
 
-    const outcome = executeCompanionTurn(turn.user, [], runningLogs, turnMemory, simulatedDate);
-    const meta = outcome.logMeta || {};
-    const newReply = (outcome.primaryResult && outcome.primaryResult.reply_text) || '';
+    let sharedLite = null;
+    let baselineReply = '';
 
-    const focusedIds = (outcome.liteResult && Array.isArray(outcome.liteResult.focused_task_ids))
-      ? outcome.liteResult.focused_task_ids
-      : [];
-    let focusedDisplay = 'なし (0件)';
-    if (focusedIds.length > 0) {
-      if (!turnMemory._testMockTasks && !cachedSheetTasks) {
-        cachedSheetTasks = getTasks('未完了');
+    for (let m = 0; m < modelSpecs.length; m++) {
+      const spec = modelSpecs[m];
+      const specMemory = Object.assign({}, turnMemory);
+      if (spec.backend_model) specMemory.backend_model = spec.backend_model;
+      if (spec.thinking_level) specMemory.thinking_level = spec.thinking_level;
+      if (sharedLite) specMemory._testPrecomputedLite = sharedLite;
+
+      const outcome = executeCompanionTurn(turn.user, [], runningLogs, specMemory, simulatedDate);
+      if (m === 0) {
+        sharedLite = outcome._liteSnapshot || null;
+        cachedSheetTasks = logTurnLiteSummary_(outcome, turnMemory, cachedSheetTasks, isMultiCompare);
       }
-      const refTasks = turnMemory._testMockTasks || cachedSheetTasks || [];
-      const titleById = {};
-      refTasks.forEach(t => { if (t && t.id) titleById[t.id] = t.title; });
-      focusedDisplay = `${focusedIds.length}件 -> ` + focusedIds.map(id => titleById[id] ? `[${id}] ${titleById[id]}` : id).join(' / ');
+
+      const replyText = logTurnBackendOutcome_(outcome, spec, isMultiCompare, backendLabel);
+      if (spec.isBaselineForHistory || (m === 0 && !baselineReply)) {
+        baselineReply = replyText;
+      }
     }
 
-    Logger.log(`\n🧭 [Lite判定]: ${meta.phaseAndTags || ''}`);
-    Logger.log(`🎯 [Lite選出タスク (focused_task_ids)]: ${focusedDisplay}`);
-    const matchedStamps = (outcome.liteResult && Array.isArray(outcome.liteResult.matched_cycle_stamps) && outcome.liteResult.matched_cycle_stamps.length > 0)
-      ? outcome.liteResult.matched_cycle_stamps.join(', ')
-      : 'なし';
-    Logger.log(`📌 [Lite検出スタンプ (matched_cycle_stamps)]: ${matchedStamps}`);
-    const actualBackend = meta.backendModel || backendLabel;
-    Logger.log(`📊 [トークン]: 合計 ${meta.newTotalTokens} tok (前段Lite: ${(meta.litePromptTokens || 0) + (meta.liteCandidatesTokens || 0)} + 後段[${actualBackend}]: ${(meta.flashPromptTokens || 0) + (meta.flashCandidatesTokens || 0)})`);
-    Logger.log(`\n🆕 【新システム応答 (${outcome.phaseLabel} / ${actualBackend})】:\n${newReply}${formatActionSummary_(outcome.primaryResult)}`);
-
-    const logLine = `${hhmm} User: ${turn.user}\nAI: ${newReply.replace(/\n/g, ' ')}`;
+    const logLine = `${hhmm} User: ${turn.user}\nAI: ${baselineReply.replace(/\n/g, ' ')}`;
     runningLogs = runningLogs ? `${runningLogs}\n${logLine}` : logLine;
   }
   Logger.log('\n============================================================\n');
+}
+
+/**
+ * 前段Liteの判定・選出結果をログ出力するヘルパー
+ * @private
+ */
+function logTurnLiteSummary_(outcome, turnMemory, cachedSheetTasks, isMultiCompare) {
+  const meta = outcome.logMeta || {};
+  const focusedIds = (outcome.liteResult && Array.isArray(outcome.liteResult.focused_task_ids))
+    ? outcome.liteResult.focused_task_ids
+    : [];
+  let focusedDisplay = 'なし (0件)';
+  if (focusedIds.length > 0) {
+    if (!turnMemory._testMockTasks && !cachedSheetTasks) {
+      cachedSheetTasks = getTasks('未完了');
+    }
+    const refTasks = turnMemory._testMockTasks || cachedSheetTasks || [];
+    const titleById = {};
+    refTasks.forEach(t => { if (t && t.id) titleById[t.id] = t.title; });
+    focusedDisplay = `${focusedIds.length}件 -> ` + focusedIds.map(id => titleById[id] ? `[${id}] ${titleById[id]}` : id).join(' / ');
+  }
+
+  const liteSummaryTag = isMultiCompare
+    ? (meta.phaseAndTags || '').replace(/\s*\/\s*model:[^/\]]+/, ' / model:共通Lite')
+    : (meta.phaseAndTags || '');
+  Logger.log(`\n🧭 [Lite判定]: ${liteSummaryTag}`);
+  const rangeStart = (outcome.liteResult && outcome.liteResult.schedule_range_start) || '';
+  const rangeEnd = (outcome.liteResult && outcome.liteResult.schedule_range_end) || '';
+  if (rangeStart || rangeEnd) {
+    Logger.log(`📅 [Lite動的カレンダー範囲]: ${rangeStart || '(本日)'} 〜 ${rangeEnd || '(+14日)'}`);
+  }
+  const searchQuery = (outcome.liteResult && outcome.liteResult.search_query) || '';
+  if (searchQuery) {
+    Logger.log(`🔎 [Lite検索質問抽出 (search_query)]: ${searchQuery}`);
+  }
+  Logger.log(`🎯 [Lite選出タスク (focused_task_ids)]: ${focusedDisplay}`);
+  const matchedStamps = (outcome.liteResult && Array.isArray(outcome.liteResult.matched_cycle_stamps) && outcome.liteResult.matched_cycle_stamps.length > 0)
+    ? outcome.liteResult.matched_cycle_stamps.join(', ')
+    : 'なし';
+  Logger.log(`📌 [Lite検出スタンプ (matched_cycle_stamps)]: ${matchedStamps}`);
+  return cachedSheetTasks;
+}
+
+/**
+ * 後段モデルの検索・速度・トークン・応答内容をログ出力するヘルパー
+ * @return {string} reply_text
+ * @private
+ */
+function logTurnBackendOutcome_(outcome, spec, isMultiCompare, defaultBackendLabel) {
+  const meta = outcome.logMeta || {};
+  const newReply = (outcome.primaryResult && outcome.primaryResult.reply_text) || '';
+  const actualBackend = meta.backendModel || defaultBackendLabel;
+
+  if (isMultiCompare && spec.label) {
+    Logger.log(`\n── 🤖 [${spec.label}] ──`);
+  }
+
+  const searchUsed = Boolean(meta.webSearchUsed);
+  const queries = Array.isArray(meta.webSearchQueries) ? meta.webSearchQueries : [];
+  const chunksCount = meta.groundingChunksCount || 0;
+  const toolUseTok = meta.webSearchToolUseTokens || meta.flashToolUseTokens || 0;
+  const metaKeys = Array.isArray(meta.groundingMetaKeys) ? meta.groundingMetaKeys : [];
+  let searchDisplay;
+  if (!searchUsed) {
+    searchDisplay = 'なし (検索不要ターン)';
+  } else if (queries.length > 0) {
+    searchDisplay = `${queries.join(' / ')} (chunks:${chunksCount}, toolTok:${toolUseTok})`;
+  } else if (chunksCount > 0 || toolUseTok > 0 || metaKeys.length > 0) {
+    searchDisplay = `クエリ文字なし (chunks:${chunksCount}, toolTok:${toolUseTok}, keys:[${metaKeys.join(',')}])`;
+  } else if (meta.webSearchFailed) {
+    searchDisplay = '実行エラー (検索未完了)';
+  } else {
+    searchDisplay = '起動済み・グラウンディング未発火 (chunks:0)';
+  }
+  Logger.log(`🔍 [Web検索 (googleSearch / ${meta.webSearchModel || '3.1-lite'})]: ${searchDisplay}`);
+  if (searchUsed) {
+    Logger.log(`   ↳ [検索生応答メタ] finish:${meta.webSearchFinishReason || '-'} / candKeys:[${(meta.webSearchCandidateKeys || []).join(',')}] / partKeys:[${(meta.webSearchPartKeys || []).join(',')}] / gKeys:[${metaKeys.join(',')}]`);
+    if (meta.webSearchSummaryPreview) {
+      Logger.log(`   ↳ [検索生本文先頭] ${meta.webSearchSummaryPreview}`);
+    }
+  }
+
+  const liteMs = meta.liteLatencyMs || 0;
+  const searchMs = meta.webSearchLatencyMs || 0;
+  const flashMs = meta.flashLatencyMs || 0;
+  const liteLabel = isMultiCompare ? '共通Lite' : '前段Lite';
+  const searchTimeSeg = searchUsed ? ` + Web検索: ${(searchMs / 1000).toFixed(2)}s` : '';
+  Logger.log(`⏱️ [応答時間]: 計 ${((liteMs + searchMs + flashMs) / 1000).toFixed(2)}s (${liteLabel}: ${(liteMs / 1000).toFixed(2)}s${searchTimeSeg} + 後段[${actualBackend}]: ${(flashMs / 1000).toFixed(2)}s)`);
+  const liteThink = meta.liteThinkingTokens || 0;
+  const liteSubtotal = (meta.litePromptTokens || 0) + (meta.liteCandidatesTokens || 0) + liteThink;
+  const searchTokSeg = searchUsed
+    ? ` + Web検索: ${meta.webSearchTotalTokens || 0}(思考=${meta.webSearchThinkingTokens || 0}, tool=${meta.webSearchToolUseTokens || 0})`
+    : '';
+  Logger.log(`📊 [トークン]: 合計 ${meta.newTotalTokens} tok (${liteLabel}: ${liteSubtotal}(思考=${liteThink})${searchTokSeg} + 後段[${actualBackend}]: in=${meta.flashPromptTokens || 0} / out=${meta.flashCandidatesTokens || 0} / 思考=${meta.flashThinkingTokens || 0})`);
+  const heading = isMultiCompare && spec.label ? `${spec.label} / ${outcome.phaseLabel} / ${actualBackend}` : `${outcome.phaseLabel} / ${actualBackend}`;
+  Logger.log(`\n🆕 【新システム応答 (${heading})】:\n${newReply}${formatActionSummary_(outcome.primaryResult)}`);
+  return newReply;
 }
 
 // =============================================================================

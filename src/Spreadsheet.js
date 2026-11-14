@@ -1356,10 +1356,10 @@ function updateDictionarySafely(newDictionaryCandidate) {
  * cycle_stamps の特定項目を既存の他のスタンプを破壊せずに安全にマージ更新
  * 変更がない場合（同日付への重複書き込みなど）はスプレッドシート書き込みをスキップする
  * @param {string} updatesText 例: "外歩き・散歩: 2026-10-29"
- * @return {boolean} 実際に更新された場合は true
+ * @return {Array<string>} 実際に新規追加または別日付へ更新されたエントリ一覧（例: ["音楽を聴く: 2026-11-13"]）
  */
 function updateCycleStampsSafely(updatesText) {
-  if (!updatesText || typeof updatesText !== 'string' || !updatesText.trim()) return false;
+  if (!updatesText || typeof updatesText !== 'string' || !updatesText.trim()) return [];
   const currentMemory = getMemory();
   const existingRaw = (currentMemory.cycle_stamps || '').trim();
 
@@ -1384,25 +1384,25 @@ function updateCycleStampsSafely(updatesText) {
   const existing = parseEntries(existingRaw);
   const incoming = parseEntries(updatesText);
 
-  let hasChanged = false;
+  const updatedEntries = [];
   for (let i = 0; i < incoming.order.length; i++) {
     const k = incoming.order[i];
     if (!existing.map.hasOwnProperty(k)) {
       existing.order.push(k);
-      hasChanged = true;
+      updatedEntries.push(`${k}: ${incoming.map[k]}`);
     } else if (existing.map[k] !== incoming.map[k]) {
-      hasChanged = true;
+      updatedEntries.push(`${k}: ${incoming.map[k]}`);
     }
     existing.map[k] = incoming.map[k];
   }
 
-  if (!hasChanged) {
-    return false;
+  if (updatedEntries.length === 0) {
+    return [];
   }
 
   const mergedLines = existing.order.map(k => `${k}: ${existing.map[k]}`);
   setMemoryValue('cycle_stamps', mergedLines.join('\n'));
-  return true;
+  return updatedEntries;
 }
 
 /**

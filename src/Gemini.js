@@ -1,14 +1,14 @@
 /**
- * Gemini.js - Gemini 3.1 Flash-Lite ＆ Gemini 3.8 Flash 2段階ハイブリッド連携モジュール
- * 前段 Flash-Lite ルーティング ＋ 後段 Flash 動的アセンブル実行
- * 低レイテンシ（thinkingBudget: 0）、Web検索グラウンディング、JSONスキーマ
+ * Gemini.js - Gemini 3.1 Flash-Lite ＆ Gemini 3.5 Flash-Lite / 3.8 Flash ハイブリッド連携モジュール
+ * 前段 Flash-Lite ルーティング ＋ 事実質問時Web検索前取得（3.1 Flash-Lite） ＋ 後段動的アセンブル実行
+ * JSONモードとWeb検索の直交分離、thinkingLevel制御、JSONスキーマ
  */
 
 /**
  * Gemini API への共通リクエスト＆自動リトライ関数（503/429対策・思考パート除外・usageMetadata取得・エンドポイント指定対応）
  * @param {Object} requestPayload
  * @param {string=} customEndpointBase オプション: Lite等の別モデルエンドポイントベースURL
- * @return {{text: string, usage: Object|null}} 抽出されたテキストおよび使用量メタデータ
+ * @return {{text: string, usage: Object|null, groundingQueries: Array<string>, groundingChunksCount: number, groundingMetaKeys: Array<string>, groundingSources: Array<{title: string, uri: string}>, finishReason: string, candidateKeys: Array<string>, partKeys: Array<string>}} 抽出されたテキスト・使用量・グラウンディング情報
  */
 function fetchGeminiResultWithRetry(requestPayload, customEndpointBase) {
   const config = getConfig();
@@ -66,9 +66,9 @@ function fetchGeminiResultWithRetry(requestPayload, customEndpointBase) {
 }
 
 /**
- * Gemini API レスポンス文字列からテキストと usageMetadata を抽出する共通ヘルパー
+ * Gemini API レスポンス文字列からテキスト・usageMetadata・グラウンディング情報を抽出する共通ヘルパー
  * @param {string} responseText
- * @return {{text: string, usage: Object|null}}
+ * @return {{text: string, usage: Object|null, groundingQueries: Array<string>, groundingChunksCount: number, groundingMetaKeys: Array<string>, groundingSources: Array<{title: string, uri: string}>, finishReason: string, candidateKeys: Array<string>, partKeys: Array<string>}}
  * @private
  */
 function extractGeminiCandidateResult_(responseText) {
@@ -77,15 +77,52 @@ function extractGeminiCandidateResult_(responseText) {
   if (jsonResponse.usageMetadata) {
     const u = jsonResponse.usageMetadata;
     const cached = u.cachedContentTokenCount || 0;
-    Logger.log(`[Gemini Token Usage] Prompt: ${u.promptTokenCount}, Candidates: ${u.candidatesTokenCount}, Cached: ${cached}, Total: ${u.totalTokenCount}`);
+    const toolUseTok = u.toolUsePromptTokenCount || 0;
+    const toolLog = toolUseTok > 0 ? `, ToolUse: ${toolUseTok}` : '';
+    Logger.log(`[Gemini Token Usage] Prompt: ${u.promptTokenCount}, Candidates: ${u.candidatesTokenCount}, Cached: ${cached}${toolLog}, Total: ${u.totalTokenCount}`);
   }
 
   let contentText = '';
-  if (jsonResponse.candidates && jsonResponse.candidates.length > 0 && jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts) {
-    const parts = jsonResponse.candidates[0].content.parts;
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i].text && !parts[i].thought) {
-        contentText += parts[i].text;
+  let groundingQueries = [];
+  let groundingChunksCount = 0;
+  let groundingMetaKeys = [];
+  const groundingSources = [];
+  let finishReason = '';
+  let candidateKeys = [];
+  const partKeysSet = {};
+  if (jsonResponse.candidates && jsonResponse.candidates.length > 0) {
+    const cand = jsonResponse.candidates[0];
+    candidateKeys = Object.keys(cand);
+    finishReason = cand.finishReason || '';
+    if (cand.content && cand.content.parts) {
+      const parts = cand.content.parts;
+      for (let i = 0; i < parts.length; i++) {
+        Object.keys(parts[i] || {}).forEach(k => { partKeysSet[k] = true; });
+        if (parts[i].text && !parts[i].thought) {
+          contentText += parts[i].text;
+        }
+      }
+    }
+    if (cand.groundingMetadata) {
+      groundingMetaKeys = Object.keys(cand.groundingMetadata);
+      if (Array.isArray(cand.groundingMetadata.webSearchQueries)) {
+        groundingQueries = cand.groundingMetadata.webSearchQueries.map(q => String(q || '').trim()).filter(Boolean);
+      }
+      if (Array.isArray(cand.groundingMetadata.groundingChunks)) {
+        groundingChunksCount = cand.groundingMetadata.groundingChunks.length;
+        const seenUris = {};
+        for (let j = 0; j < cand.groundingMetadata.groundingChunks.length; j++) {
+          const web = cand.groundingMetadata.groundingChunks[j] && cand.groundingMetadata.groundingChunks[j].web;
+          if (!web || !web.uri) continue;
+          const uri = String(web.uri).trim();
+          if (!uri || seenUris[uri]) continue;
+          seenUris[uri] = true;
+          groundingSources.push({
+            title: String(web.title || '').trim(),
+            uri: uri
+          });
+          if (groundingSources.length >= 5) break;
+        }
       }
     }
   }
@@ -96,7 +133,40 @@ function extractGeminiCandidateResult_(responseText) {
 
   return {
     text: contentText.trim(),
-    usage: jsonResponse.usageMetadata || null
+    usage: jsonResponse.usageMetadata || null,
+    groundingQueries: groundingQueries,
+    groundingChunksCount: groundingChunksCount,
+    groundingMetaKeys: groundingMetaKeys,
+    groundingSources: groundingSources,
+    finishReason: finishReason,
+    candidateKeys: candidateKeys,
+    partKeys: Object.keys(partKeysSet)
+  };
+}
+
+/**
+ * Gemini usageMetadata からトークン内訳を一貫抽出するヘルパー
+ * @param {Object=} usage
+ * @return {{prompt: number, cand: number, cached: number, toolUse: number, thinking: number, total: number}}
+ * @private
+ */
+function extractTokenStats_(usage) {
+  const u = usage || {};
+  const prompt = u.promptTokenCount || 0;
+  const cand = u.candidatesTokenCount || 0;
+  const cached = u.cachedContentTokenCount || 0;
+  const toolUse = u.toolUsePromptTokenCount || 0;
+  const total = u.totalTokenCount || (prompt + cand);
+  const thinking = (typeof u.thoughtsTokenCount === 'number')
+    ? u.thoughtsTokenCount
+    : Math.max(0, total - prompt - cand - toolUse);
+  return {
+    prompt: prompt,
+    cand: cand,
+    cached: cached,
+    toolUse: toolUse,
+    thinking: thinking,
+    total: total
   };
 }
 
@@ -232,6 +302,14 @@ const LITE_RESPONSE_SCHEMA = {
       type: 'BOOLEAN',
       description: '明日以降の予定、週末スケジュール、来週などの確認・照会が含まれているか'
     },
+    schedule_range_start: {
+      type: 'STRING',
+      description: '未来の日程照会や予定登録・変更時に参照すべきカレンダー開始日 (YYYY-MM-DD)。直近数日内で足りる・不要な場合は空文字 ""'
+    },
+    schedule_range_end: {
+      type: 'STRING',
+      description: '未来の日程照会や予定登録・変更時に参照すべきカレンダー終了日 (YYYY-MM-DD)。言及された週末・連休・来月・特定時期を過不足なく含む日付。不要時は空文字 ""'
+    },
     need_schedule_plan: {
       type: 'BOOLEAN',
       description: 'ユーザーからタイムスケジュールや時刻を区切った段取り表の組み立てを明確に求められているか（単発の相談・現状確認・着手摩擦はfalse）'
@@ -253,9 +331,13 @@ const LITE_RESPONSE_SCHEMA = {
     matched_cycle_stamps: {
       type: 'ARRAY',
       items: { type: 'STRING' }
+    },
+    search_query: {
+      type: 'STRING',
+      description: 'tagsに"事実質問"を含む場合のみ抽出するWeb検索用の自己完結した質問・確認事項（会話ログの指示語や対象時期・場所を補完し、DB依頼や体調等の私的文脈は除く）。不要時は空文字 ""'
     }
   },
-  required: ['tags', 'previous_action_status', 'action_intent', 'focused_task_ids', 'need_db_action', 'db_target_type', 'future_schedule_inquiry', 'need_schedule_plan', 'location', 'health_status', 'weather_relevance', 'matched_habit_topic', 'matched_cycle_stamps']
+  required: ['tags', 'previous_action_status', 'action_intent', 'focused_task_ids', 'need_db_action', 'db_target_type', 'future_schedule_inquiry', 'schedule_range_start', 'schedule_range_end', 'need_schedule_plan', 'location', 'health_status', 'weather_relevance', 'matched_habit_topic', 'matched_cycle_stamps', 'search_query']
 };
 
 /**
@@ -268,7 +350,7 @@ function getDefaultPromptLite() {
 
 【各フィールドの判定基準】
 1. tags（発言の要素分類・複数該当可）:
-   - "DB依頼": タスク、カレンダー予定、買い物メモ、インプットストック、定期ルーティンの追加・変更・削除・記録の依頼。（※迷いの呟きや単なる現状確認は含めない）★既存タスクの優先度引き上げ・引き下げ、提案順序や提案タイミングの指定（「〜を優先度高めで提案して」「早めに提案して」等）、メモやリマインド目安の更新要望も含む。
+   - "DB依頼": タスク、カレンダー予定、買い物メモ、インプットストック、定期ルーティンの追加・変更・削除・記録の依頼、および対話・段取りの中で確定した既存タスクの状態変更（実施時期・期限の変更や先送り、優先度・リマインド目安・補足メモの更新等）。（※迷いの呟きや単なる現状確認は含めない）
    - "事実質問": Web検索で調べる必要がある外部の事実、店舗・施設情報、イベント期日、天気、仕様などの調査・確認を求める質問。
    - "単発行動の開始": これから直ちに物理行動・移動・家事・準備・作業等へ向かう明確な開始宣言（「これから風呂入ってくる」「今から出かける」等）。※「〜しなきゃだけど面倒」「動きたくない」「布団から出たくない」等の着手摩擦・心理的葛藤の吐露は開始宣言と混同せず、"体調・疲労の訴え"（低調）や"雑談"、"過ごし方相談"に分類すること。
    - "活動目標の表明": 今すぐの開始ではなく、今日この後や週末など、これから行う具体的な行動予定・やっておきたいこと・実践したい意志の表明（「今日中に〜する」「週末に〜やろう」「〜したい」等）。※単なる感覚的な願望やつぶやき（「〜食べたい」「〜欲しい」「〜見たい」等）も含め、後述の直交4大プール手札化判定にて適切に分類すること。
@@ -298,7 +380,7 @@ function getDefaultPromptLite() {
    - 【操作・完了・リスケ・資料連携時】:
      * ユーザーが言及・完了報告したタスク（プロジェクトプレフィックスや表現の揺らぎ、一部の単語から該当タスクを柔軟に推論）
      * 「今日のタスク明日に回して」「残りは明日に」等の一括指示時は、当日以前（当日含む）が期限の未完了タスクをすべて選出
-     * 優先度・提案順序の指定（「〜を優先して」「早めに提案して」等）があったタスク、またはプロジェクトフォルダ・資料(Google Docs)の追記・紐付け対象となる関連タスク
+     * 優先度・提案順序の指定（「〜を優先して」「早めに提案して」等）があったタスク、カレンダー予定の追加・移動と連動して期限を揃えるべき関連タスク、またはプロジェクトフォルダ・資料(Google Docs)の追記・紐付け対象となる関連タスク
    - 【提案・相談・見通し時】:
      * 期限が迫っている重要タスク、優先度指定のあるタスク、または現在の空き時間・状況・負荷に適した選択肢（脱力時は数分でできる低負荷なもの）を文脈に応じて柔軟に選出
    - 不要または該当なしの場合は空配列 [] を出力。
@@ -313,14 +395,14 @@ function getDefaultPromptLite() {
      * ③ 日時確定の予定 → db_target_type: "calendar"
      * ④ 本人が行うあらゆる行動・実践（外出、制作、調査、家事、身の回りの手入れ等、規模や所要時間の大小を問わず） → db_target_type: "task_add"
      * ※2つ以上の異なるプール操作が同時に必要な場合は必ず db_target_type: "other" を出力すること。
-   - ★重要【タスクの優先度・提案順序の指定】: ユーザーが既存タスクについて「優先度高めで提案してほしい」「早めに提案して」「〇〇を優先して」などと発言した場合も、タスクのメモやリマインド目安を更新するため必ず true とする。
+   - ★重要【既存タスクの方針・状態変更】: 対話や段取りの中で、既存タスクの優先度・提案タイミング・実施時期（先送り含む）・補足メモ等の更新方針が定まった場合も必ず true とする。
    - 単なる日常行動の報告（「夕飯食べた」「ニュース見終えた」「風呂入る」など）で未完了タスクやDB更新が伴わない場合のみ false。
 
 6. db_target_type（必要なDB操作の種別）:
    - "none"（操作不要）
    - "task_complete"（タスク完了）
    - "task_add"（単発タスク追加・目標のタスク化・外出体験・既存プロジェクトへの新規タスク追加と紐付け）
-   - "task_update"（タスクの制御属性更新: 期限リスケ・カテゴリ/タイトル変更・優先度/リマインド目安変更、および [📄資料連携済] が無い通常タスクへの短い補足メモ更新）
+   - "task_update"（タスクの制御属性更新: 実施時期・期限の変更や先送り、カテゴリ/タイトル変更、優先度/リマインド目安変更、および [📄資料連携済] が無い通常タスクへの短い補足メモ更新。※対話や段取りの中で先送り・別日対応が決まった場合も含む）
    - "task_delete"（タスク削除）
    - "project_doc"（Google Driveのプロジェクトフォルダ新規作成・Google Docs作成・タスク紐付け、および [📄資料連携済] タスクや 📄Doc連携あり プロジェクトに対する検討候補・URL・メモ内容の追加/追記全般 ※「ドキュメント」「資料」と明記しない自然な追加依頼もすべてここへ分類すること）
    - "routine"（毎日のタスク化・定期ルーティン・日課の追加、および定期ルーティン自体の完了・停止）
@@ -330,8 +412,9 @@ function getDefaultPromptLite() {
    - "memory"（生活習慣・周期スタンプ・プロファイル・辞書更新）
    - "other"（買物とタスクなど、2つ以上の異なるDB操作が同時に必要な場合・その他）
 
-7. future_schedule_inquiry（未来日程・カレンダー照会の有無）:
-   - 明日以降の予定、週末スケジュール、来週などの確認・照会、または未来のスケジュールを意識した相談が含まれている場合は true。当日のやり取りのみなら false。
+7. future_schedule_inquiry / schedule_range_start / schedule_range_end（未来日程・動的カレンダー取得期間）:
+   - future_schedule_inquiry: 明日以降の予定、週末スケジュール、来週・来月などの確認・照会、または未来のスケジュールを意識した相談・登録依頼が含まれている場合は true。当日のやり取りのみなら false。
+   - schedule_range_start / schedule_range_end: 予定の確認や追加・変更において、デフォルトの直近数日（今週〜翌週月曜）より先の時期（「来週末」「来月」「特定の月日・年」「次の連休」「祝日」等）の予定や祝日を参照する必要がある場合、コンテキストの【現在日時】および【今後1年間の日本の祝日】を根拠に、該当する対象日・連休・対象月（例: 祝日に繋がる連休ならその土日月、特定月ならその月初〜月末）のみを過不足なく含む YYYY-MM-DD をピンポイントで指定する（※根拠なく広い固定日数を指定したり、祝日のない通常の週末を連休と誤認して狭めたりしないこと）。直近数日内で足りる・カレンダー参照不要時は空文字 "" とする。
 
 8. need_schedule_plan（タイムスケジュール・段取り組み立ての要否）:
    - 一日全体や帰宅後〜就寝など、時刻を区切ったタイムスケジュール表や過ごし方の段取りを明確に組み立てるよう求められた場合のみ true。
@@ -341,10 +424,10 @@ function getDefaultPromptLite() {
    - 会話文脈、カレンダー予定、時間帯から現在地を推論し、"自宅" / "職場" / "移動中" / "外出先" のいずれかを出力。
 
 10. health_status（当日の心身シグナル抽出）:
-   - 当日ログおよび最新発言の事実から、"通常" / "低調" / "不調" を客観的に判定：
-     * "通常": 通常通り活動可能。日常的な空気や肌の乾燥、寒暖差、天気の感想、満腹・空腹、一時的な軽い感覚などは「通常」として扱う。
-     * "低調": ★【日常的な揺らぎ・省エネモード】寝不足、だるさ、軽い疲労感、肌や首の痒み、集中力低下など。活動自体は可能だが、負荷を下げて省エネで動くべき状態（仕事や身支度・軽食などの生活基盤は維持しつつ、余分な高負荷タスクや過密作業を控える）。
-     * "不調": ★【活動不能・緊急停止レベル】発熱、起き上がれないほどの激痛、めまい、嘔吐、危険な過労など、物理的に活動が破綻している状態。仕事を休む・受診するなど、社会生活の停止・引き算セーフティが必要な深刻な状態。
+   - 当日ログおよび最新発言の事実から、過去のピークではなく「現時点で活動を継続できる状態か」を軸に "通常" / "低調" / "不調" を客観的に判定：
+     * "通常": 現時点で通常通り活動可能。日常的な空気や肌の乾燥、寒暖差、天気の感想、満腹・空腹、一時的な軽い感覚などは「通常」として扱う。
+     * "低調": ★【省エネ・経過観察モード】寝不足、だるさ、疲労感、痒み、集中力低下などの軽い不調に加え、一時的に強い症状があったが今は落ち着いている・回復傾向にあるなど、現時点でペースを落とせば生活や業務を継続できる状態（生活基盤は維持しつつ、過密負荷や高負荷タスク・無理な外出を控えて様子を見る）。
+     * "不調": ★【活動不能・緊急停止レベル】発熱、起き上がれないほどの激痛、めまい、嘔吐、危険な過労など強い症状が「現時点で進行形にあり」、物理的に活動が破綻している状態。仕事を休む・受診する・完全安静にするなど、社会生活の停止・引き算セーフティが必要な深刻な状態。
 
 11. weather_relevance（屋外・天気の関与判定）:
    - 外出・移動の言及、天気・気温・気圧の質問、または屋外活動（散歩・買い物等）の可能性がある場合は true、室内完結のやり取りなら false。
@@ -356,7 +439,12 @@ function getDefaultPromptLite() {
    - コンテキストで提示された【登録済み周期スタンプ一覧 (cycle_stamps)】の中から、今回の発言または当日の会話履歴において「実際に開始・実施・達成した」と判断できる項目名（表記そのまま）を配列で選出。
    - 【原則ベースの実施判定】:
      * スタンプ項目名の直接的な言及だけでなく、【ユーザー基本基盤 (profile)】および【生活習慣・活動定義 (lifestyle_habits)】に照らし合わせ、報告された実際の行動・移動・達成タスクがその項目の実施条件（物理的な移動・活動内容等）を必然的に伴う場合も実施とみなして選出する。
-     * 【除外】: これから行う未実行の単なる願望・未来予定の相談、および本格的な実施・メンテナンス基準に満たない極めて軽微な部分ケアは除外し、該当なしの場合は空配列 [] を出力。`;
+     * 【除外】: これから行う未実行の単なる願望・未来予定の相談、および本格的な実施・メンテナンス基準に満たない極めて軽微な部分ケアは除外し、該当なしの場合は空配列 [] を出力。
+
+14. search_query（Web検索用の純粋な質問抽出）:
+   - tags に "事実質問" を含めた場合のみ出力する（含まない場合は必ず空文字 ""）。
+   - ユーザー発言と文脈（会話履歴・未完了タスク・現在日時・祝日一覧・基本基盤等）から指示語（「そこ」「それ」等）や対象時期・条件を補完し、Web検索コールが単体で意味を把握できる自己完結した質問・確認事項（1〜2文）として切り出す。
+   - ★私的情報の遮断: 予定仮置き・タスク変更・買物メモ等のDB操作依頼や、体調・個人的な日常ログなど検索と無関係な文脈は一切含めず、確認すべき外部事実のみを純粋に抽出すること。`;
 }
 
 /**
@@ -445,12 +533,12 @@ function getDefaultPromptSchedule() {
   return `【タイムスケジュール・段取り組み立て仕様】
 - 【対象時間枠の完全タイムライン設計】:
   一日全体の組み立てを求められた場合は起床〜就寝まで、特定の時間帯（帰宅後の夜、午後〜夜、週末など）の段取りを求められた場合はその対象時間枠全体について、「夕方以降」「あとで」等の曖昧なまとめ方をせず、具体的な時刻範囲（HH:mm〜HH:mm）で時間割化して提示する（現在時刻以前の完了済み時間や既存の固定予定を無視せず、残りの可処分時間を前提に現実的に組むこと）。
-- 【生活リズムの土台（第2層の堅持）】:
-  起床を含む場合、起床直後に重い活動へ直行させず、朝食や低覚醒からのゆったりした立ち上げ（身支度、ウォームアップ等）を朝の前提として組み、健康的なリズムを支える。夜間・帰宅後の段取りでは、就寝時刻や翌日の回復を圧迫しない引き際を組み込む。
-- 【生活習慣メモリーのアンカー配置と柔軟性】:
-  コンテキストの【生活習慣メモリー（lifestyle_habits）】に定義された食事や入浴などの時間を基本アンカーとして時間割に配置する。ただし、外出や長時間の活動を行う場合は固定枠に縛られず、動線に合わせた柔軟な例外を認める。
-- 【主活動の確保と全データプールの横断活用】:
-  ユーザーが表明した活動目標や、コンテキストの【未消化ストック（input_stock）】から選定した主活動に必要なまとまった時間枠を優先して確保する。
+- 【生活リズムの土台と実時間の先行控除（第2層の堅持）】:
+  先に固定予定・就寝や出発などの境界制約、および【生活習慣メモリー（lifestyle_habits）】に基づく食事・身支度・入浴（事前のお湯張りや、入浴後のドライヤー・スキンケア・着替えを含む一式の現実所要時間）・移動・片付け等の生活維持時間を現実的な長さで差し引き、正味の可処分時間を算出する（外出等で固定アンカーに縛られにくい時は動線に合わせた柔軟な例外を認める）。
+  起床を含む場合は起床直後に重い活動へ直行させず、朝食やゆったりした立ち上げ（身支度、ウォームアップ等）を前提とし、夜間・帰宅後の段取りでは就寝時刻や翌日の回復を圧迫しない引き際を組み込む。
+- 【主活動の確保と収まりきらない時の引き算調整（詰め込み禁止）】:
+  ユーザーが表明した活動目標や、コンテキストの【未消化ストック（input_stock）】から選定した活動は、正味の可処分時間と心身の余裕の中で無理なく楽しめる時間枠として確保する。
+  制約時刻や生活維持の実時間を差し引いた結果、希望された活動すべてを余裕を持って収めると各枠が細切れに圧縮されたり休息・睡眠を圧迫したりする場合は、無茶な詰め込みをして「組めた」と合わせない。正味の残り時間の現実を率直に伝えた上で、「無理なく収まる負荷・件数へ適宜減らす（優先したいものへ調整する、片方はごく軽い触れ方にとどめる、入りきらない分を別日へ回す等）」といった引き算の調整案を提示する。
 - 【直近記録（疎遠度）に基づくリバランス】:
   * 【周期スタンプ（cycle_stamps）】や会話履歴を参照し、直近数日間で身体の運動・ケアや他者・社会との接点が途絶えている場合は、主活動を圧迫しない時間帯にそれらを補う枠を優先的に段取りへ織り交ぜる。
   * 運動や身体ケアの枠を提案する際は、単一の行動に偏らず、【生活習慣メモリー（lifestyle_habits）】に登録された手札から状況や時間枠に適した選択肢を提示する。
@@ -517,7 +605,7 @@ ${getDefaultTaskPrefixGuide_()}
 ${getTaskProjectLinkRule_()}
    - ★連携資料とメモ欄の責務分離（重要）: 対象タスクに \`[📄資料連携済]\` が付いている（または対応する \`📄Doc連携あり\` プロジェクトが存在する）場合、検討候補・URL・調査メモ・案などの情報蓄積にはスプレッドシートの \`memo\` 列を上書きせず、必ず後述の \`project_actions\`（\`append_doc\`）へ出力すること。\`task_actions\` の \`update\` は期限・優先度・カテゴリ・タイトル・資料紐付け等の制御属性変更のみに使用する。
    - ★タスク更新 (update) の差分パッチ原則: 変更するキーのみを出力してください（例: リスケなら \`task_id\` と \`due_date\`、カテゴリ変更なら \`task_id\` と \`category\`（7大カテゴリ名）、タイトル本文変更なら \`task_id\` と \`new_title\` を出力）。指定のないキーはGAS側で既存値がそのまま保持されます。
-   - ★一括リスケ指示への対応: 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭の了解だけで済ませず、コンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（\`due_date\` を翌日日付 \`YYYY-MM-DD\` に変更）を配列で確実に出力すること。
+   - ★実施時期・期限の変更同期: 一括・個別を問わず、対象タスクの実施日や期限を変更・先送りする方針が定まった時は、口頭の了解だけで済ませず、【着目・関連タスク】のうち現在の期限が目標日と異なる対象すべてについて \`task_actions\` の \`update\`（\`due_date: "YYYY-MM-DD"\`）を出力して状態を同期すること（すでに目標日と一致している場合は更新不要）。
    - ★優先度・方針指定: ユーザーから「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の提案方針・優先度指定があった場合も、口頭の了解だけで済ませず必ず update を出力する。\`remind_context\` に優先度を反映した状況（例: \`直近の空き枠・最優先\`, \`休日PC・最優先\` 等）を設定し、\`memo\` に指定された背景・理由（例: \`昨今の情勢を考慮し優先度高め\` 等）を追記・更新する。
    - タスク完了(complete)・破棄(delete): \`task_id\` を指定すれば \`title\` は省略可能。
 2. 買物メモ・インプット作品操作 (shopping_actions / input_stock_actions):
@@ -527,6 +615,7 @@ ${getTaskProjectLinkRule_()}
    - 個人メインカレンダーのみ操作可能（家族共用カレンダーは読み取り専用）。
    - 【出力最小化原則】: \`is_all_day: false\` や \`recurrence_days: []\` などのデフォルト値は省略する。同日の予定の場合、\`end_time\` は \`"HH:mm"\` 形式で出力してトークンを節約する。
    - 既存予定の変更時は、旧予定の \`delete\` と新予定の \`add\` をセットで出力する。
+   - 既存の【着目・関連タスク】に対応する未完了タスクがある場合は、カレンダーの日程と揃えて \`task_actions\` の \`update\` で \`due_date\` も同時に更新すること（新規タスクの重複追加は不要）。
 4. プロジェクトフォルダ・Google Docs操作 (project_actions):
    - 階層ルール: マイドライブ直下の7大カテゴリフォルダ（\`仕事\`, \`制作・創作\`, \`家事・環境\`, \`実務・手続\`, \`趣味・文化\`, \`身体・ケア\`, \`お出かけ\`）配下に \`YYMM_プロジェクト名\` フォルダを置き、Google Docsはその中へ格納する。
    - アクション: \`create_project\`（フォルダ＆Doc新規作成）、\`add_doc\`（既存プロジェクトへDoc追加）、\`append_doc\`（連携済みGoogle Docへの追記）。既存タスクと紐付ける場合は \`task_id\` を指定し、同時に新規タスクを作る場合は \`task_actions\` 側に \`project_name\` を指定する。
@@ -582,10 +671,11 @@ ${getTaskProjectLinkRule_()}
  * DB操作種別に応じた最小限のJSONスキーマ・仕様モジュールを返す（Flashの入力トークン節約）
  * @param {string} dbTargetType 'task_complete' | 'task_add' | 'task_update' | 'task_delete' | 'project_doc' | 'calendar' | 'shopping' | 'input_stock' | 'other'
  * @param {string=} customDbPrompt カスタムDBプロンプト（設定時はプリフィックス定義および'other'時に優先）
+ * @param {Object=} options 追加制御オプション（例: { hasRelatedTasks: boolean }）
  * @return {string}
  * @private
  */
-function getMicroDbSchema_(dbTargetType, customDbPrompt) {
+function getMicroDbSchema_(dbTargetType, customDbPrompt, options) {
   const prefixGuide = resolveTaskPrefixGuide_(customDbPrompt);
   const projectLinkRule = getTaskProjectLinkRule_();
 
@@ -604,7 +694,7 @@ function getMicroDbSchema_(dbTargetType, customDbPrompt) {
 ${prefixGuide}
     - 期限 (due_date): ユーザーから期限・期間・実施日の明示がある場合のみ YYYY-MM-DD を設定し、未指定の調査・検討タスク等では省略する。
 ${projectLinkRule}
-- 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭了解だけでなくコンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（due_date を翌日日付 YYYY-MM-DD に変更）を配列で出力してください。
+- 【実施時期・期限の変更同期】: 一括・個別を問わず、対象タスクの実施日や期限を変更・先送りする方針が定まった時は、口頭の了解だけで済ませず、【着目・関連タスク】のうち現在の期限が目標日と異なる対象すべてについて \`update\`（\`due_date: "YYYY-MM-DD"\`）を配列で出力すること（すでに目標日と一致している場合は更新不要）。
 {
   "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "task_actions": [
@@ -650,7 +740,7 @@ ${prefixGuide}
   * 例（タイトル文言変更）: { "action": "update", "task_id": "T_...", "new_title": "[大分類] 新タイトル" }
   * 例（資料・プロジェクト紐付け）: { "action": "update", "task_id": "T_...", "project_name": "2611_〇〇" }
 - 「優先度高めで提案して」「早めに提案して」「〇〇を優先して」等の指定があった場合も、口頭の了解だけで済ませず必ず update を出力し、remind_context（例: 「直近の空き枠・最優先」「休日PC・最優先」等）と memo（背景・理由）を更新してください。
-- 「今日のタスク明日に回して」「残りは明日に」等の指示時は、口頭了解だけでなくコンテキストの【着目・関連タスク】に存在する未完了タスク全件に対して、update（due_date を翌日日付 YYYY-MM-DD に変更）を配列で出力してください。
+- 【実施時期・期限の変更同期】: 一括・個別を問わず、対象タスクの実施日や期限を変更・先送りする方針が定まった時は、口頭の了解だけで済ませず、【着目・関連タスク】のうち現在の期限が目標日と異なる対象すべてについて \`update\`（\`due_date: "YYYY-MM-DD"\`）を配列で出力すること（すでに目標日と一致している場合は更新不要）。
 {
   "reply_text": "【必須】ユーザーへの返信文（※操作結果の箇条書き復唱は不要。1〜2文で簡潔に）",
   "task_actions": [
@@ -696,9 +786,16 @@ ${prefixGuide}
 }`;
   }
   if (dbTargetType === 'calendar') {
+    const hasRelatedTasks = Boolean(options && options.hasRelatedTasks);
+    const taskSyncRule = hasRelatedTasks
+      ? '\n- 既存の【着目・関連タスク】に対応する未完了タスクが存在する場合は、カレンダーの日程と揃えて task_actions の update で due_date も同時に更新すること（新規タスクの重複追加は不要）。'
+      : '';
+    const taskSyncSchema = hasRelatedTasks
+      ? `,\n  "task_actions": [\n    { "action": "update", "task_id": "T_...", "due_date": "YYYY-MM-DD" }\n  ]`
+      : '';
     return `【データベース操作仕様: カレンダー予定】
 カレンダーの予定を追加・変更・削除する場合は、以下のJSONキーを出力してください：
-- 個人メインカレンダーのみ操作可能。変更時は旧予定の delete と新予定の add をセットで出力。
+- 個人メインカレンダーのみ操作可能。変更時は旧予定の delete と新予定の add をセットで出力。${taskSyncRule}
 - 【出力最小化原則】:
   * is_all_day: false や recurrence_days: [] などのデフォルト値はキー自体を省略すること。
   * 同日の予定の場合、end_time は "HH:mm" 形式（例: "14:00"）で出力してトークンを節約すること。
@@ -708,7 +805,7 @@ ${prefixGuide}
   "calendar_actions": [
     { "action": "add", "title": "予定名", "start_time": "YYYY-MM-DDTHH:mm:ss", "end_time": "HH:mm" },
     { "action": "delete", "title": "予定名", "date": "YYYY-MM-DD" }
-  ]
+  ]${taskSyncSchema}
 }`;
   }
   if (dbTargetType === 'shopping') {
@@ -810,6 +907,12 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed,
   userContent += `【直前のやり取りからの経過時間(Δt)】: ${precomputed.elapsedStr}\n`;
   userContent += `【時間の鏡（現在の予定・次の境界までの残り時間）】: ${precomputed.boundaryInfo.summaryText}\n`;
   userContent += `【本日のカレンダー予定一覧】: ${precomputed.todayEvents.length > 0 ? precomputed.todayEvents.join(' / ') : '予定なし'}\n`;
+  const upcomingHolidays = (typeof getUpcomingHolidaysSummary_ === 'function')
+    ? getUpcomingHolidaysSummary_(precomputed.now)
+    : '';
+  if (upcomingHolidays) {
+    userContent += `【今後1年間の日本の祝日】: ${upcomingHolidays}\n`;
+  }
 
   if (memory && memory.profile && memory.profile.trim() !== '') {
     userContent += `【ユーザー基本基盤 (profile)】: ${memory.profile.trim()}\n`;
@@ -855,7 +958,7 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed,
       }
     ],
     generationConfig: {
-      temperature: 0.1,
+      thinkingConfig: resolveThinkingConfig_(SYSTEM_CONSTANTS.GEMINI_LITE_MODEL, { thinking_level: 'low' }),
       responseMimeType: 'application/json',
       responseSchema: LITE_RESPONSE_SCHEMA
     }
@@ -873,12 +976,15 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed,
         need_db_action: Boolean(parsed.need_db_action),
         db_target_type: parsed.db_target_type || 'none',
         future_schedule_inquiry: Boolean(parsed.future_schedule_inquiry),
+        schedule_range_start: String(parsed.schedule_range_start || '').trim(),
+        schedule_range_end: String(parsed.schedule_range_end || '').trim(),
         need_schedule_plan: Boolean(parsed.need_schedule_plan),
         location: parsed.location || '自宅',
         health_status: parsed.health_status || '通常',
         weather_relevance: Boolean(parsed.weather_relevance),
         matched_habit_topic: parsed.matched_habit_topic || 'none',
-        matched_cycle_stamps: Array.isArray(parsed.matched_cycle_stamps) ? parsed.matched_cycle_stamps.map(s => String(s || '').trim()).filter(Boolean) : []
+        matched_cycle_stamps: Array.isArray(parsed.matched_cycle_stamps) ? parsed.matched_cycle_stamps.map(s => String(s || '').trim()).filter(Boolean) : [],
+        search_query: String(parsed.search_query || '').trim()
       },
       usage: res.usage
     };
@@ -893,14 +999,96 @@ function callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed,
         need_db_action: false,
         db_target_type: 'none',
         future_schedule_inquiry: false,
+        schedule_range_start: '',
+        schedule_range_end: '',
         need_schedule_plan: false,
         location: '自宅',
         health_status: '通常',
         weather_relevance: false,
         matched_habit_topic: 'none',
-        matched_cycle_stamps: []
+        matched_cycle_stamps: [],
+        search_query: ''
       },
       usage: { promptTokenCount: 0, candidatesTokenCount: 0, cachedContentTokenCount: 0, totalTokenCount: 0 }
+    };
+  }
+}
+
+/**
+ * Web検索事前取得リクエストのペイロードを構築（前段Lite抽出のsearch_query＋現在日時のみを注入）
+ * @param {string} searchQuery 前段Liteが抽出した自己完結の検索質問
+ * @param {Object} precomputed
+ * @param {string=} fallbackUserText searchQueryが空だった場合のみの安全フォールバック
+ * @return {Object}
+ * @private
+ */
+function buildGeminiWebSearchPayload_(searchQuery, precomputed, fallbackUserText) {
+  const effectiveQuery = String(searchQuery || '').trim() || String(fallbackUserText || '').trim();
+  const systemPrompt =
+    'あなたは事実に忠実なWeb検索リサーチャーです。\n' +
+    '与えられた現在日時を時間軸の基準とし、確認したい質問・トピックについて必ず googleSearch ツールを実行して最新の一次情報を確認してください。\n' +
+    '確認できた事実の要点のみを簡潔に整理して答え、確認できなかった細部は推測で補完しないでください。';
+
+  const nowStr = (precomputed && precomputed.nowStr) ? precomputed.nowStr : '';
+  const userContent =
+    `【現在日時】: ${nowStr}\n` +
+    `【確認したい質問・トピック】:\n${effectiveQuery}`;
+
+  return {
+    systemInstruction: {
+      parts: [{ text: systemPrompt }]
+    },
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: userContent }]
+      }
+    ],
+    tools: [{ googleSearch: {} }],
+    generationConfig: {
+      thinkingConfig: resolveThinkingConfig_(SYSTEM_CONSTANTS.GEMINI_LITE_MODEL, { thinking_level: 'medium' })
+    }
+  };
+}
+
+/**
+ * 事実質問時専用: Gemini 3.1 Flash-Lite + googleSearch で外部一次情報を前取得（JSON制約なし・直交分離）
+ * @param {string} searchQuery 前段Liteが抽出した自己完結の検索質問
+ * @param {Object} precomputed
+ * @param {string=} fallbackUserText searchQueryが空だった場合のみの安全フォールバック
+ * @return {{summaryText: string, queries: Array<string>, chunksCount: number, metaKeys: Array<string>, sources: Array<{title: string, uri: string}>, finishReason: string, candidateKeys: Array<string>, partKeys: Array<string>, usage: Object|null, failed: boolean}}
+ * @private
+ */
+function callGeminiWebSearch_(searchQuery, precomputed, fallbackUserText) {
+  const payload = buildGeminiWebSearchPayload_(searchQuery, precomputed, fallbackUserText);
+
+  try {
+    const res = fetchGeminiResultWithRetry(payload, SYSTEM_CONSTANTS.GEMINI_LITE_ENDPOINT_BASE);
+    return {
+      summaryText: res.text || '',
+      queries: Array.isArray(res.groundingQueries) ? res.groundingQueries : [],
+      chunksCount: res.groundingChunksCount || 0,
+      metaKeys: Array.isArray(res.groundingMetaKeys) ? res.groundingMetaKeys : [],
+      sources: Array.isArray(res.groundingSources) ? res.groundingSources : [],
+      finishReason: res.finishReason || '',
+      candidateKeys: Array.isArray(res.candidateKeys) ? res.candidateKeys : [],
+      partKeys: Array.isArray(res.partKeys) ? res.partKeys : [],
+      usage: res.usage || null,
+      failed: false
+    };
+  } catch (err) {
+    Logger.log('Web検索事前取得エラー (検索未完了として続行): ' + err.message);
+    return {
+      summaryText: '',
+      queries: [],
+      chunksCount: 0,
+      metaKeys: [],
+      sources: [],
+      finishReason: '',
+      candidateKeys: [],
+      partKeys: [],
+      usage: null,
+      failed: true
     };
   }
 }
@@ -1186,6 +1374,14 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     promptModules.push((memory.prompt_schedule && memory.prompt_schedule.trim() !== '') ? memory.prompt_schedule.trim() : getDefaultPromptSchedule());
   }
 
+  // 3-2c. 外部情報の確認方針（事実質問時のみ直交注入）
+  if (needSearch) {
+    promptModules.push(
+      '【外部情報の確認方針】\n' +
+      '- 未確認の外部事実や最新情報の確認を伴う発話です。提供された【外部Web検索結果】の一次情報の範囲内のみで回答・判断し、確認できなかった日時・営業時間・料金・固有名詞等の細部は自身の推測で補完・断定せず未確認である旨を伝えてください。'
+    );
+  }
+
   // 3-3. DB操作仕様 ＆ JSONスキーマ（ピンポイント・マイクロスキーマ適用で大幅節約）
   let effectiveTargetType = (liteResult && liteResult.db_target_type) ? liteResult.db_target_type : 'none';
   if (needDbModule) {
@@ -1230,7 +1426,7 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
 
     const usesFullDbSchema = !(effectiveTargetType !== 'none' && effectiveTargetType !== 'other' && !hasImages);
     if (!usesFullDbSchema) {
-      promptModules.push(getMicroDbSchema_(effectiveTargetType, memory.prompt_db));
+      promptModules.push(getMicroDbSchema_(effectiveTargetType, memory.prompt_db, { hasRelatedTasks: tasksToInject.length > 0 }));
       if (hasPendingCycleStamps) {
         if (effectiveTargetType === 'memory') {
           promptModules.push(`【周期スタンプ更新の確認】\n${cycleStampGuidance}`);
@@ -1301,6 +1497,26 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     contextLines.push(`【気圧急降下】: ${pressureAlertVal === 'TRUE' ? '急降下中(注意)' : '安定'}`);
   }
 
+  // 3-7. 外部Web検索結果の条件付き注入（事実質問時のみ別コール取得済み一次情報を注入）
+  if (needSearch && precomputed && precomputed.webSearchContext) {
+    const ws = precomputed.webSearchContext;
+    const hasGroundedEvidence = !ws.failed && Boolean(ws.summaryText) &&
+      ((ws.chunksCount || 0) > 0 || (Array.isArray(ws.queries) && ws.queries.length > 0));
+    if (hasGroundedEvidence) {
+      const queryLabel = (Array.isArray(ws.queries) && ws.queries.length > 0)
+        ? ` (検索クエリ: ${ws.queries.join(' / ')})`
+        : '';
+      let searchBlock = `【外部Web検索結果（一次情報）${queryLabel}】:\n${ws.summaryText}`;
+      if (Array.isArray(ws.sources) && ws.sources.length > 0) {
+        const srcLines = ws.sources.map(s => `- ${s.title || s.uri}: ${s.uri}`).join('\n');
+        searchBlock += `\n参照元:\n${srcLines}`;
+      }
+      contextLines.push(searchBlock);
+    } else {
+      contextLines.push('【外部Web検索結果】: Web検索から確実な一次情報を取得できませんでした（未確認の細部は推測で断定せず、確認が必要である旨を伝えること）。');
+    }
+  }
+
   // 買物リスト・インプットストックの条件付き注入
   const needShopping = (phase === 'PHASE_C' && tags.indexOf('過ごし方相談') !== -1) ||
     (liteResult && (liteResult.db_target_type === 'shopping' || liteResult.db_target_type === 'other')) ||
@@ -1361,15 +1577,18 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
     }
   }
 
-  // カレンダー予定の動的注入（フェーズC・段取り設計時・未来日程照会・カレンダー操作時は直近〜週末予定を注入）
+  // カレンダー予定の動的注入（フェーズC・段取り設計時・未来日程照会・カレンダー操作時は指定期間または直近〜週末予定を注入）
+  const rangeStart = (liteResult && liteResult.schedule_range_start) ? liteResult.schedule_range_start : '';
+  const rangeEnd = (liteResult && liteResult.schedule_range_end) ? liteResult.schedule_range_end : '';
   const needFutureCalendar = (phase === 'PHASE_C') ||
     needSchedulePlan ||
     Boolean(liteResult.future_schedule_inquiry) ||
-    Boolean(liteResult.db_target_type === 'calendar');
+    Boolean(liteResult.db_target_type === 'calendar') ||
+    Boolean(rangeStart || rangeEnd);
 
   if (needFutureCalendar) {
     const excludeDate = (memory && memory._testCalendarExcludeDate) || '';
-    const calCtx = getCalendarAndHolidayContext(precomputed.now, excludeDate);
+    const calCtx = getCalendarAndHolidayContext(precomputed.now, excludeDate, rangeStart, rangeEnd);
     contextLines.push(calCtx);
   } else if (precomputed.todayEvents && precomputed.todayEvents.length > 0) {
     contextLines.push(`【本日のカレンダー予定】: ${precomputed.todayEvents.join(' / ')}`);
@@ -1442,16 +1661,10 @@ function buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory,
       }
     ],
     generationConfig: {
-      temperature: 0.7,
-      thinkingConfig: resolveThinkingConfig_(backendTarget.model, memory)
+      thinkingConfig: resolveThinkingConfig_(backendTarget.model, memory),
+      responseMimeType: 'application/json'
     }
   };
-
-  if (needSearch) {
-    requestPayload.tools = [{ googleSearch: {} }];
-  } else {
-    requestPayload.generationConfig.responseMimeType = 'application/json';
-  }
 
   return requestPayload;
 }
@@ -1494,6 +1707,13 @@ function resolveBackendModel_(memory) {
       endpoint: SYSTEM_CONSTANTS.GEMINI_35_LITE_ENDPOINT_BASE
     };
   }
+  if (normalized === 'hydrogen' || normalized === '4-hydrogen' || normalized === SYSTEM_CONSTANTS.GEMINI_HYDROGEN_MODEL.toLowerCase()) {
+    return {
+      model: SYSTEM_CONSTANTS.GEMINI_HYDROGEN_MODEL,
+      shortLabel: 'hydrogen',
+      endpoint: SYSTEM_CONSTANTS.GEMINI_HYDROGEN_ENDPOINT_BASE
+    };
+  }
   if (!normalized || normalized === 'flash' || normalized === SYSTEM_CONSTANTS.GEMINI_MODEL.toLowerCase()) {
     return {
       model: SYSTEM_CONSTANTS.GEMINI_MODEL,
@@ -1518,7 +1738,8 @@ function resolveBackendModel_(memory) {
 
 /**
  * モデルと memory.thinking_level 設定から Gemini generationConfig.thinkingConfig を解決
- * - Gemini 3系（3.5-flash-lite / 3.8-flash 等）: thinkingLevel ('minimal' | 'low' | 'medium' | 'high')
+ * - Gemini 3.5-lite / 3.6-flash 等: minimal / low / medium / high
+ * - Gemini 3.8-flash / Gemini 4 Hydrogen 等（minimal非対応モデル）: minimal指定時は安全に low へフォールバック（Hydrogenは xhigh も可）
  * - レガシー Gemini 2.5系: thinkingBudget: 0
  * @param {string} modelName
  * @param {Object=} memory
@@ -1529,10 +1750,21 @@ function resolveThinkingConfig_(modelName, memory) {
   if (m.indexOf('gemini-2.5') === 0) {
     return { thinkingBudget: 0 };
   }
-  const rawLevel = String((memory && (memory._testThinkingLevel || memory.thinking_level)) || 'minimal').trim().toLowerCase();
-  const allowed = ['minimal', 'low', 'medium', 'high'];
-  const level = allowed.indexOf(rawLevel) !== -1 ? rawLevel : 'minimal';
-  return { thinkingLevel: level };
+  const supportsMinimal = (
+    m.indexOf('flash-lite') !== -1 ||
+    m.indexOf('gemini-3.6-flash') !== -1 ||
+    m.indexOf('gemini-3-flash') !== -1
+  );
+  const supportsXhigh = (m.indexOf('hydrogen') !== -1);
+  const allowed = supportsXhigh
+    ? ['low', 'medium', 'high', 'xhigh']
+    : (supportsMinimal ? ['minimal', 'low', 'medium', 'high'] : ['low', 'medium', 'high']);
+  const defaultLevel = supportsMinimal ? 'minimal' : 'low';
+  const rawLevel = String((memory && (memory._testThinkingLevel || memory.thinking_level)) || defaultLevel).trim().toLowerCase();
+  if (allowed.indexOf(rawLevel) !== -1) {
+    return { thinkingLevel: rawLevel };
+  }
+  return { thinkingLevel: (rawLevel === 'minimal' && !supportsMinimal) ? 'low' : defaultLevel };
 }
 
 /**
@@ -1577,10 +1809,23 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
   };
 
   // 2. 前段 Flash-Lite 実行（意図分類・ルーティング）
+  // 比較ドライラン等で前段Lite結果が注入されている場合は再利用し、同一判定下で後段モデルのみを比較する
   const hasImages = Boolean(imageBlobs && imageBlobs.length > 0);
-  const liteCall = callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed, allUncompletedTasks);
-  const liteResult = liteCall.result;
-  const liteUsage = liteCall.usage || {};
+  const preLite = memory && memory._testPrecomputedLite;
+  let liteResult;
+  let liteUsage;
+  let liteLatencyMs;
+  if (preLite && preLite.liteResult) {
+    liteResult = preLite.liteResult;
+    liteUsage = preLite.liteUsage || {};
+    liteLatencyMs = preLite.liteLatencyMs || 0;
+  } else {
+    const tLite0 = Date.now();
+    const liteCall = callGeminiLite(userText, hasImages, todayLogsText, memory, precomputed, allUncompletedTasks);
+    liteLatencyMs = Date.now() - tLite0;
+    liteResult = liteCall.result;
+    liteUsage = liteCall.usage || {};
+  }
 
   // 3. GAS ルール層: フェーズ判定
   const phase = determineActionPhase(liteResult, boundaryInfo);
@@ -1598,7 +1843,27 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
   };
   const phaseLabel = phaseShortMap[phase] || phase;
   const phaseFullLabel = phaseMap[phase] || phase;
-  const tagsStr = (liteResult.tags || []).join(',');
+  const liteTags = Array.isArray(liteResult.tags) ? liteResult.tags : [];
+  const needSearch = (liteTags.indexOf('事実質問') !== -1);
+  let webSearchContext = null;
+  let webSearchUsage = {};
+  let webSearchLatencyMs = 0;
+  if (needSearch) {
+    if (preLite && preLite.webSearchSnapshot) {
+      webSearchContext = preLite.webSearchSnapshot.context || null;
+      webSearchUsage = preLite.webSearchSnapshot.usage || {};
+      webSearchLatencyMs = preLite.webSearchSnapshot.latencyMs || 0;
+    } else {
+      const tSearch0 = Date.now();
+      const ws = callGeminiWebSearch_(liteResult.search_query, precomputed, userText);
+      webSearchLatencyMs = Date.now() - tSearch0;
+      webSearchContext = ws;
+      webSearchUsage = ws.usage || {};
+    }
+    precomputed.webSearchContext = webSearchContext;
+  }
+
+  const tagsStr = liteTags.join(',');
   const backendTarget = resolveBackendModel_(memory);
   const thinkingCfg = resolveThinkingConfig_(backendTarget.model, memory);
   const thinkLabel = thinkingCfg.thinkingLevel ? thinkingCfg.thinkingLevel : 'b0';
@@ -1609,34 +1874,54 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
   const newPayload = buildNewSystemFlashPayload(userText, imageBlobs, todayLogsText, memory, liteResult, phase, precomputed, allUncompletedTasks);
 
   // 5. 後段モデルの実行（memory.backend_model またはテストフラグにより切替）
+  const tFlash0 = Date.now();
   const singleRes = fetchGeminiResultWithRetry(newPayload, backendTarget.endpoint);
+  const flashLatencyMs = Date.now() - tFlash0;
   const newUsage = singleRes.usage || {};
   const newParsed = parseGeminiActionJson_(singleRes.text, newUsage);
 
   // 6. トークン集計
-  const litePrompt = liteUsage.promptTokenCount || 0;
-  const liteCand = liteUsage.candidatesTokenCount || 0;
-  const liteCache = liteUsage.cachedContentTokenCount || 0;
-  const liteTotal = liteUsage.totalTokenCount || (litePrompt + liteCand);
-
-  const flashPrompt = newUsage.promptTokenCount || 0;
-  const flashCand = newUsage.candidatesTokenCount || 0;
-  const flashCache = newUsage.cachedContentTokenCount || 0;
-  const flashTotal = newUsage.totalTokenCount || (flashPrompt + flashCand);
-
-  const newTotalTokens = liteTotal + flashTotal;
+  const liteStats = extractTokenStats_(liteUsage);
+  const searchStats = extractTokenStats_(webSearchUsage);
+  const flashStats = extractTokenStats_(newUsage);
+  const newTotalTokens = liteStats.total + searchStats.total + flashStats.total;
+  const webSearchQueries = (webSearchContext && Array.isArray(webSearchContext.queries)) ? webSearchContext.queries : [];
 
   const logMeta = {
     isTwoModel: true,
     backendModel: backendTarget.model,
-    litePromptTokens: litePrompt,
-    liteCandidatesTokens: liteCand,
-    liteCachedTokens: liteCache,
-    flashPromptTokens: flashPrompt,
-    flashCandidatesTokens: flashCand,
-    flashCachedTokens: flashCache,
+    litePromptTokens: liteStats.prompt,
+    liteCandidatesTokens: liteStats.cand,
+    liteCachedTokens: liteStats.cached,
+    liteThinkingTokens: liteStats.thinking,
+    webSearchUsed: needSearch,
+    webSearchModel: needSearch ? SYSTEM_CONSTANTS.GEMINI_LITE_MODEL : '',
+    webSearchFailed: Boolean(webSearchContext && webSearchContext.failed),
+    webSearchPromptTokens: searchStats.prompt,
+    webSearchCandidatesTokens: searchStats.cand,
+    webSearchCachedTokens: searchStats.cached,
+    webSearchThinkingTokens: searchStats.thinking,
+    webSearchToolUseTokens: searchStats.toolUse,
+    webSearchTotalTokens: searchStats.total,
+    webSearchLatencyMs: webSearchLatencyMs,
+    flashPromptTokens: flashStats.prompt,
+    flashCandidatesTokens: flashStats.cand,
+    flashCachedTokens: flashStats.cached,
+    flashThinkingTokens: flashStats.thinking,
+    flashToolUseTokens: flashStats.toolUse,
+    liteLatencyMs: liteLatencyMs,
+    flashLatencyMs: flashLatencyMs,
     newTotalTokens: newTotalTokens,
-    phaseAndTags: phaseAndTags
+    phaseAndTags: phaseAndTags,
+    webSearchQueries: webSearchQueries,
+    groundingChunksCount: (webSearchContext && webSearchContext.chunksCount) || 0,
+    groundingMetaKeys: (webSearchContext && Array.isArray(webSearchContext.metaKeys)) ? webSearchContext.metaKeys : [],
+    webSearchFinishReason: (webSearchContext && webSearchContext.finishReason) || '',
+    webSearchCandidateKeys: (webSearchContext && Array.isArray(webSearchContext.candidateKeys)) ? webSearchContext.candidateKeys : [],
+    webSearchPartKeys: (webSearchContext && Array.isArray(webSearchContext.partKeys)) ? webSearchContext.partKeys : [],
+    webSearchSummaryPreview: (webSearchContext && webSearchContext.summaryText)
+      ? String(webSearchContext.summaryText).replace(/\s+/g, ' ').slice(0, 220)
+      : ''
   };
 
   return {
@@ -1644,7 +1929,17 @@ function executeCompanionTurn(userText, imageBlobs, todayLogsText, memoryOpt, si
     phaseLabel: phaseLabel,
     liteResult: liteResult,
     primaryResult: newParsed,
-    logMeta: logMeta
+    logMeta: logMeta,
+    _liteSnapshot: {
+      liteResult: liteResult,
+      liteUsage: liteUsage,
+      liteLatencyMs: liteLatencyMs,
+      webSearchSnapshot: needSearch ? {
+        context: webSearchContext,
+        usage: webSearchUsage,
+        latencyMs: webSearchLatencyMs
+      } : null
+    }
   };
 }
 
@@ -1769,7 +2064,6 @@ ${relevantDict ? `- 関連用語定義:\n${relevantDict}\n` : ''}
   const requestPayload = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
-      temperature: 0.7,
       thinkingConfig: {
         thinkingLevel: 'low'
       }
@@ -1886,7 +2180,6 @@ ${logsSummary || 'ログなし'}
   const requestPayload = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
-      temperature: 0.1,
       thinkingConfig: {
         thinkingBudget: 0
       }
@@ -2019,7 +2312,6 @@ ${relevantDict ? `\n【関連用語定義（固有名詞・作品・プロジェ
   const requestPayload = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
-      temperature: 0.7,
       thinkingConfig: {
         thinkingBudget: 0
       }

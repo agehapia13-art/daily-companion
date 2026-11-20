@@ -599,22 +599,6 @@ function apiSendChat(authKey, messagePayload) {
   const workBoundary = getWorkModeAndBoundary(now, memory.profile);
   const shouldRefreshDeck = deckNeedsRefresh === true ||
     (deckNeedsRefresh === 'check_low_cards' && composeHomeDeck(workBoundary.workMode, now, fastState).cards.length < 3);
-  if (shouldRefreshDeck) {
-    try {
-      fastState.aiDeck = generateAiDeck({
-        reason: 'chat_update',
-        now: now,
-        fastState: fastState,
-        workMode: workBoundary.workMode,
-        todayEvents: workBoundary.todayEvents,
-        boundaryInfo: workBoundary.boundaryInfo,
-        useFlashModel: false
-      });
-      stateChanged = true;
-    } catch (deckErr) {
-      Logger.log('Chat連動デッキ更新警告: ' + deckErr.message);
-    }
-  }
 
   const lists = buildListsSnapshot(null, now);
   fastState.listCache = lists;
@@ -633,7 +617,8 @@ function apiSendChat(authKey, messagePayload) {
     nowStr: nowStr,
     lists: lists,
     state: fastState,
-    deck: deck
+    deck: deck,
+    needsDeckRefresh: Boolean(shouldRefreshDeck)
   };
 }
 

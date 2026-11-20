@@ -262,18 +262,58 @@ function executeChatSend(msgObj, plainText, photo) {
       saveLocalSnapshot();
       renderAll();
       scrollToChatBottom();
+      if (res.needsDeckRefresh) {
+        callServerApi('apiRefreshDeck', state.authKey, [])
+          .then(function(deckRes) {
+            if (deckRes && deckRes.authorized && deckRes.deck) {
+              state.composedDeck = deckRes.deck;
+              if (deckRes.state) state.fastState = deckRes.state;
+              saveLocalSnapshot();
+              if (state.tab === 'home') renderHome();
+            }
+          })
+          .catch(function() {});
+      }
     })
     .catch(function(err) {
-      state.isSending = false;
-      var errId = 'ERR_' + Date.now();
-      state.failedPayloads[errId] = { msgObj: msgObj, plainText: plainText, photo: photo };
-      state.messages.push({
-        id: errId,
-        isError: true,
-        errorText: (err && err.message) ? err.message : String(err)
-      });
-      renderChat();
-      scrollToChatBottom();
+      setTimeout(function() {
+        callServerApi('apiGetHomeBootstrap', state.authKey)
+          .then(function(boot) {
+            if (boot && boot.authorized && Array.isArray(boot.chatMessages)) {
+              var matched = null;
+              for (var i = boot.chatMessages.length - 1; i >= 0; i--) {
+                var cm = boot.chatMessages[i];
+                if (cm && cm.userText && plainText && cm.userText.indexOf(plainText.slice(0, 20)) !== -1 && (cm.aiText || cm.reactionEmoji)) {
+                  matched = cm;
+                  break;
+                }
+              }
+              if (matched) {
+                state.isSending = false;
+                applyServerStatePayload(boot);
+                var localErrors = state.messages.filter(function(m) { return m.isError; });
+                state.messages = boot.chatMessages.concat(localErrors);
+                saveLocalSnapshot();
+                renderAll();
+                scrollToChatBottom();
+                return;
+              }
+            }
+            throw err;
+          })
+          .catch(function() {
+            state.isSending = false;
+            var errId = 'ERR_' + Date.now();
+            state.failedPayloads[errId] = { msgObj: msgObj, plainText: plainText, photo: photo };
+            state.messages.push({
+              id: errId,
+              isError: true,
+              errorText: (err && err.message) ? err.message : String(err)
+            });
+            renderChat();
+            scrollToChatBottom();
+          });
+      }, 1500);
     });
 }
 

@@ -320,9 +320,22 @@ function buildRoutineAnchorCards(workMode, now, fastState) {
     }
   }
 
-  // 2.5 夕食アンカー（17:00以降、未完了・未スキップ時）
-  if (minsOfDay >= 17 * 60 && avail('anchor_dinner')) {
-    cards.push({ id: 'anchor_dinner', icon: 'utensils', title: '夕食', sub: '一息ついてしっかり食べる', mins: 45, isAnchor: true });
+  const rawAiCards = (fastState.aiDeck && Array.isArray(fastState.aiDeck.cards)) ? fastState.aiDeck.cards : [];
+  const hasAiAnchor = (id) => rawAiCards.some(c => c && c.id === id);
+
+  // 2.5 風呂上がりスキンケア（入浴完了後のみ最優先表示）
+  if (completed['anchor_bath'] && avail('anchor_skincare')) {
+    cards.push({ id: 'anchor_skincare', icon: 'sparkles', title: '風呂上がりのスキンケア', sub: '肌を整えてリラックス', mins: 15, isAnchor: true });
+  }
+
+  // 2.6 夕方以降の生活アンカー（AIが既に配置していればAIの順番を尊重、未配置時のみ補完）
+  if (minsOfDay >= 17 * 60) {
+    if (avail('anchor_dinner') && !hasAiAnchor('anchor_dinner')) {
+      cards.push({ id: 'anchor_dinner', icon: 'utensils', title: '夕食', sub: '一息ついてしっかり食べる', mins: 45, isAnchor: true });
+    }
+    if (avail('anchor_bath') && !hasAiAnchor('anchor_bath')) {
+      cards.push({ id: 'anchor_bath', icon: 'droplet', title: '入浴', sub: '湯船で一日の疲れを流す', mins: 30, isAnchor: true });
+    }
   }
 
   // 3. 日跨ぎ「就寝」カード（21:30以降〜翌04:00前まで保証）

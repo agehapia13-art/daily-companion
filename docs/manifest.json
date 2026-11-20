@@ -1,7 +1,7 @@
 {
-  "name": "Daily Companion",
-  "short_name": "Companion",
-  "description": "生活の輪郭を静かに支える伴走アプリ",
+  "name": "マイコックピット",
+  "short_name": "マイコックピット",
+  "description": "状況の鏡と行動の舵取りを支えるパーソナルコックピット",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

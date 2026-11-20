@@ -22,9 +22,9 @@ function validateHtmlScripts(html, label) {
 
 function buildManifestJson() {
   return JSON.stringify({
-    name: 'Daily Companion',
-    short_name: 'Companion',
-    description: '生活の輪郭を静かに支える伴走アプリ',
+    name: 'マイコックピット',
+    short_name: 'マイコックピット',
+    description: '状況の鏡と行動の舵取りを支えるパーソナルコックピット',
     start_url: './',
     scope: './',
     display: 'standalone',
@@ -56,10 +56,12 @@ function buildManifestJson() {
 
 function buildIconSvg() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="170" fill="#F4F0FC"/>
-  <g transform="translate(106.67 106.67) scale(12.4444)" fill="none" stroke="#6D3FE0" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/>
-    <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
+  <rect width="512" height="512" rx="170" fill="#13112B"/>
+  <g transform="translate(106.67 106.67) scale(12.4444)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9.5" stroke="#312E59" stroke-width="1.6"/>
+    <path d="M 5.3 18.7 A 9.5 9.5 0 1 1 18.7 18.7" stroke="#A78BFA" stroke-width="2.1"/>
+    <polygon points="15.8,8.2 13.4,13.4 8.2,15.8 10.6,10.6" stroke="#F8FAFC" stroke-width="1.8" fill="#8B5CF6" fill-opacity="0.35"/>
+    <circle cx="12" cy="12" r="1.3" fill="#F8FAFC"/>
   </g>
 </svg>\n`;
 }

@@ -264,10 +264,10 @@ function rotateDeck() {
   state.isRefreshingDeck = true;
   renderHome();
   var excludeIds = pool.map(function(c) { return c.id; });
-  callServerApi('apiRefreshDeck', state.authKey, excludeIds)
+  runMutationApi('apiRefreshDeck', state.authKey, excludeIds)
     .then(function(res) {
       state.isRefreshingDeck = false;
-      if (res && res.authorized) {
+      if (res && res.authorized && !res._stale) {
         state.fastState.aiDeck = res.aiDeck;
         state.composedDeck = res.deck;
         saveLocalSnapshot();
@@ -294,11 +294,10 @@ function dismissCardToday(cardId) {
   saveLocalSnapshot();
   renderHome();
   showToast('今日は非表示にしました');
-  callServerApi('apiDismissCardToday', state.authKey, cardId)
+  runMutationApi('apiDismissCardToday', state.authKey, cardId)
     .then(function(res) {
-      if (res && res.authorized && res.deck) {
-        state.fastState = res.state;
-        state.composedDeck = res.deck;
+      if (res && res.authorized && !res._stale && res.deck) {
+        applyServerStatePayload(res);
         saveLocalSnapshot();
       }
     })
@@ -377,7 +376,7 @@ function executeTriageCard(card) {
   saveLocalSnapshot();
   renderHome();
   showToast('今日の残り負荷を軽くしました');
-  callServerApi('apiCompleteAction', state.authKey, { session: card })
+  runMutationApi('apiCompleteAction', state.authKey, { session: card })
     .then(function(res) {
       if (res && res.authorized) {
         applyServerStatePayload(res);
@@ -396,7 +395,7 @@ function startAction(card) {
   saveLocalSnapshot();
   renderHome();
 
-  callServerApi('apiStartAction', state.authKey, started)
+  runMutationApi('apiStartAction', state.authKey, started)
     .then(function(res) {
       if (res && res.authorized) {
         if (res.aiDeck) state.fastState.aiDeck = res.aiDeck;
@@ -413,7 +412,7 @@ function pauseFocus() {
   state.fastState.activeSession = null;
   saveLocalSnapshot();
   renderHome();
-  callServerApi('apiStartAction', state.authKey, null).catch(function() {});
+  runMutationApi('apiStartAction', state.authKey, null).catch(function() {});
 }
 
 function finishFocus() {
@@ -459,7 +458,7 @@ function completeReflection(keepOpen) {
   renderAll();
   showToast(keepOpen ? 'ここまでの進行を記録しました' : (r.feeling || note || r.photoBase64 ? '記録して次へ進みました' : 'お疲れさまでした'));
 
-  callServerApi('apiCompleteAction', state.authKey, {
+  runMutationApi('apiCompleteAction', state.authKey, {
     session: r.card,
     mood: r.feeling,
     note: note,

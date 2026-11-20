@@ -1810,7 +1810,7 @@
       <div class="custom-btns">
         <button type="button" onclick="saveSettings()" class="btn-solid" style="width:100%;padding:11px;">保存して同期</button>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v22</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v23</div>
     </div>
   </div>
 
@@ -1893,6 +1893,8 @@
       failedPayloads: {},
       savedRange: null,
       lastFetchedAt: 0,
+      syncEpoch: 0,
+      inFlightMutations: 0,
       toastTimer: null
     };
 
@@ -1968,13 +1970,43 @@
       }
     }
 
+    function runMutationApi(funcName) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      state.syncEpoch = (state.syncEpoch || 0) + 1;
+      var myEpoch = state.syncEpoch;
+      state.inFlightMutations = (state.inFlightMutations || 0) + 1;
+      return callServerApi.apply(null, [funcName].concat(args))
+        .then(function(res) {
+          state.inFlightMutations = Math.max(0, (state.inFlightMutations || 1) - 1);
+          if (res && typeof res === 'object' && myEpoch !== state.syncEpoch) {
+            res._stale = true;
+          }
+          return res;
+        })
+        .catch(function(err) {
+          state.inFlightMutations = Math.max(0, (state.inFlightMutations || 1) - 1);
+          throw err;
+        });
+    }
+
     function applyServerStatePayload(res) {
+      if (!res || res._stale) return;
       if (res.state) {
-        var localSession = state.fastState && state.fastState.activeSession;
+        var prev = state.fastState || {};
+        var sameDay = Boolean(prev.dayKey && res.state.dayKey && prev.dayKey === res.state.dayKey);
+        var mergedCompleted = sameDay
+          ? Object.assign({}, prev.completedToday || {}, res.state.completedToday || {})
+          : (res.state.completedToday || {});
+        var mergedDismissed = sameDay
+          ? Object.assign({}, prev.dismissedToday || {}, res.state.dismissedToday || {})
+          : (res.state.dismissedToday || {});
+        var localSession = prev.activeSession;
         var lockActive = Boolean(state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil);
         var keepLocalSession = Boolean(localSession && !res.state.activeSession && lockActive);
         var keepClearedSession = Boolean(!localSession && res.state.activeSession && lockActive);
         state.fastState = res.state;
+        state.fastState.completedToday = mergedCompleted;
+        state.fastState.dismissedToday = mergedDismissed;
         if (keepLocalSession) state.fastState.activeSession = localSession;
         if (keepClearedSession) state.fastState.activeSession = null;
       }
@@ -1987,8 +2019,10 @@
 
     function syncFromServer(manual) {
       if (state.isSyncing) return;
+      if (!manual && state.inFlightMutations > 0) return;
       if (!manual && state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil) return;
       state.isSyncing = true;
+      var reqEpoch = state.syncEpoch || 0;
       var btn = document.getElementById('syncBtn');
       if (btn) btn.classList.add('spinning');
 
@@ -1996,6 +2030,9 @@
         .then(function(res) {
           state.isSyncing = false;
           if (btn) btn.classList.remove('spinning');
+          if (reqEpoch !== (state.syncEpoch || 0) || state.inFlightMutations > 0) {
+            return;
+          }
           if (!res || !res.authorized) {
             state.authorized = false;
             openSettingsModal((res && res.error) ? res.error : '認証に失敗しました。');
@@ -2576,10 +2613,10 @@
       state.isRefreshingDeck = true;
       renderHome();
       var excludeIds = pool.map(function(c) { return c.id; });
-      callServerApi('apiRefreshDeck', state.authKey, excludeIds)
+      runMutationApi('apiRefreshDeck', state.authKey, excludeIds)
         .then(function(res) {
           state.isRefreshingDeck = false;
-          if (res && res.authorized) {
+          if (res && res.authorized && !res._stale) {
             state.fastState.aiDeck = res.aiDeck;
             state.composedDeck = res.deck;
             saveLocalSnapshot();
@@ -2606,11 +2643,10 @@
       saveLocalSnapshot();
       renderHome();
       showToast('今日は非表示にしました');
-      callServerApi('apiDismissCardToday', state.authKey, cardId)
+      runMutationApi('apiDismissCardToday', state.authKey, cardId)
         .then(function(res) {
-          if (res && res.authorized && res.deck) {
-            state.fastState = res.state;
-            state.composedDeck = res.deck;
+          if (res && res.authorized && !res._stale && res.deck) {
+            applyServerStatePayload(res);
             saveLocalSnapshot();
           }
         })
@@ -2689,7 +2725,7 @@
       saveLocalSnapshot();
       renderHome();
       showToast('今日の残り負荷を軽くしました');
-      callServerApi('apiCompleteAction', state.authKey, { session: card })
+      runMutationApi('apiCompleteAction', state.authKey, { session: card })
         .then(function(res) {
           if (res && res.authorized) {
             applyServerStatePayload(res);
@@ -2708,7 +2744,7 @@
       saveLocalSnapshot();
       renderHome();
 
-      callServerApi('apiStartAction', state.authKey, started)
+      runMutationApi('apiStartAction', state.authKey, started)
         .then(function(res) {
           if (res && res.authorized) {
             if (res.aiDeck) state.fastState.aiDeck = res.aiDeck;
@@ -2725,7 +2761,7 @@
       state.fastState.activeSession = null;
       saveLocalSnapshot();
       renderHome();
-      callServerApi('apiStartAction', state.authKey, null).catch(function() {});
+      runMutationApi('apiStartAction', state.authKey, null).catch(function() {});
     }
 
     function finishFocus() {
@@ -2771,7 +2807,7 @@
       renderAll();
       showToast(keepOpen ? 'ここまでの進行を記録しました' : (r.feeling || note || r.photoBase64 ? '記録して次へ進みました' : 'お疲れさまでした'));
 
-      callServerApi('apiCompleteAction', state.authKey, {
+      runMutationApi('apiCompleteAction', state.authKey, {
         session: r.card,
         mood: r.feeling,
         note: note,
@@ -3155,7 +3191,7 @@
       renderChat();
       scrollToChatBottom();
 
-      callServerApi('apiSendChat', state.authKey, {
+      runMutationApi('apiSendChat', state.authKey, {
         text: plainText,
         imageBase64: photo ? photo.base64 : '',
         imageMimeType: photo ? photo.mimeType : ''
@@ -3176,7 +3212,7 @@
           renderAll();
           scrollToChatBottom();
           if (res.needsDeckRefresh) {
-            callServerApi('apiRefreshDeck', state.authKey, [])
+            runMutationApi('apiRefreshDeck', state.authKey, [])
               .then(function(deckRes) {
                 if (deckRes && deckRes.authorized && deckRes.deck) {
                   state.composedDeck = deckRes.deck;
@@ -3438,7 +3474,7 @@
       saveLocalSnapshot();
       renderLists();
       showToast(s.done ? '「' + s.item + '」を購入済にしました' : '「' + s.item + '」を未買に戻しました');
-      callServerApi('apiMutateListItem', state.authKey, {
+      runMutationApi('apiMutateListItem', state.authKey, {
         listType: 'shopping',
         action: 'toggle',
         rowIndex: s.rowIndex,

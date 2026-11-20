@@ -67,6 +67,8 @@ var state = {
   failedPayloads: {},
   savedRange: null,
   lastFetchedAt: 0,
+  syncEpoch: 0,
+  inFlightMutations: 0,
   toastTimer: null
 };
 
@@ -142,13 +144,43 @@ function loadLocalSnapshot() {
   }
 }
 
+function runMutationApi(funcName) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  state.syncEpoch = (state.syncEpoch || 0) + 1;
+  var myEpoch = state.syncEpoch;
+  state.inFlightMutations = (state.inFlightMutations || 0) + 1;
+  return callServerApi.apply(null, [funcName].concat(args))
+    .then(function(res) {
+      state.inFlightMutations = Math.max(0, (state.inFlightMutations || 1) - 1);
+      if (res && typeof res === 'object' && myEpoch !== state.syncEpoch) {
+        res._stale = true;
+      }
+      return res;
+    })
+    .catch(function(err) {
+      state.inFlightMutations = Math.max(0, (state.inFlightMutations || 1) - 1);
+      throw err;
+    });
+}
+
 function applyServerStatePayload(res) {
+  if (!res || res._stale) return;
   if (res.state) {
-    var localSession = state.fastState && state.fastState.activeSession;
+    var prev = state.fastState || {};
+    var sameDay = Boolean(prev.dayKey && res.state.dayKey && prev.dayKey === res.state.dayKey);
+    var mergedCompleted = sameDay
+      ? Object.assign({}, prev.completedToday || {}, res.state.completedToday || {})
+      : (res.state.completedToday || {});
+    var mergedDismissed = sameDay
+      ? Object.assign({}, prev.dismissedToday || {}, res.state.dismissedToday || {})
+      : (res.state.dismissedToday || {});
+    var localSession = prev.activeSession;
     var lockActive = Boolean(state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil);
     var keepLocalSession = Boolean(localSession && !res.state.activeSession && lockActive);
     var keepClearedSession = Boolean(!localSession && res.state.activeSession && lockActive);
     state.fastState = res.state;
+    state.fastState.completedToday = mergedCompleted;
+    state.fastState.dismissedToday = mergedDismissed;
     if (keepLocalSession) state.fastState.activeSession = localSession;
     if (keepClearedSession) state.fastState.activeSession = null;
   }
@@ -161,8 +193,10 @@ function applyServerStatePayload(res) {
 
 function syncFromServer(manual) {
   if (state.isSyncing) return;
+  if (!manual && state.inFlightMutations > 0) return;
   if (!manual && state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil) return;
   state.isSyncing = true;
+  var reqEpoch = state.syncEpoch || 0;
   var btn = document.getElementById('syncBtn');
   if (btn) btn.classList.add('spinning');
 
@@ -170,6 +204,9 @@ function syncFromServer(manual) {
     .then(function(res) {
       state.isSyncing = false;
       if (btn) btn.classList.remove('spinning');
+      if (reqEpoch !== (state.syncEpoch || 0) || state.inFlightMutations > 0) {
+        return;
+      }
       if (!res || !res.authorized) {
         state.authorized = false;
         openSettingsModal((res && res.error) ? res.error : '認証に失敗しました。');

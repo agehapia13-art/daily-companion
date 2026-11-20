@@ -245,7 +245,7 @@ function executeChatSend(msgObj, plainText, photo) {
   renderChat();
   scrollToChatBottom();
 
-  callServerApi('apiSendChat', state.authKey, {
+  runMutationApi('apiSendChat', state.authKey, {
     text: plainText,
     imageBase64: photo ? photo.base64 : '',
     imageMimeType: photo ? photo.mimeType : ''
@@ -266,7 +266,7 @@ function executeChatSend(msgObj, plainText, photo) {
       renderAll();
       scrollToChatBottom();
       if (res.needsDeckRefresh) {
-        callServerApi('apiRefreshDeck', state.authKey, [])
+        runMutationApi('apiRefreshDeck', state.authKey, [])
           .then(function(deckRes) {
             if (deckRes && deckRes.authorized && deckRes.deck) {
               state.composedDeck = deckRes.deck;
@@ -528,7 +528,7 @@ function toggleShoppingDone(itemId) {
   saveLocalSnapshot();
   renderLists();
   showToast(s.done ? '「' + s.item + '」を購入済にしました' : '「' + s.item + '」を未買に戻しました');
-  callServerApi('apiMutateListItem', state.authKey, {
+  runMutationApi('apiMutateListItem', state.authKey, {
     listType: 'shopping',
     action: 'toggle',
     rowIndex: s.rowIndex,

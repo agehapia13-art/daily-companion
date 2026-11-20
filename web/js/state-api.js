@@ -153,6 +153,7 @@ function applyServerStatePayload(res) {
 
 function syncFromServer(manual) {
   if (state.isSyncing) return;
+  if (!manual && state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil) return;
   state.isSyncing = true;
   var btn = document.getElementById('syncBtn');
   if (btn) btn.classList.add('spinning');

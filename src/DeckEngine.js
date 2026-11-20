@@ -263,6 +263,19 @@ function generateAiDeck(opts) {
 
   try {
     const res = fetchGeminiResultWithRetry(payload, endpoint);
+    if (res && res.usage && typeof appendLog === 'function') {
+      try {
+        const u = res.usage;
+        const tsStr = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+        appendLog(tsStr, 'system', `[DeckEngine:${reason}]`, '', '', {
+          litePromptTokens: u.promptTokenCount || 0,
+          liteCandidatesTokens: u.candidatesTokenCount || 0,
+          liteCachedTokens: u.cachedContentTokenCount || 0,
+          newTotalTokens: u.totalTokenCount || 0,
+          phaseTag: `deck_${reason}`
+        });
+      } catch (logErr) {}
+    }
     const parsed = JSON.parse(res.text);
     const sanitizeCard = (c, idx, isLow) => ({
       id: String(c.id || ((isLow ? 'low_' : 'ai_') + Date.now() + '_' + idx)),

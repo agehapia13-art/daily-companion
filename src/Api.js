@@ -928,11 +928,13 @@ function buildChatLogEntryObject_(entry) {
  */
 function buildChatMessagesFromLogicalTodayLogs_(nowOpt) {
   const logs = getLogicalTodayLogs(nowOpt);
-  return logs.map((entry, idx) => {
-    const item = buildChatLogEntryObject_(entry);
-    item.id = `LOG_${idx}_${item.time}`;
-    return item;
-  });
+  return logs
+    .filter(entry => entry.sender !== 'system')
+    .map((entry, idx) => {
+      const item = buildChatLogEntryObject_(entry);
+      item.id = `LOG_${idx}_${item.time}`;
+      return item;
+    });
 }
 
 /**

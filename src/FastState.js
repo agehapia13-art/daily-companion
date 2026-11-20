@@ -157,8 +157,9 @@ function buildListsSnapshot(memoryOpt, nowOpt) {
   const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const memory = memoryOpt || getMemory();
 
-  // 1. Tasks（未完了 ＋ 本日完了分）
-  const allTasks = getTasks();
+  // 1. Tasks（未完了 ＋ 本日完了分、期限順ソート）
+  const rawTasks = getTasks();
+  const allTasks = typeof sortTasksByUrgency_ === 'function' ? sortTasksByUrgency_(rawTasks, todayStr) : rawTasks;
   const tasks = allTasks
     .filter(t => t.status === '未完了' || (t.status === '完了' && t.completedDate === todayStr))
     .map(t => {

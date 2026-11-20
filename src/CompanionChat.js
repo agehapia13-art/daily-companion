@@ -310,6 +310,18 @@ function buildChatPayload_(userText, imageBlobs, todayLogsText, memory, precompu
     dynamicLines.push(`【本日のカレンダー予定】: ${pre.todayEvents.join(' / ')}`);
   }
 
+  try {
+    if (typeof loadFastState === 'function') {
+      const fs = loadFastState(opt.simulatedNowDate || new Date());
+      if (fs && fs.activeSession && fs.activeSession.title) {
+        const mins = fs.activeSession.startedAtMs
+          ? Math.max(0, Math.round((Date.now() - Number(fs.activeSession.startedAtMs)) / 60000))
+          : 0;
+        dynamicLines.push(`【現在進行中のタイマー行動】: ${fs.activeSession.title}（開始から${mins}分経過）`);
+      }
+    }
+  } catch (e) {}
+
   const allTasks = pre.allUncompletedTasks || [];
   if (allTasks.length > 0 && typeof formatUncompletedTasksForContext === 'function') {
     dynamicLines.push(`【未完了タスク一覧】:\n${formatUncompletedTasksForContext(allTasks, pre.todayDate)}`);

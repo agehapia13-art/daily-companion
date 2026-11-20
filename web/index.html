@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Daily Companion</title>
+  <meta name="theme-color" content="#FDFCFF" id="metaThemeColor" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+/* INLINE_STYLES */
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <div id="appShell" class="app-shell">
+      <div id="ambientLayer" class="ambient-layer">
+        <canvas id="ambientCanvas" class="ambient-canvas" aria-hidden="true"></canvas>
+        <svg class="frost-grain" aria-hidden="true">
+          <filter id="frostNoise">
+            <feTurbulence type="fractalNoise" baseFrequency="0.82" numOctaves="2" stitchTiles="stitch" />
+          </filter>
+          <rect width="100%" height="100%" filter="url(#frostNoise)" />
+        </svg>
+      </div>
+
+      <div class="screen-body">
+        <!-- TAB 1: Home -->
+        <div id="tab-home" class="screen-body">
+          <div class="scroll-area">
+            <div class="home-header">
+              <div class="meta-top-row">
+                <div id="homeMeta" class="meta-line">天気情報を同期中…</div>
+                <div class="meta-tools">
+                  <button id="syncBtn" onclick="syncFromServer(true)" class="icon-pill-btn" aria-label="再同期"></button>
+                  <button id="settingsBtn" onclick="openSettingsModal()" class="icon-pill-btn" aria-label="設定"></button>
+                </div>
+              </div>
+              <div id="homeBoundary" class="boundary-hero"></div>
+              <div id="homeSubLine" class="sub-context-line hidden"></div>
+            </div>
+
+            <div id="briefingSlot"></div>
+            <div id="homeCenterArea" style="flex:1;display:flex;flex-direction:column;"></div>
+          </div>
+        </div>
+
+        <!-- TAB 2: Chat -->
+        <div id="tab-talk" class="screen-body hidden">
+          <div id="talkScroll" class="scroll-area">
+            <div id="chatList" class="chat-list"></div>
+          </div>
+        </div>
+
+        <!-- TAB 3: Lists -->
+        <div id="tab-lists" class="screen-body hidden">
+          <div class="lists-header">
+            <div class="seg-bar">
+              <button id="seg-tasks" onclick="switchListSubTab('tasks')" class="seg-btn active">Tasks</button>
+              <button id="seg-shopping" onclick="switchListSubTab('shopping')" class="seg-btn">Shopping</button>
+              <button id="seg-stock" onclick="switchListSubTab('stock')" class="seg-btn">Stock</button>
+              <button id="seg-habits" onclick="switchListSubTab('habits')" class="seg-btn">Habits</button>
+            </div>
+            <div id="tasksCategoryRow" class="cat-row"></div>
+          </div>
+          <div class="scroll-area">
+            <div id="listsContent" class="list-cards"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bottom-fade-veil"></div>
+
+      <!-- Floating Shared Composer (Chat & Lists) -->
+      <div id="sharedComposer" class="shared-composer hidden">
+        <div id="chatPhotoPreview" class="attach-preview-bar hidden"></div>
+        <div class="composer-row">
+          <input id="chatPhotoInput" type="file" accept="image/*" class="hidden" onchange="handleChatPhotoSelect(event)" />
+          <button type="button" onclick="document.getElementById('chatPhotoInput').click()" class="attach-circle" aria-label="写真を添付"></button>
+          <div id="talkEditor" class="talk-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="メッセージ・リストをタップして挿入"></div>
+          <button type="button" onclick="submitTalkEditor()" class="send-circle" aria-label="送信"></button>
+        </div>
+      </div>
+
+      <!-- Floating Navigation Dock -->
+      <nav class="bottom-nav">
+        <button id="nav-home" onclick="switchTab('home')" class="nav-btn active"></button>
+        <button id="nav-talk" onclick="switchTab('talk')" class="nav-btn"></button>
+        <button id="nav-lists" onclick="switchTab('lists')" class="nav-btn"></button>
+      </nav>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal-backdrop hidden" onclick="if(event.target===this && state.authorized) closeSettingsModal()">
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <span>接続・表示設定</span>
+        <button id="closeSettingsBtn" onclick="closeSettingsModal()" class="icon-pill-btn" aria-label="閉じる"></button>
+      </div>
+      <div id="settingsError" class="modal-error hidden"></div>
+      <div id="apiUrlFieldGroup" class="field-group">
+        <label class="field-label" for="inputApiUrl">GAS ウェブアプリ URL</label>
+        <input id="inputApiUrl" type="url" class="custom-input" placeholder="https://script.google.com/macros/s/.../exec" />
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="inputAuthKey">オーナー認証キー</label>
+        <input id="inputAuthKey" type="password" class="custom-input" placeholder="key を入力" />
+      </div>
+      <button type="button" onclick="toggleTheme()" class="settings-row-btn">
+        <span>外観テーマ</span>
+        <span id="themeStateLabel">ライト</span>
+      </button>
+      <div class="custom-btns">
+        <button type="button" onclick="saveSettings()" class="btn-solid" style="width:100%;padding:11px;">保存して同期</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image Lightbox -->
+  <div id="imageLightbox" class="modal-backdrop hidden" onclick="closeImageLightbox()">
+    <img id="lightboxImg" src="" alt="拡大画像" class="lightbox-img" />
+  </div>
+
+  <div id="toastBar" class="toast hidden"></div>
+
+  <script>
+    var INITIAL_TAB = "home";
+    var SERVER_PRE_KEY = "";
+/* INLINE_SCRIPTS */
+  </script>
+</body>
+</html>

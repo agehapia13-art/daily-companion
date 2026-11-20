@@ -1,6 +1,7 @@
 /**
- * Setup.js - 初期化・メンテナンス・プロンプト検証モジュール
- * スプレッドシート全6タブの自動初期化、深夜タイマートリガー設定、および汎用ドライラン検証関数群
+ * Setup.js - 初期化・メンテナンス・プロンプト検証モジュール (v2)
+ * スプレッドシート全6タブの自動初期化（10列tasks / 6列input_stock / prompt_deck）、
+ * 03:00 / 05:00 / 17:00 トリガー設定、および汎用ドライラン検証関数群
  */
 
 // =============================================================================
@@ -31,18 +32,21 @@ function setupSpreadsheet() {
     formatHeaderRow_(logsSheet);
   }
 
-  // 2. tasks タブ（全9列対応: リマインド目安・関連URL追加）
-  const taskHeaders = ['タスクID', 'タスク名', '期限', 'ステータス(未完了/完了/破棄)', '登録日', '完了日', 'メモ', 'リマインド目安', '関連URL'];
+  // 2. tasks タブ（全10列対応: 見込み所要時間(分)追加）
+  const taskHeaders = ['タスクID', 'タスク名', '期限', 'ステータス(未完了/完了/破棄)', '登録日', '完了日', 'メモ', 'リマインド目安', '関連URL', '見込み所要時間(分)'];
   let tasksSheet = ss.getSheetByName(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
   if (!tasksSheet) tasksSheet = ss.insertSheet(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
   if (tasksSheet.getLastRow() === 0) {
     tasksSheet.appendRow(taskHeaders);
     formatHeaderRow_(tasksSheet);
-  } else if (tasksSheet.getLastColumn() < 9) {
+  } else if (tasksSheet.getLastColumn() < 10) {
     if (tasksSheet.getLastColumn() < 8) {
       tasksSheet.getRange(1, 8).setValue('リマインド目安');
     }
-    tasksSheet.getRange(1, 9).setValue('関連URL');
+    if (tasksSheet.getLastColumn() < 9) {
+      tasksSheet.getRange(1, 9).setValue('関連URL');
+    }
+    tasksSheet.getRange(1, 10).setValue('見込み所要時間(分)');
     formatHeaderRow_(tasksSheet);
   }
 
@@ -68,14 +72,17 @@ function setupSpreadsheet() {
     formatHeaderRow_(shoppingSheet);
   }
 
-  // 5. input_stock タブ
+  // 5. input_stock タブ（全6列対応: 見込み所要時間(分)追加）
   let inputStockSheet = ss.getSheetByName(SYSTEM_CONSTANTS.SHEET_NAMES.INPUT_STOCK);
   if (!inputStockSheet) inputStockSheet = ss.insertSheet(SYSTEM_CONSTANTS.SHEET_NAMES.INPUT_STOCK);
   if (inputStockSheet.getLastRow() === 0) {
-    inputStockSheet.appendRow(['種別', 'タイトル', 'メモ', 'ステータス(未/完)', '消化日']);
+    inputStockSheet.appendRow(['種別', 'タイトル', 'メモ', 'ステータス(未/完)', '消化日', '見込み所要時間(分)']);
     formatHeaderRow_(inputStockSheet);
-    inputStockSheet.appendRow(['音楽', 'Ludwig Göransson - Oppenheimer OST', '音響設計の分析', '未', '']);
-    inputStockSheet.appendRow(['映画', 'Dune: Part Two', 'サウンドデザイン視聴', '未', '']);
+    inputStockSheet.appendRow(['音楽', 'Ludwig Göransson - Oppenheimer OST', '音響設計の分析', '未', '', 45]);
+    inputStockSheet.appendRow(['映画', 'Dune: Part Two', 'サウンドデザイン視聴', '未', '', 120]);
+  } else if (inputStockSheet.getLastColumn() < 6) {
+    inputStockSheet.getRange(1, 6).setValue('見込み所要時間(分)');
+    formatHeaderRow_(inputStockSheet);
   }
 
   // 6. memory タブ
@@ -84,27 +91,23 @@ function setupSpreadsheet() {
   if (memorySheet.getLastRow() === 0) {
     memorySheet.appendRow(['キー', '値']);
     formatHeaderRow_(memorySheet);
-    memorySheet.appendRow(['profile', 'サウンドディレクター / ゲーム・映像音響制作。自宅(横浜市磯子区)と職場(渋谷)。DTM・ギター演奏が日課。']);
+    memorySheet.appendRow(['profile', '']);
     memorySheet.appendRow(['backend_model', '3.5-lite']);
-    memorySheet.appendRow(['thinking_level', 'minimal']);
-    memorySheet.appendRow(['weather_info', '自宅(磯子): 晴れ 最高22℃ 降水10% ｜ 職場(渋谷): 晴れ 最高23℃ 降水10%']);
+    memorySheet.appendRow(['thinking_level', 'low']);
+    memorySheet.appendRow(['weather_info', '']);
     memorySheet.appendRow(['pressure_alert', 'FALSE']);
-    memorySheet.appendRow(['cycle_stamps', '美容院: 2026-09-20, 機材メンテ: 2026-09-25']);
-    memorySheet.appendRow(['weekly_summary', '睡眠時間は安定。中盤に肩こり・集中力低下の兆候あり。']);
+    memorySheet.appendRow(['cycle_stamps', '']);
+    memorySheet.appendRow(['weekly_summary', '']);
     memorySheet.appendRow(['briefing_delivered_date', '']);
     memorySheet.appendRow(['monthly_report_ready', 'FALSE']);
-    memorySheet.appendRow(['prompt_lite', '']);
     memorySheet.appendRow(['prompt_core', '']);
-    memorySheet.appendRow(['prompt_phase_a', '']);
-    memorySheet.appendRow(['prompt_phase_b', '']);
-    memorySheet.appendRow(['prompt_phase_c', '']);
-    memorySheet.appendRow(['prompt_phase_d', '']);
     memorySheet.appendRow(['prompt_schedule', '']);
     memorySheet.appendRow(['prompt_db', '']);
-    memorySheet.appendRow(['prompt_relief', '']);
+    memorySheet.appendRow(['prompt_deck', '']);
+    memorySheet.appendRow(['V2_FAST_STATE', '']);
     memorySheet.appendRow(['custom_system_prompt', '']);
-    memorySheet.appendRow(['dictionary', '・ぽこあポケモン（ぽこあ）: Nintendo Switch 2用ゲーム（2026年3月5日発売予定）。スローライフ・サンドボックス作品。※スマホの「ポケポケ」とは全くの別物。\n・ぱずぎり: パズルアクションゲーム。\n・残響フラクタル: ユーザーが執筆・制作しているオリジナルの創作作品。']);
-    memorySheet.appendRow(['ideal_self', '健やかな心身と社会性のある繋がりを保ちつつ、罪悪感のない休息とメリハリのある活動を両立し、専門性（サウンドディレクション等）・創作・大切な人との繋がりを自然に前進させる生活']);
+    memorySheet.appendRow(['dictionary', '']);
+    memorySheet.appendRow(['ideal_self', '']);
   }
 
   const defaultSheet = ss.getSheetByName('シート1') || ss.getSheetByName('Sheet1');
@@ -118,12 +121,17 @@ function setupSpreadsheet() {
 }
 
 /**
- * 深夜統合バッチ（毎日午前3:00〜4:00）のタイマートリガーを自動作成
+ * v2 定期トリガー（03:00 深夜統合 / 05:00 朝天気 / 17:00 夜デッキ再編成）を自動作成
  */
 function setupTriggers() {
+  const targetHandlers = {
+    dailyMidnightBatch: true,
+    morningWeatherBatch: true,
+    eveningDeckBatch: true
+  };
   const triggers = ScriptApp.getProjectTriggers();
   for (let i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === 'dailyMidnightBatch') {
+    if (targetHandlers[triggers[i].getHandlerFunction()]) {
       ScriptApp.deleteTrigger(triggers[i]);
     }
   }
@@ -134,30 +142,32 @@ function setupTriggers() {
     .everyDays(1)
     .create();
 
-  Logger.log('深夜03:00統合バッチトリガー（dailyMidnightBatch）を正常に登録しました！');
+  ScriptApp.newTrigger('morningWeatherBatch')
+    .timeBased()
+    .atHour(5)
+    .everyDays(1)
+    .create();
+
+  ScriptApp.newTrigger('eveningDeckBatch')
+    .timeBased()
+    .atHour(17)
+    .everyDays(1)
+    .create();
+
+  Logger.log('v2 トリガー（03:00 dailyMidnightBatch / 05:00 morningWeatherBatch / 17:00 eveningDeckBatch）を登録しました！');
 }
 
 /**
- * 手動実行用: LINEリッチメニュー（画面下部固定メニュー）の自動登録・有効化
- */
-function setupLineRichMenuFromSetup() {
-  setupLineRichMenu();
-}
-
-/**
- * 手動実行用: コード上の2モデル体制の全モジュールプロンプト群をスプレッドシートの memory シートに一括反映
+ * 手動テスト用: コード上の全モジュールプロンプト群（prompt_deck含む）をスプレッドシート memory シートに一括反映
  */
 function syncDefaultPromptsToSpreadsheet() {
-  setMemoryValue('prompt_lite', getDefaultPromptLite());
   setMemoryValue('prompt_core', getDefaultPromptCore());
-  setMemoryValue('prompt_phase_a', getDefaultPromptPhaseA());
-  setMemoryValue('prompt_phase_b', getDefaultPromptPhaseB());
-  setMemoryValue('prompt_phase_c', getDefaultPromptPhaseC());
-  setMemoryValue('prompt_phase_d', getDefaultPromptPhaseD());
   setMemoryValue('prompt_schedule', getDefaultPromptSchedule());
   setMemoryValue('prompt_db', getDefaultPromptDb());
-  setMemoryValue('prompt_relief', getDefaultPromptRelief());
-  Logger.log('✅ スプレッドシートの memory シートに全プロンプトモジュールを保存しました！');
+  if (typeof getDefaultPromptDeck === 'function') {
+    setMemoryValue('prompt_deck', getDefaultPromptDeck());
+  }
+  Logger.log('✅ スプレッドシートの memory シートに全4モジュールプロンプト（prompt_core / prompt_schedule / prompt_db / prompt_deck）を保存しました！');
 }
 
 /**
@@ -165,984 +175,6 @@ function syncDefaultPromptsToSpreadsheet() {
  */
 function syncSystemPromptToSpreadsheet() {
   syncDefaultPromptsToSpreadsheet();
-}
-
-// =============================================================================
-// 2. プロンプト比較・連続対話検証テスト（完全ドライラン・2モデルAB比較対応）
-// =============================================================================
-
-/**
- * ★スポット検証用: 任意の単発または連続対話シナリオをテスト実行
- * プロンプト改善時はこの関数内の scenario を書き換えて実行してください。
- * - turns が1件なら単発テスト、複数件なら前のターンのAI回答を自動的に次ターンのログへ引き継ぐ連鎖テストになります。
- * - 新システム（2モデル体制: Lite + Flash）と旧システム（単一Flash 6,400文字）の応答・トークン・アクションを並列比較します。
- */
-function testCustomScenario() {
-  const customStylePrompt = '【口調・話し方】\n丁寧な敬体（です・ます調）で、落ち着いた頼れる伴走者として自然に応答する。\n情緒的な慰めや定型の労い・前置きは最小限にとどめ、さっぱりとした等身大の距離感で、要点へ端的に入る。';
-
-  // 0. 決定論的ユニット確認（境界イベント・Phase D分離・3.5-lite＆low解決・動的カレンダー・JSON/Web検索分離）
-  const calMarch = getCalendarAndHolidayContext(new Date(2026, 10, 13, 10, 22, 0), '', '2027-03-01', '2027-03-31');
-  const calClamped = getCalendarAndHolidayContext(new Date(2026, 10, 13, 10, 22, 0), '', '2026-11-13', '2027-11-13');
-  const upcomingHolidays = getUpcomingHolidaysSummary_(new Date(2026, 10, 13, 10, 22, 0));
-  const calMicroWithTask = getMicroDbSchema_('calendar', '', { hasRelatedTasks: true });
-  const calMicroNoTask = getMicroDbSchema_('calendar', '', { hasRelatedTasks: false });
-  const dummyPayload = buildNewSystemFlashPayload(
-    'テスト雑談',
-    [],
-    '',
-    { backend_model: '3.5-lite', thinking_level: 'low' },
-    { tags: ['雑談'], action_intent: 'general_dialogue', focused_task_ids: [], matched_cycle_stamps: [] },
-    'PHASE_D',
-    { now: new Date(2026, 10, 13, 10, 0, 0), nowStr: '2026-11-13(Fri) 10:00', todayDate: new Date(2026, 10, 13), elapsedStr: '初回', boundaryInfo: { summaryText: 'なし' }, todayEvents: [], habitTopics: [] },
-    []
-  );
-  const dummySearchPayload = buildNewSystemFlashPayload(
-    'テスト事実質問',
-    [],
-    '',
-    { backend_model: '3.5-lite', thinking_level: 'low' },
-    { tags: ['事実質問'], action_intent: 'general_dialogue', focused_task_ids: [], matched_cycle_stamps: [] },
-    'PHASE_D',
-    {
-      now: new Date(2026, 10, 13, 10, 0, 0),
-      nowStr: '2026-11-13(Fri) 10:00',
-      todayDate: new Date(2026, 10, 13),
-      elapsedStr: '初回',
-      boundaryInfo: { summaryText: 'なし' },
-      todayEvents: [],
-      habitTopics: [],
-      webSearchContext: {
-        summaryText: 'テスト施設は10:00〜18:00開館です。',
-        queries: ['テスト施設 開館時間'],
-        chunksCount: 1,
-        sources: [{ title: '公式サイト', uri: 'https://example.com' }],
-        failed: false
-      }
-    },
-    []
-  );
-  const dummyWsPayload = buildGeminiWebSearchPayload_(
-    '旧前田家本邸洋館の11月の開館日・休館日・開館時間',
-    { nowStr: '2026-11-13(Fri) 20:45' },
-    '激しい腹痛アリ。あと買物メモに柔軟剤追加と開館日調べて'
-  );
-  const dummyWsFallbackPayload = buildGeminiWebSearchPayload_(
-    '',
-    { nowStr: '2026-11-13(Fri) 20:45' },
-    '明日の東京の天気は？'
-  );
-  const unitCandidateTasks = [
-    { id: 'T_done', title: '[趣味・文化] モンスト周回', dueDate: '2026-11-14', remindContext: '' },
-    { id: 'T_later', title: '[趣味・文化] いつかやる', dueDate: '', remindContext: '' },
-    { id: 'T_prio', title: '⭐[優先] [家事・環境] パスワード移行', dueDate: '', remindContext: '最優先' }
-  ];
-  const unitHabitsMemory = {
-    backend_model: '3.5-lite',
-    thinking_level: 'low',
-    lifestyle_habits: '[運動・身体ケア] YouTubeストレッチ / Switchフィットネス\n[余白・趣味] 水彩画 / 小説',
-    cycle_stamps: 'ゲーム: 2026-11-10'
-  };
-  const dummyPhaseCFallbackPayload = buildNewSystemFlashPayload(
-    '「モンスト周回」 完了',
-    [],
-    '',
-    unitHabitsMemory,
-    { tags: ['完了報告'], action_intent: 'proactive_proposal', db_target_type: 'task_complete', focused_task_ids: ['T_done'], matched_cycle_stamps: [] },
-    'PHASE_C',
-    { now: new Date(2026, 10, 14, 11, 46, 0), nowStr: '2026-11-14(Sat) 11:46', todayDate: new Date(2026, 10, 14), elapsedStr: '8分', boundaryInfo: { summaryText: '固定予定なし' }, todayEvents: [], habitTopics: [] },
-    unitCandidateTasks
-  );
-  const dummyPhaseCShoppingPayload = buildNewSystemFlashPayload(
-    '牛乳を買い物メモに追加して',
-    [],
-    '',
-    unitHabitsMemory,
-    { tags: ['DB依頼'], action_intent: 'proactive_proposal', db_target_type: 'shopping', need_db_action: true, focused_task_ids: ['T_prio'], matched_cycle_stamps: [] },
-    'PHASE_C',
-    { now: new Date(2026, 10, 14, 15, 10, 0), nowStr: '2026-11-14(Sat) 15:10', todayDate: new Date(2026, 10, 14), elapsedStr: '10分', boundaryInfo: { summaryText: '固定予定なし' }, todayEvents: [], habitTopics: [] },
-    unitCandidateTasks
-  );
-  const dummyPhaseCDoneCyclePayload = buildNewSystemFlashPayload(
-    '「モンスト周回」 完了',
-    [],
-    '',
-    unitHabitsMemory,
-    { tags: ['完了報告', 'DB依頼'], action_intent: 'proactive_proposal', db_target_type: 'other', need_db_action: true, focused_task_ids: ['T_done', 'T_prio'], matched_cycle_stamps: ['ゲーム'] },
-    'PHASE_C',
-    { now: new Date(2026, 10, 14, 11, 53, 0), nowStr: '2026-11-14(Sat) 11:53', todayDate: new Date(2026, 10, 14), elapsedStr: '7分', boundaryInfo: { summaryText: '固定予定なし' }, todayEvents: [], habitTopics: [] },
-    unitCandidateTasks
-  );
-  const dummyPhaseCStatedGoalPayload = buildNewSystemFlashPayload(
-    'この後システム改善やるね',
-    [],
-    '',
-    unitHabitsMemory,
-    { tags: ['活動目標の表明'], action_intent: 'support_stated_goal', db_target_type: 'none', focused_task_ids: [], matched_cycle_stamps: [] },
-    'PHASE_C',
-    { now: new Date(2026, 10, 14, 11, 46, 0), nowStr: '2026-11-14(Sat) 11:46', todayDate: new Date(2026, 10, 14), elapsedStr: '8分', boundaryInfo: { summaryText: '固定予定なし' }, todayEvents: [], habitTopics: [] },
-    unitCandidateTasks
-  );
-  const dummyPhaseDWorkPayload = buildNewSystemFlashPayload(
-    '「モンスト周回」 完了',
-    [],
-    '',
-    unitHabitsMemory,
-    { tags: ['完了報告', 'DB依頼'], action_intent: 'db_operation', db_target_type: 'task_complete', focused_task_ids: ['T_done'], matched_cycle_stamps: [] },
-    'PHASE_D',
-    { now: new Date(2026, 10, 13, 10, 7, 0), nowStr: '2026-11-13(Fri) 10:07', todayDate: new Date(2026, 10, 13), elapsedStr: '20分', boundaryInfo: { summaryText: 'リモートワーク中' }, todayEvents: [], habitTopics: [] },
-    unitCandidateTasks
-  );
-  const relaxedJsonParsed = parseGeminiActionJson_(
-    '{\n  "reply_text": \'読了お疲れ様！次は "ストレッチ" か本でも。\',\n  "task_actions": [{ "action": "complete", "task_id": "T_done" }],\n  "memory_updates": { "cycle_stamps_updates": "読書（本・漫画）: 2026-11-14" }\n}',
-    {}
-  );
-
-  const unitChecks = [
-    ['isUmbrellaEventTitle("自由時間")', isUmbrellaEventTitle('自由時間') === true],
-    ['isUmbrellaEventTitle("休息")', isUmbrellaEventTitle('休息') === true],
-    ['isUmbrellaEventTitle("休憩")', isUmbrellaEventTitle('休憩') === true],
-    ['isUmbrellaEventTitle("リモートワーク")', isUmbrellaEventTitle('リモートワーク') === false],
-    [
-      'determineActionPhase(pureDbOp -> PHASE_D)',
-      determineActionPhase({
-        action_intent: 'db_operation',
-        tags: ['DB依頼', '活動目標の表明'],
-        need_schedule_plan: false,
-        focused_task_ids: []
-      }, { isUmbrellaEvent: false }) === 'PHASE_D'
-    ],
-    [
-      'determineActionPhase(need_schedule_plan -> PHASE_C)',
-      determineActionPhase({
-        action_intent: 'db_operation',
-        tags: ['DB依頼'],
-        need_schedule_plan: true,
-        focused_task_ids: []
-      }, { isUmbrellaEvent: false }) === 'PHASE_C'
-    ],
-    [
-      'determineActionPhase(sendoff + fatigue -> PHASE_B)',
-      determineActionPhase({
-        action_intent: 'immediate_sendoff',
-        tags: ['単発行動の開始', '体調・疲労の訴え'],
-        need_schedule_plan: false,
-        focused_task_ids: []
-      }, { isUmbrellaEvent: false }) === 'PHASE_B'
-    ],
-    [
-      'determineActionPhase(friction -> PHASE_C)',
-      determineActionPhase({
-        action_intent: 'proactive_proposal',
-        tags: ['体調・疲労の訴え'],
-        need_schedule_plan: false,
-        focused_task_ids: []
-      }, { isUmbrellaEvent: false }) === 'PHASE_C'
-    ],
-    [
-      'determineActionPhase(空き時間の完了トランジション -> PHASE_C)',
-      determineActionPhase({
-        action_intent: 'general_dialogue',
-        tags: ['完了報告'],
-        matched_habit_topic: '余白・趣味',
-        need_schedule_plan: false,
-        focused_task_ids: []
-      }, { isDuringEvent: false, isUmbrellaEvent: false, minutesUntilNext: 180 }) === 'PHASE_C'
-    ],
-    [
-      'determineActionPhase(深夜/就寝移行の完了 -> PHASE_D)',
-      determineActionPhase({
-        action_intent: 'general_dialogue',
-        tags: ['完了報告', '雑談'],
-        matched_habit_topic: '睡眠',
-        need_schedule_plan: false,
-        focused_task_ids: []
-      }, { isDuringEvent: false, isUmbrellaEvent: false, minutesUntilNext: 0 }) === 'PHASE_D'
-    ],
-    [
-      'determineActionPhase(本業・固定予定中の完了 -> PHASE_D)',
-      determineActionPhase({
-        action_intent: 'general_dialogue',
-        tags: ['完了報告'],
-        matched_habit_topic: '家事',
-        need_schedule_plan: false,
-        focused_task_ids: []
-      }, { isDuringEvent: true, isUmbrellaEvent: false, minutesUntilNext: 0 }) === 'PHASE_D'
-    ],
-    [
-      'determineActionPhase(空き時間の未定状態・行動提案 -> PHASE_C)',
-      determineActionPhase({
-        action_intent: 'proactive_proposal',
-        tags: ['雑談'],
-        matched_habit_topic: 'none',
-        need_schedule_plan: false,
-        focused_task_ids: []
-      }, { isDuringEvent: false, isUmbrellaEvent: false, minutesUntilNext: 300 }) === 'PHASE_C'
-    ],
-    [
-      'determineActionPhase(空き時間のトラブル対応等 -> PHASE_D)',
-      determineActionPhase({
-        action_intent: 'general_dialogue',
-        tags: ['雑談'],
-        matched_habit_topic: 'none',
-        need_schedule_plan: false,
-        focused_task_ids: []
-      }, { isDuringEvent: false, isUmbrellaEvent: false, minutesUntilNext: 300 }) === 'PHASE_D'
-    ],
-    [
-      'determineActionPhase(空き時間のDB依頼(未継続・次未定) -> PHASE_C)',
-      determineActionPhase({
-        action_intent: 'db_operation',
-        tags: ['DB依頼'],
-        previous_action_status: '該当なし',
-        need_schedule_plan: false,
-        focused_task_ids: []
-      }, { isDuringEvent: false, isUmbrellaEvent: false, minutesUntilNext: 180 }) === 'PHASE_C'
-    ],
-    [
-      'determineActionPhase(継続中アクション中のDB依頼・雑談 -> PHASE_A)',
-      determineActionPhase({
-        action_intent: 'db_operation',
-        tags: ['DB依頼'],
-        previous_action_status: '継続中',
-        need_schedule_plan: false,
-        focused_task_ids: []
-      }, { isDuringEvent: false, isUmbrellaEvent: false, minutesUntilNext: 180 }) === 'PHASE_A' &&
-      determineActionPhase({
-        action_intent: 'general_dialogue',
-        tags: ['雑談'],
-        previous_action_status: '継続中',
-        need_schedule_plan: false,
-        focused_task_ids: []
-      }, { isDuringEvent: true, isUmbrellaEvent: true, minutesUntilNext: 120 }) === 'PHASE_A'
-    ],
-    [
-      'determineActionPhase(包括枠内の完了 -> PHASE_C)',
-      determineActionPhase({
-        action_intent: 'general_dialogue',
-        tags: ['完了報告'],
-        matched_habit_topic: '余白・趣味',
-        need_schedule_plan: false,
-        focused_task_ids: []
-      }, { isDuringEvent: true, isUmbrellaEvent: true, minutesUntilNext: 60 }) === 'PHASE_C'
-    ],
-    [
-      'resolveBackendModel_("3.5-lite")',
-      resolveBackendModel_({ backend_model: '3.5-lite' }).model === 'gemini-3.5-flash-lite'
-    ],
-    [
-      'resolveBackendModel_("hydrogen")',
-      resolveBackendModel_({ backend_model: 'hydrogen' }).model === 'gemini-4-hydrogen'
-    ],
-    [
-      'resolveThinkingConfig_("low")',
-      resolveThinkingConfig_('gemini-3.5-flash-lite', { thinking_level: 'low' }).thinkingLevel === 'low'
-    ],
-    [
-      'resolveThinkingConfig_("gemini-3.8-flash", minimal->low安全フォールバック)',
-      resolveThinkingConfig_('gemini-3.8-flash', { thinking_level: 'minimal' }).thinkingLevel === 'low'
-    ],
-    [
-      'resolveThinkingConfig_("gemini-4-hydrogen", minimal->low安全フォールバック)',
-      resolveThinkingConfig_('gemini-4-hydrogen', { thinking_level: 'minimal' }).thinkingLevel === 'low'
-    ],
-    [
-      'resolveThinkingConfig_("gemini-4-hydrogen", "xhigh")',
-      resolveThinkingConfig_('gemini-4-hydrogen', { thinking_level: 'xhigh' }).thinkingLevel === 'xhigh'
-    ],
-    [
-      'getCalendarAndHolidayContext(2027-03-01..2027-03-31)',
-      calMarch.indexOf('2027-03-01') !== -1 && calMarch.indexOf('2027-03-31') !== -1
-    ],
-    [
-      'getCalendarAndHolidayContext(62日安全クランプ)',
-      calClamped.indexOf('2027-01-14') !== -1 && calClamped.indexOf('2027-11-13') === -1
-    ],
-    [
-      'getUpcomingHolidaysSummary_(2026-11-23勤労感謝の日)',
-      upcomingHolidays.indexOf('2026-11-23') !== -1
-    ],
-    [
-      'getMicroDbSchema_("calendar", hasRelatedTasks:true/false)',
-      calMicroWithTask.indexOf('task_actions') !== -1 && calMicroNoTask.indexOf('task_actions') === -1
-    ],
-    [
-      'buildNewSystemFlashPayload(Web検索直交分離＆JSON専念・temperature非送信)',
-      !dummyPayload.tools &&
-      dummyPayload.generationConfig.responseMimeType === 'application/json' &&
-      dummyPayload.generationConfig.temperature === undefined &&
-      !dummySearchPayload.tools &&
-      dummySearchPayload.generationConfig.responseMimeType === 'application/json' &&
-      dummySearchPayload.generationConfig.temperature === undefined
-    ],
-    [
-      'buildNewSystemFlashPayload(needSearch直交注入と非注入)',
-      dummySearchPayload.systemInstruction.parts[0].text.indexOf('【外部情報の確認方針】') !== -1 &&
-      dummySearchPayload.contents[0].parts[0].text.indexOf('【外部Web検索結果（一次情報）') !== -1 &&
-      dummyPayload.systemInstruction.parts[0].text.indexOf('【外部情報の確認方針】') === -1 &&
-      dummyPayload.contents[0].parts[0].text.indexOf('【外部Web検索結果') === -1
-    ],
-    [
-      'buildGeminiWebSearchPayload_(search_query純粋化＆私的情報遮断)',
-      dummyWsPayload.contents[0].parts[0].text.indexOf('旧前田家本邸洋館の11月の開館日・休館日・開館時間') !== -1 &&
-      dummyWsPayload.contents[0].parts[0].text.indexOf('腹痛') === -1 &&
-      dummyWsPayload.contents[0].parts[0].text.indexOf('柔軟剤') === -1 &&
-      Boolean(dummyWsPayload.tools && dummyWsPayload.tools[0] && dummyWsPayload.tools[0].googleSearch) &&
-      dummyWsPayload.generationConfig.responseMimeType === undefined &&
-      dummyWsPayload.generationConfig.thinkingConfig.thinkingLevel === 'medium' &&
-      dummyWsFallbackPayload.contents[0].parts[0].text.indexOf('明日の東京の天気は？') !== -1
-    ],
-    [
-      'buildNewSystemFlashPayload(PHASE_C完了トランジション次手候補フォールバック & lifestyle_habits非タスク供給 & 目標/D抑止)',
-      dummyPhaseCFallbackPayload.contents[0].parts[0].text.indexOf('T_prio') !== -1 &&
-      dummyPhaseCFallbackPayload.contents[0].parts[0].text.indexOf('T_done') !== -1 &&
-      dummyPhaseCFallbackPayload.contents[0].parts[0].text.indexOf('【生活習慣・活動定義 (lifestyle_habits)】') !== -1 &&
-      dummyPhaseCStatedGoalPayload.contents[0].parts[0].text.indexOf('【生活習慣・活動定義 (lifestyle_habits)】') === -1 &&
-      dummyPhaseDWorkPayload.contents[0].parts[0].text.indexOf('T_prio') === -1 &&
-      dummyPhaseDWorkPayload.contents[0].parts[0].text.indexOf('【生活習慣・活動定義 (lifestyle_habits)】') === -1
-    ],
-    [
-      'getDefaultPromptPhaseC(非タスク行動必須ミックス触媒指針 & 曖昧待機禁止)',
-      getDefaultPromptPhaseC().indexOf('非タスク行動を必ず1〜2件含め') !== -1 &&
-      getDefaultPromptPhaseC().indexOf('希望がある場合は') === -1
-    ],
-    [
-      'buildNewSystemFlashPayload(PHASE_C×DB併用出力リマインド & 周期スタンプ併用microschema正規化)',
-      dummyPhaseCShoppingPayload.systemInstruction.parts[0].text.indexOf('【出力構成のリマインド（フェーズC × 用件併用時）】') !== -1 &&
-      dummyPhaseCStatedGoalPayload.systemInstruction.parts[0].text.indexOf('【出力構成のリマインド（フェーズC × 用件併用時）】') === -1 &&
-      dummyPhaseDWorkPayload.systemInstruction.parts[0].text.indexOf('【出力構成のリマインド（フェーズC × 用件併用時）】') === -1 &&
-      dummyPhaseCDoneCyclePayload.systemInstruction.parts[0].text.indexOf('【データベース操作仕様: タスク完了】') !== -1 &&
-      dummyPhaseCDoneCyclePayload.systemInstruction.parts[0].text.indexOf('cycle_stamps_updates') !== -1 &&
-      dummyPhaseCDoneCyclePayload.systemInstruction.parts[0].text.indexOf('calendar_actions') === -1
-    ],
-    [
-      'parseGeminiActionJson_(シングルクォート準JSON救済 & アクション保持)',
-      relaxedJsonParsed.reply_text === '読了お疲れ様！次は "ストレッチ" か本でも。' &&
-      Array.isArray(relaxedJsonParsed.task_actions) &&
-      relaxedJsonParsed.task_actions.length === 1 &&
-      relaxedJsonParsed.memory_updates &&
-      relaxedJsonParsed.memory_updates.cycle_stamps_updates === '読書（本・漫画）: 2026-11-14'
-    ]
-  ];
-  Logger.log('============================================================');
-  Logger.log('🧪 【検証0: ロジック単体チェック (完全ドライラン)】');
-  unitChecks.forEach(([label, ok]) => Logger.log(`${ok ? '✅' : '❌'} ${label}`));
-
-  const mockTasksTurn1 = [
-    {
-      id: 'T_20261103_200621_731',
-      title: '[家事・環境] 私物の整理',
-      dueDate: '2026-11-14',
-      status: '未完了',
-      memo: '',
-      remindContext: '週末のまとまった時間',
-      docUrl: ''
-    },
-    {
-      id: 'T_20261113_190000_002',
-      title: '[実務・手続] Amazonアカウント：早希ちゃんに相談する（〜21:00まで）',
-      dueDate: '2026-11-14',
-      status: '未完了',
-      memo: '',
-      remindContext: '〜21:00まで',
-      docUrl: ''
-    },
-    {
-      id: 'T_20261107_100000_003',
-      title: '[趣味・文化] 読書：天使1/2方程式を読む',
-      dueDate: '',
-      status: '未完了',
-      memo: '',
-      remindContext: '余白時間・リラックス',
-      docUrl: ''
-    },
-    {
-      id: 'T_20261113_090000_004',
-      title: '[趣味・文化] モンスト：超究極・兵のミザリー周回',
-      dueDate: '2026-11-14',
-      status: '未完了',
-      memo: '毎日ルーティン',
-      remindContext: '日課・隙間時間',
-      docUrl: ''
-    },
-    {
-      id: 'T_20261110_180000_005',
-      title: '⭐[優先] [家事・環境] Chrome・iCloud・Notionのパスワードを1Passwordへ順次移行',
-      dueDate: '',
-      status: '未完了',
-      memo: '最優先で少しずつ進める',
-      remindContext: 'PC作業できる時間',
-      docUrl: ''
-    }
-  ];
-
-  // Turn2ではTurn1で完了したミザリー周回を除いた残存タスク状態を模擬
-  const mockTasksAfterMisery = mockTasksTurn1.filter(t => t.id !== 'T_20261113_090000_004');
-
-  const holidayInitialLogs = [
-    '11:38 User: おはよう',
-    'AI: おはようございます。今日は特に時間指定の予定はない休日ですね。自分のペースで過ごしつつ、気になるところから進めていきましょう。'
-  ].join('\n');
-
-  // シナリオ1: 固定予定のない休日（終日家族予定のみ）における完了トランジション（PHASE_C）＆就寝前安全境界
-  runPromptScenario({
-    name: '休日空き時間完了トランジション検証 (11/14 再現)',
-    mockMemory: {
-      backend_model: '3.5-lite',
-      thinking_level: 'low',
-      custom_system_prompt: customStylePrompt
-    },
-    initialLogs: holidayInitialLogs,
-    turns: [
-      {
-        time: '2026-11-14 11:46:55',
-        user: '「モンスト：超究極・兵のミザリー周回」 完了',
-        mockTasks: mockTasksTurn1
-      },
-      {
-        time: '2026-11-14 11:53:01',
-        user: '「読書：天使1/2方程式を読む」 完了',
-        mockTasks: mockTasksAfterMisery
-      },
-      {
-        time: '2026-11-14 23:45:00',
-        user: 'もう歯磨きも終わったし、そろそろおやすみ',
-        mockTasks: mockTasksAfterMisery.filter(t => t.id !== 'T_20261107_100000_003')
-      }
-    ]
-  });
-
-  // シナリオ2: 本業勤務中の完了報告に対する境界保護検証（PHASE_D維持・提案非介入確認）
-  runPromptScenario({
-    name: '境界保護検証 (平日リモートワーク中の完了報告 -> PHASE_D)',
-    mockMemory: {
-      backend_model: '3.5-lite',
-      thinking_level: 'low',
-      custom_system_prompt: customStylePrompt
-    },
-    mockTasks: [
-      {
-        id: 'T_20261113_110000_001',
-        title: '[家事・環境] MacBook：手入れ・清掃',
-        dueDate: '2026-11-13',
-        status: '未完了',
-        memo: '',
-        remindContext: 'デスク作業時',
-        docUrl: ''
-      },
-      ...mockTasksAfterMisery
-    ],
-    initialLogs: '',
-    turns: [
-      {
-        time: '2026-11-13 10:07:08',
-        user: '「MacBook：手入れ・清掃」 を完了'
-      }
-    ]
-  });
-
-  // シナリオ3: 休日余白時間の非タスク含む提案（挨拶/DB依頼 -> PHASE_C）と突発トラブル保護（-> PHASE_D）
-  runPromptScenario({
-    name: '休日余白提案(挨拶/DB依頼->PHASE_C非タスク併用) ＆ トラブル保護(->PHASE_D)',
-    mockMemory: {
-      backend_model: '3.5-lite',
-      thinking_level: 'low',
-      custom_system_prompt: customStylePrompt
-    },
-    mockTasks: [...mockTasksAfterMisery],
-    initialLogs: '',
-    turns: [
-      {
-        time: '2026-11-14 11:38:08',
-        user: 'おはよう'
-      },
-      {
-        time: '2026-11-14 12:03:26',
-        user: 'パソコンのモニターからパチパチと異音が😱 寿命か……'
-      },
-      {
-        time: '2026-11-14 15:10:00',
-        user: '牛乳を買い物メモに追加して'
-      }
-    ]
-  });
-
-  Logger.log('💡 完全ドライランのため、スプレッドシートの書き換えは行っていません。');
-}
-
-/**
- * ★標準回帰テスト用: 代表的な4大シナリオを一括検証
- * プロンプトの全体構造を変更した際、主要機能（多様性・送り出し・体調配慮・連続対話）に退行がないかを確認します。
- */
-function testAllStandardScenarios() {
-  const scenarios = getStandardTestScenarios_();
-  Logger.log(`🚀 >>> 標準回帰テスト（全 ${scenarios.length} シナリオ）を開始します <<< 🚀`);
-  for (let i = 0; i < scenarios.length; i++) {
-    runPromptScenario(scenarios[i]);
-  }
-  Logger.log('🏁 >>> 標準回帰テストが完了しました <<< 🏁');
-}
-
-/**
- * 互換エイリアス（単数形）
- */
-function testAllStandardScenario() {
-  testAllStandardScenarios();
-}
-
-/**
- * 汎用プロンプト検証ランナー（単発 ＆ 複数ターン動的連鎖・新旧AB比較対応）
- * スプレッドシートやLINEを一切変更せず、新システム（Lite + 動的アセンブルFlash）と
- * 旧システム（単一Flash）の出力・トークン消費・DBアクションを並列比較します。
- *
- * @param {{
- *   name: string,
- *   initialLogs?: string,
- *   mockMemory?: Object,
- *   mockTasks?: Array<Object>,
- *   turns: Array<{ time: string, user: string, mockMemory?: Object, mockTasks?: Array<Object> }>,
- *   compareModels?: Array<{ label: string, backend_model: string, thinking_level?: string, isBaselineForHistory?: boolean }>
- * }} scenario
- */
-function runPromptScenario(scenario) {
-  const memory = getMemory();
-  // 新システム単独ドライランモード（コード内最新のデフォルトプロンプトを直接評価）
-  const testMemory = Object.assign({}, memory, scenario.mockMemory || {}, {
-    prompt_lite: '', // コード最新の getDefaultPromptLite() を確実に評価
-    prompt_core: '', // コード最新の getDefaultPromptCore() を確実に評価
-    prompt_phase_a: '', // コード最新の getDefaultPromptPhaseA() を確実に評価
-    prompt_phase_b: '', // コード最新の getDefaultPromptPhaseB() を確実に評価
-    prompt_phase_c: '', // コード最新の getDefaultPromptPhaseC() を確実に評価
-    prompt_phase_d: '', // コード最新の getDefaultPromptPhaseD() を確実に評価
-    prompt_schedule: '', // コード最新の getDefaultPromptSchedule() を確実に評価
-    prompt_relief: '', // コード最新の getDefaultPromptRelief() を確実に評価
-    prompt_db: '', // コード最新の getDefaultPromptDb() を確実に評価
-    _testCalendarExcludeDate: scenario.excludeCalendarDate || ''
-  });
-  if (typeof scenario.useLiteForBackend === 'boolean') {
-    testMemory._testUseLiteForBackend = scenario.useLiteForBackend;
-  }
-
-  let runningLogs = scenario.initialLogs || '';
-  let cachedSheetTasks = null;
-
-  const hasCompareModels = Array.isArray(scenario.compareModels) && scenario.compareModels.length > 0;
-  const modelSpecs = hasCompareModels
-    ? scenario.compareModels
-    : [{ label: '', backend_model: testMemory.backend_model, thinking_level: testMemory.thinking_level, isBaselineForHistory: true }];
-  const isMultiCompare = modelSpecs.length > 1;
-
-  const backendLabel = (typeof resolveBackendModel_ === 'function')
-    ? resolveBackendModel_(testMemory).model
-    : SYSTEM_CONSTANTS.GEMINI_MODEL;
-  const headerBackend = isMultiCompare
-    ? `後段${modelSpecs.length}モデル共通Lite比較: ${modelSpecs.map(s => s.backend_model).join(' / ')}`
-    : `後段: ${backendLabel}`;
-  Logger.log('============================================================');
-  Logger.log(`🧪 【${scenario.name}】 [${headerBackend}] (${scenario.turns.length}ターン / 新システム単独ドライラン)`);
-  Logger.log('============================================================');
-
-  for (let i = 0; i < scenario.turns.length; i++) {
-    const turn = scenario.turns[i];
-    const simulatedDate = new Date(turn.time.replace(' ', 'T') + '+09:00');
-    const timeLabel = Utilities.formatDate(simulatedDate, 'Asia/Tokyo', 'yyyy-MM-dd(E) HH:mm');
-    const hhmm = Utilities.formatDate(simulatedDate, 'Asia/Tokyo', 'HH:mm');
-
-    Logger.log(`\n--- 💬 Turn ${i + 1} [${timeLabel}] ---`);
-    Logger.log(`User: ${turn.user}`);
-
-    const turnMemory = Object.assign({}, testMemory, turn.mockMemory || {});
-    if (turn.mockTasks || scenario.mockTasks) {
-      turnMemory._testMockTasks = turn.mockTasks || scenario.mockTasks;
-    }
-
-    let sharedLite = null;
-    let baselineReply = '';
-
-    for (let m = 0; m < modelSpecs.length; m++) {
-      const spec = modelSpecs[m];
-      const specMemory = Object.assign({}, turnMemory);
-      if (spec.backend_model) specMemory.backend_model = spec.backend_model;
-      if (spec.thinking_level) specMemory.thinking_level = spec.thinking_level;
-      if (sharedLite) specMemory._testPrecomputedLite = sharedLite;
-
-      const outcome = executeCompanionTurn(turn.user, [], runningLogs, specMemory, simulatedDate);
-      if (m === 0) {
-        sharedLite = outcome._liteSnapshot || null;
-        cachedSheetTasks = logTurnLiteSummary_(outcome, turnMemory, cachedSheetTasks, isMultiCompare);
-      }
-
-      const replyText = logTurnBackendOutcome_(outcome, spec, isMultiCompare, backendLabel);
-      if (spec.isBaselineForHistory || (m === 0 && !baselineReply)) {
-        baselineReply = replyText;
-      }
-    }
-
-    const logLine = `${hhmm} User: ${turn.user}\nAI: ${baselineReply.replace(/\n/g, ' ')}`;
-    runningLogs = runningLogs ? `${runningLogs}\n${logLine}` : logLine;
-  }
-  Logger.log('\n============================================================\n');
-}
-
-/**
- * 前段Liteの判定・選出結果をログ出力するヘルパー
- * @private
- */
-function logTurnLiteSummary_(outcome, turnMemory, cachedSheetTasks, isMultiCompare) {
-  const meta = outcome.logMeta || {};
-  const focusedIds = (outcome.liteResult && Array.isArray(outcome.liteResult.focused_task_ids))
-    ? outcome.liteResult.focused_task_ids
-    : [];
-  let focusedDisplay = 'なし (0件)';
-  if (focusedIds.length > 0) {
-    if (!turnMemory._testMockTasks && !cachedSheetTasks) {
-      cachedSheetTasks = getTasks('未完了');
-    }
-    const refTasks = turnMemory._testMockTasks || cachedSheetTasks || [];
-    const titleById = {};
-    refTasks.forEach(t => { if (t && t.id) titleById[t.id] = t.title; });
-    focusedDisplay = `${focusedIds.length}件 -> ` + focusedIds.map(id => titleById[id] ? `[${id}] ${titleById[id]}` : id).join(' / ');
-  }
-
-  const liteSummaryTag = isMultiCompare
-    ? (meta.phaseAndTags || '').replace(/\s*\/\s*model:[^/\]]+/, ' / model:共通Lite')
-    : (meta.phaseAndTags || '');
-  Logger.log(`\n🧭 [Lite判定]: ${liteSummaryTag}`);
-  const rangeStart = (outcome.liteResult && outcome.liteResult.schedule_range_start) || '';
-  const rangeEnd = (outcome.liteResult && outcome.liteResult.schedule_range_end) || '';
-  if (rangeStart || rangeEnd) {
-    Logger.log(`📅 [Lite動的カレンダー範囲]: ${rangeStart || '(本日)'} 〜 ${rangeEnd || '(+14日)'}`);
-  }
-  const searchQuery = (outcome.liteResult && outcome.liteResult.search_query) || '';
-  if (searchQuery) {
-    Logger.log(`🔎 [Lite検索質問抽出 (search_query)]: ${searchQuery}`);
-  }
-  Logger.log(`🎯 [Lite選出タスク (focused_task_ids)]: ${focusedDisplay}`);
-  const matchedStamps = (outcome.liteResult && Array.isArray(outcome.liteResult.matched_cycle_stamps) && outcome.liteResult.matched_cycle_stamps.length > 0)
-    ? outcome.liteResult.matched_cycle_stamps.join(', ')
-    : 'なし';
-  Logger.log(`📌 [Lite検出スタンプ (matched_cycle_stamps)]: ${matchedStamps}`);
-  return cachedSheetTasks;
-}
-
-/**
- * 後段モデルの検索・速度・トークン・応答内容をログ出力するヘルパー
- * @return {string} reply_text
- * @private
- */
-function logTurnBackendOutcome_(outcome, spec, isMultiCompare, defaultBackendLabel) {
-  const meta = outcome.logMeta || {};
-  const newReply = (outcome.primaryResult && outcome.primaryResult.reply_text) || '';
-  const actualBackend = meta.backendModel || defaultBackendLabel;
-
-  if (isMultiCompare && spec.label) {
-    Logger.log(`\n── 🤖 [${spec.label}] ──`);
-  }
-
-  const searchUsed = Boolean(meta.webSearchUsed);
-  const queries = Array.isArray(meta.webSearchQueries) ? meta.webSearchQueries : [];
-  const chunksCount = meta.groundingChunksCount || 0;
-  const toolUseTok = meta.webSearchToolUseTokens || meta.flashToolUseTokens || 0;
-  const metaKeys = Array.isArray(meta.groundingMetaKeys) ? meta.groundingMetaKeys : [];
-  let searchDisplay;
-  if (!searchUsed) {
-    searchDisplay = 'なし (検索不要ターン)';
-  } else if (queries.length > 0) {
-    searchDisplay = `${queries.join(' / ')} (chunks:${chunksCount}, toolTok:${toolUseTok})`;
-  } else if (chunksCount > 0 || toolUseTok > 0 || metaKeys.length > 0) {
-    searchDisplay = `クエリ文字なし (chunks:${chunksCount}, toolTok:${toolUseTok}, keys:[${metaKeys.join(',')}])`;
-  } else if (meta.webSearchFailed) {
-    searchDisplay = '実行エラー (検索未完了)';
-  } else {
-    searchDisplay = '起動済み・グラウンディング未発火 (chunks:0)';
-  }
-  Logger.log(`🔍 [Web検索 (googleSearch / ${meta.webSearchModel || '3.1-lite'})]: ${searchDisplay}`);
-  if (searchUsed) {
-    Logger.log(`   ↳ [検索生応答メタ] finish:${meta.webSearchFinishReason || '-'} / candKeys:[${(meta.webSearchCandidateKeys || []).join(',')}] / partKeys:[${(meta.webSearchPartKeys || []).join(',')}] / gKeys:[${metaKeys.join(',')}]`);
-    if (meta.webSearchSummaryPreview) {
-      Logger.log(`   ↳ [検索生本文先頭] ${meta.webSearchSummaryPreview}`);
-    }
-  }
-
-  const liteMs = meta.liteLatencyMs || 0;
-  const searchMs = meta.webSearchLatencyMs || 0;
-  const flashMs = meta.flashLatencyMs || 0;
-  const liteLabel = isMultiCompare ? '共通Lite' : '前段Lite';
-  const searchTimeSeg = searchUsed ? ` + Web検索: ${(searchMs / 1000).toFixed(2)}s` : '';
-  Logger.log(`⏱️ [応答時間]: 計 ${((liteMs + searchMs + flashMs) / 1000).toFixed(2)}s (${liteLabel}: ${(liteMs / 1000).toFixed(2)}s${searchTimeSeg} + 後段[${actualBackend}]: ${(flashMs / 1000).toFixed(2)}s)`);
-  const liteThink = meta.liteThinkingTokens || 0;
-  const liteSubtotal = (meta.litePromptTokens || 0) + (meta.liteCandidatesTokens || 0) + liteThink;
-  const searchTokSeg = searchUsed
-    ? ` + Web検索: ${meta.webSearchTotalTokens || 0}(思考=${meta.webSearchThinkingTokens || 0}, tool=${meta.webSearchToolUseTokens || 0})`
-    : '';
-  Logger.log(`📊 [トークン]: 合計 ${meta.newTotalTokens} tok (${liteLabel}: ${liteSubtotal}(思考=${liteThink})${searchTokSeg} + 後段[${actualBackend}]: in=${meta.flashPromptTokens || 0} / out=${meta.flashCandidatesTokens || 0} / 思考=${meta.flashThinkingTokens || 0})`);
-  const heading = isMultiCompare && spec.label ? `${spec.label} / ${outcome.phaseLabel} / ${actualBackend}` : `${outcome.phaseLabel} / ${actualBackend}`;
-  Logger.log(`\n🆕 【新システム応答 (${heading})】:\n${newReply}${formatActionSummary_(outcome.primaryResult)}`);
-  return newReply;
-}
-
-// =============================================================================
-// 3. 個別サブシステム検証用関数（ブリーフィング・記憶代謝・深夜バッチ）
-// =============================================================================
-
-/**
- * 手動テスト用: APIキーで利用可能なGeminiモデル（特にFlash/Lite系）を一覧表示
- */
-function testListGeminiModels() {
-  const config = getConfig();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${config.geminiApiKey}`;
-  const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-  const data = JSON.parse(res.getContentText());
-  Logger.log('=== 利用可能なGeminiモデル一覧 ===');
-  if (data.models) {
-    const flashModels = data.models
-      .map(m => m.name.replace('models/', ''))
-      .filter(name => name.includes('flash') || name.includes('lite'));
-    Logger.log('Flash/Lite系モデル:\n' + flashModels.join('\n'));
-  } else {
-    Logger.log('エラーまたはモデル取得失敗: ' + JSON.stringify(data));
-  }
-
-  // 404の理由を特定するための直接テスト
-  const testModels = ['gemini-2.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'];
-  for (const m of testModels) {
-    const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${config.geminiApiKey}`;
-    const testRes = UrlFetchApp.fetch(testUrl, {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify({ contents: [{ parts: [{ text: 'ping' }] }] }),
-      muteHttpExceptions: true
-    });
-    Logger.log(`[テスト ${m}]: status=${testRes.getResponseCode()} body=${testRes.getContentText().substring(0, 150)}`);
-  }
-}
-
-/**
- * 手動テスト用: デイリーブリーフィングの生成結果をログ出力して確認（ドライラン）
- */
-function testDailyBriefingOutput() {
-  Logger.log('=== デイリーブリーフィング生成テスト開始 ===');
-  const briefing = buildDailyBriefingText();
-  Logger.log('\n' + briefing);
-  Logger.log('=== デイリーブリーフィング生成テスト完了 ===');
-}
-
-/**
- * 手動テスト用: 中期記憶(rolling_memory)および長期記憶(profile)の代謝テスト（ドライラン）
- * @param {string=} targetDateStrOpt 指定日付の例: '2026-11-10'（省略時は当日全ログ対象）
- */
-function testMemoryLifecycleSimulation(targetDateStrOpt) {
-  Logger.log('=== 記憶新陳代謝テスト開始 ===');
-  const now = new Date();
-  const targetDateStr = targetDateStrOpt || Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd');
-  const targetDate = targetDateStrOpt ? new Date(`${targetDateStr}T12:00:00+09:00`) : now;
-  const logs = targetDateStrOpt ? getLogs(targetDateStr) : getLogs();
-  const memory = getMemory();
-  const targetEvents = (typeof getTodayEventsList === 'function') ? getTodayEventsList(targetDate) : [];
-  const completedTasks = getTasks('完了').filter(t => t.completedDate === targetDateStr);
-
-  Logger.log(`対象日: ${targetDateStr} / 対象ログ件数: ${logs.length} 件 / 完了タスク: ${completedTasks.length} 件`);
-  const updates = analyzeMemoryUpdates(
-    logs,
-    memory.cycle_stamps,
-    memory.weekly_summary,
-    memory.rolling_memory,
-    memory.profile,
-    memory.dictionary,
-    targetDateStr,
-    {
-      lifestyleHabits: memory.lifestyle_habits || '',
-      targetEvents: targetEvents,
-      completedTasks: completedTasks
-    }
-  );
-
-  Logger.log('【解析結果】rolling_memory:\n' + (updates.rolling_memory || '（なし）'));
-  Logger.log('【解析結果】profile:\n' + (updates.profile || '（なし）'));
-  Logger.log('【解析結果】dictionary:\n' + (updates.dictionary || '（なし）'));
-  Logger.log('【解析結果】weekly_summary:\n' + (updates.weekly_summary || '（なし）'));
-  Logger.log('【解析結果】cycle_stamps:\n' + (updates.cycle_stamps || '（なし）'));
-  Logger.log('💡 完全ドライランのため、スプレッドシートの書き換えは行っていません。');
-}
-
-/**
- * 手動テスト用: 深夜統合バッチ（Notion日報投稿＆ログクリア）の本番手動実行
- */
-function testMidnightBatchSimulation() {
-  dailyMidnightBatch();
-}
-
-/**
- * 手動テスト用: 日報生成の完全ドライラン検証（Notion投稿なし・プレーンテキスト出力）
- * - スプレッドシートから指定日付（デフォルト: '2026-11-01'）のログ・完了タスク・消化ストックを取得
- * - 該当データが空の場合は、11/1のリアルな検証用サンプルログを用いてGemini 3.8 Flashで生成
- * - Notion APIへのPOSTは行わず、生成されたMarkdown、所要時間、文字数、概算トークン数を Logger.log に出力
- * @param {string=} targetDateStrOpt 例: '2026-11-01' (省略時は '2026-11-01')
- */
-function testDailyReportDryRun(targetDateStrOpt) {
-  const targetDateStr = targetDateStrOpt || '2026-11-01';
-
-  Logger.log('============================================================');
-  Logger.log(`📊 【日報生成ドライラン検証】 対象日: ${targetDateStr}`);
-  Logger.log('============================================================');
-
-  // 1. スプレッドシートから該当日のログ・タスク・消化ストックを取得
-  let logsTarget = [];
-  let completedTasks = [];
-  let consumedInputs = [];
-
-  try {
-    const windowData = getDailyReportWindowData_(targetDateStr);
-    logsTarget = windowData.logs;
-    completedTasks = windowData.completedTasks;
-    consumedInputs = windowData.consumedInputs;
-
-    Logger.log(`📥 スプレッドシート取得結果: ログ ${logsTarget.length}件 / 完了タスク ${completedTasks.length}件 / 消化ストック ${consumedInputs.length}件`);
-  } catch (err) {
-    Logger.log(`⚠️ スプレッドシート取得エラー: ${err.message}`);
-  }
-
-  // もしスプレッドシートからログが取得できなかった場合のフォールバック（11/1のリアルな検証用サンプルログ）
-  if (logsTarget.length === 0) {
-    Logger.log('ℹ️ 該当日のログがスプレッドシートから取得できなかったため、11/1検証用サンプルデータを使用してドライランを実行します。');
-    logsTarget = [
-      { timestamp: '2026-11-01 07:15:00', sender: 'user', message: 'おはよう！今日は11月の始まりだね。月初のタスク整理と制作作業を進めたいな' },
-      { timestamp: '2026-11-01 07:45:00', sender: 'user', message: '朝ごはん食べて、昨日のチェアの高さ微調整した。腰がかなり楽' },
-      { timestamp: '2026-11-01 10:30:00', sender: 'user', message: '生活伴走システムの日報プロンプトの改修案を整理中。重要度の反映とトークン削減の方向性が固まった' },
-      { timestamp: '2026-11-01 13:00:00', sender: 'user', message: 'お昼にうどん食べた。午後はReaper立ち上げて新曲のベースライン打ち込みに入る' },
-      { timestamp: '2026-11-01 16:45:00', sender: 'user', message: 'ベースラインの仮組み完了！グルーヴ感かなり良くなった。ちょっと休憩でぱずぎりのイベント触る' },
-      { timestamp: '2026-11-01 17:30:00', sender: 'user', message: 'ぱずぎりイベントで限定報酬ゲットできた。妹からLINE来て、夕飯の買い物頼まれたのでスーパー行ってくる' },
-      { timestamp: '2026-11-01 19:15:00', sender: 'user', message: '買い物から帰宅。夕飯は家族で鍋食べた。温まる' },
-      { timestamp: '2026-11-01 21:00:00', sender: 'user', message: 'シーツ洗濯物取り込んで、ストレッチ動画15分やった。明日は制作の続きと、ギターの基礎運指をしっかりやりたい' },
-      { timestamp: '2026-11-01 23:45:00', sender: 'user', message: 'そろそろ歯磨きしてお風呂入って寝る準備するね。おやすみ！' }
-    ];
-    completedTasks = [
-      { id: 'T_20261101_01', title: '生活伴走システム：日報プロンプト改修案の策定', memo: '重要度反映とトークン半減設計' },
-      { id: 'T_20261101_02', title: '夕飯の食材買い出し', memo: '鍋の具材（妹からの頼まれもの）' }
-    ];
-    consumedInputs = [
-      { type: 'ゲーム', title: '刀剣乱舞 ぱずぎり', memo: '11月限定イベント完走・報酬獲得' }
-    ];
-  }
-
-  // 2. memory を取得
-  const memory = getMemory();
-
-  // 3. Gemini 3.8 Flash で新プロンプトによる日報Markdownを生成
-  Logger.log('\n🤖 Gemini 3.8 Flash で新設計日報（Markdown）を生成中...');
-  const startTime = new Date().getTime();
-  const dailyReportMarkdown = generateDailyReportMarkdown(logsTarget, completedTasks, memory, targetDateStr, consumedInputs);
-  const elapsedSec = ((new Date().getTime() - startTime) / 1000).toFixed(1);
-
-  const charCount = dailyReportMarkdown.length;
-  // 日本語＋Markdownのおおよそのトークン換算（1文字あたり約1〜1.2トークン）
-  const estimatedTokens = Math.round(charCount * 1.15);
-
-  const { metadata, markdown } = extractReportMetadata_(dailyReportMarkdown);
-
-  Logger.log(`✅ 日報生成完了 (${elapsedSec}秒)`);
-  Logger.log(`📊 出力文字数: ${charCount.toLocaleString()} 文字（概算: 約 ${estimatedTokens} トークン）`);
-  Logger.log(`🏷️ 【抽出されたNotionプロパティ】:\n${JSON.stringify(metadata, null, 2)}\n`);
-  Logger.log('==================== 【生成された日報（Notion本文）】 ====================\n');
-  Logger.log(markdown);
-  Logger.log('\n================================================================================');
-  Logger.log('💡 完全ドライランのため、Notion APIへの送信およびスプレッドシートの更新は一切行っていません。');
-
-  return dailyReportMarkdown;
-}
-
-/**
- * 手動テスト用: 温度シグナルと水増し排除の挙動を複数実ログ日で一括ドライラン検証
- * GASエディタ上で引数なしで実行し、11/04・11/05・11/06・11/11 の4日分を続けてログ出力します。
- */
-function testDailyReportSamplesDryRun() {
-  const sampleDates = ['2026-11-04', '2026-11-05', '2026-11-06', '2026-11-11'];
-  for (let i = 0; i < sampleDates.length; i++) {
-    testDailyReportDryRun(sampleDates[i]);
-  }
-}
-
-/**
- * 手動テスト用: 月報生成の完全ドライラン検証（Notion投稿なし・プレーンテキスト出力）
- * - Notion日報DBから指定月（未指定時は直近月、例: 2026-10）の日報データを集約
- * - Gemini 3.8 Flash で月間ジャーナル（Markdown）を生成
- * - Notion APIへのPOSTは行わず、純粋なプレーンテキストとして Logger.log に出力
- * @param {string=} targetMonthStrOpt 例: '2026-10' (省略時は直近月を自動算出)
- */
-function testMonthlyReportDryRun(targetMonthStrOpt) {
-  const now = new Date();
-  let targetMonthStr = targetMonthStrOpt;
-  if (!targetMonthStr) {
-    // 1日なら前月、それ以外なら当月（10月31日なら2026-10、11月1日なら2026-10）
-    const d = (now.getDate() === 1)
-      ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      : new Date(now.getFullYear(), now.getMonth(), 1);
-    const y = d.getFullYear();
-    const m = d.getMonth() + 1;
-    targetMonthStr = `${y}-${('0' + m).slice(-2)}`;
-  }
-
-  const [yearStr, monthNumStr] = targetMonthStr.split('-');
-  const year = parseInt(yearStr, 10);
-  const month = parseInt(monthNumStr, 10);
-  const lastDay = new Date(year, month, 0).getDate();
-  const startDateStr = `${targetMonthStr}-01`;
-  const endDateStr = `${targetMonthStr}-${('0' + lastDay).slice(-2)}`;
-
-  Logger.log('============================================================');
-  Logger.log(`📊 【月報生成ドライラン検証】 対象月: ${targetMonthStr}`);
-  Logger.log(`・集約期間: ${startDateStr} 〜 ${endDateStr}`);
-  Logger.log('============================================================');
-
-  // 1. Notion日報DBから該当期間の日報データを集約
-  let monthlyDataText = '';
-  try {
-    Logger.log('📥 Notion日報DBから日報データを取得中...');
-    monthlyDataText = queryMonthlyReports(startDateStr, endDateStr);
-    const charCount = monthlyDataText ? monthlyDataText.length : 0;
-    Logger.log(`✅ Notion日報集約完了: 約 ${charCount.toLocaleString()} 文字`);
-  } catch (err) {
-    Logger.log(`⚠️ Notion日報取得エラー: ${err.message}`);
-  }
-
-  // もしNotionから取得できなかった場合のフォールバック（テスト用サンプル日報）
-  if (!monthlyDataText || monthlyDataText.trim() === '') {
-    Logger.log('ℹ️ Notionから該当月の日報が取得できなかったため、テスト用サンプル日報を使用して生成をテストします。');
-    monthlyDataText = `【2026-10-15】
-## 今日のハイライト
-- 生活伴走システムの新アーキテクチャ設計に着手
-- Reaperでのサウンドトラック制作を進めた
-## 完了タスク
-- [x] 年末調整書類の確認
-## 秘書からのひとこと
-制作作業お疲れさまでした！
-
-【2026-10-31】
-## 今日のハイライト
-- システムの大掃除と2段階ハイブリッド構成への一本化を完了
-- 家族とモンストの深淵クエストをクリア
-## 完了タスク
-- [x] 生活伴走システム：Gemini 3.1 Flash-Lite & 3.8 Flash ハイブリッド化
-## 秘書からのひとこと
-大改修本当にお疲れさまでした！`;
-  }
-
-  // 2. スプレッドシート memory から用語辞書を取得
-  const memory = getMemory();
-
-  // 3. Gemini 3.8 Flash で月報ジャーナルMarkdownを生成
-  Logger.log('\n🤖 Gemini 3.8 Flash で月間ジャーナルを生成中...');
-  const startTime = new Date().getTime();
-  const monthlyJournalMarkdown = generateMonthlyJournalMarkdown(monthlyDataText, targetMonthStr, memory.dictionary);
-  const elapsedSec = ((new Date().getTime() - startTime) / 1000).toFixed(1);
-
-  const { metadata, markdown } = extractReportMetadata_(monthlyJournalMarkdown);
-
-  Logger.log(`✅ 月報生成完了 (${elapsedSec}秒)\n`);
-  Logger.log(`🏷️ 【抽出されたNotionプロパティ】:\n${JSON.stringify(metadata, null, 2)}\n`);
-  Logger.log('==================== 【生成された月報（Notion本文）】 ====================\n');
-  Logger.log(markdown);
-  Logger.log('\n================================================================================');
-  Logger.log('💡 完全ドライランのため、Notion APIへの送信およびスプレッドシートの更新は一切行っていません。');
 }
 
 /**
@@ -1197,93 +229,6 @@ function recreateMonthlyReport(targetMonthStrOpt) {
   Logger.log('\n============================================================');
 
   return result;
-}
-
-// =============================================================================
-// 内部ヘルパー関数（プライベート）
-// =============================================================================
-
-/**
- * 標準回帰テスト用の4大基本シナリオ定義
- * @private
- */
-function getStandardTestScenarios_() {
-  return [
-    {
-      name: '標準1 [多様性・重複排除]: 食後の隙間時間相談（同日に既出の提案がある場合）',
-      initialLogs: '11:19 User: 今何して過ごそうかな\nAI: 『漱石と倫敦ミイラ殺人事件』を少し読み進めるか、穏やかな音楽を聴いてゆっくり過ごすのはいかがでしょうか。',
-      turns: [
-        {
-          time: '2026-10-25 20:46:00',
-          user: 'ご飯食べ終えてだいぶ経ったけど、今何して過ごすかちょっと悩んでる　家族が一緒に食べたいお菓子あるみたいだからすぐには寝ない'
-        }
-      ]
-    },
-    {
-      name: '標準2 [直前物理行動の送り出し]: 準備行動の宣言（先回り・過保護の排除検証）',
-      initialLogs: '',
-      turns: [
-        {
-          time: '2026-10-25 17:00:00',
-          user: 'そろそろお風呂洗ってお湯張ってくるね'
-        }
-      ]
-    },
-    {
-      name: '標準3 [状態属性フィルタ]: 体調不良×手持ち無沙汰（安静姿勢で可能な複数プール提案）',
-      initialLogs: '09:00 User: おはよう、朝ごはん食べたよ\nAI: おはようございます！しっかり朝食が摂れて良かったです。',
-      turns: [
-        {
-          time: '2026-10-25 11:20:00',
-          user: 'お腹が重たくて横になってるんだけど、全然眠くはなくて暇なんだよね。13時のお昼まで何して過ごそう'
-        }
-      ]
-    },
-    {
-      name: '標準4 [見通し段取り＆文脈引き継ぎ]: 起床時の目標宣言 → ルーティン完了報告（2ターン連鎖）',
-      initialLogs: '',
-      turns: [
-        {
-          time: '2026-10-26 07:01:44',
-          user: 'おはよう。今日は仕事前に生活伴走システムの改善をやりたいんだよね'
-        },
-        {
-          time: '2026-10-26 07:09:26',
-          user: '今日のメダル受け取り完了'
-        }
-      ]
-    }
-  ];
-}
-
-/**
- * AI応答に含まれるDB/カレンダー操作アクションをログ表示用に整形
- * @private
- */
-function formatActionSummary_(res) {
-  const actions = [];
-  if (res.task_actions && res.task_actions.length > 0) {
-    actions.push('task_actions: ' + JSON.stringify(res.task_actions));
-  }
-  if (res.calendar_actions && res.calendar_actions.length > 0) {
-    actions.push('calendar_actions: ' + JSON.stringify(res.calendar_actions));
-  }
-  if (res.shopping_actions && res.shopping_actions.length > 0) {
-    actions.push('shopping_actions: ' + JSON.stringify(res.shopping_actions));
-  }
-  if (res.input_stock_actions && res.input_stock_actions.length > 0) {
-    actions.push('input_stock_actions: ' + JSON.stringify(res.input_stock_actions));
-  }
-  if (res.routine_actions && res.routine_actions.length > 0) {
-    actions.push('routine_actions: ' + JSON.stringify(res.routine_actions));
-  }
-  if (res.project_actions && res.project_actions.length > 0) {
-    actions.push('project_actions: ' + JSON.stringify(res.project_actions));
-  }
-  if (res.memory_updates && Object.keys(res.memory_updates).length > 0) {
-    actions.push('memory_updates: ' + JSON.stringify(res.memory_updates));
-  }
-  return actions.length > 0 ? '\n📋 [出力アクション]: ' + actions.join(' | ') : '';
 }
 
 /**

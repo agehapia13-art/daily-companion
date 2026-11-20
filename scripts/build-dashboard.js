@@ -29,8 +29,8 @@ function buildManifestJson() {
     scope: './',
     display: 'standalone',
     orientation: 'any',
-    background_color: '#F6F3EC',
-    theme_color: '#4F6653',
+    background_color: '#FDFCFF',
+    theme_color: '#8B5CF6',
     icons: [
       {
         src: './icon-192.png',
@@ -56,8 +56,8 @@ function buildManifestJson() {
 
 function buildIconSvg() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="170" fill="#E8F0E9"/>
-  <g transform="translate(106.67 106.67) scale(12.4444)" fill="none" stroke="#4F6653" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+  <rect width="512" height="512" rx="170" fill="#F4F0FC"/>
+  <g transform="translate(106.67 106.67) scale(12.4444)" fill="none" stroke="#6D3FE0" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
     <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/>
     <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
   </g>
@@ -142,8 +142,8 @@ function polylineToSegments(pts) {
  * @return {Buffer}
  */
 function renderLeafIconPng(size) {
-  const bg = [232, 240, 233]; // --dc-sage-light (#E8F0E9)
-  const fg = [79, 102, 83];   // --dc-sage-main  (#4F6653)
+  const bg = [244, 240, 252]; // Airy lavender-pearl
+  const fg = [109, 63, 224];  // Accent violet
 
   // .dc-logo-mark (24x24) 内の 14x14 アイコンと同じ中心配置比率
   const scale = (size * (14 / 24)) / 24;
@@ -276,7 +276,7 @@ function encodeRgbPng(width, height, rawScanlines) {
 }
 
 function buildServiceWorkerJs() {
-  return `const CACHE_NAME = 'dc-pwa-v3';
+  return `const CACHE_NAME = 'dc-pwa-v4';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -361,9 +361,54 @@ self.addEventListener('notificationclick', (event) => {
 `;
 }
 
+const WEB_JS_FILES = [
+  'web/js/state-api.js',
+  'web/js/mist-theme.js',
+  'web/js/home-view.js',
+  'web/js/chat-lists-view.js'
+];
+
+function indentBlock(text, spaces) {
+  const pad = ' '.repeat(spaces);
+  return String(text || '')
+    .replace(/\n+$/, '')
+    .split('\n')
+    .map(line => (line.trim() === '' ? '' : pad + line))
+    .join('\n');
+}
+
+function assembleDashboardHtml() {
+  const indexTpl = fs.readFileSync('web/index.html', 'utf8');
+  const cssSrc = fs.readFileSync('web/styles.css', 'utf8');
+  const jsChunks = WEB_JS_FILES.map((filePath) => {
+    const code = fs.readFileSync(filePath, 'utf8');
+    new vm.Script(code, { filename: filePath });
+    return code.trim();
+  });
+
+  const indentedCss = indentBlock(cssSrc, 4);
+  const indentedJs = indentBlock(jsChunks.join('\n\n'), 4);
+
+  return indexTpl
+    .replace('/* INLINE_STYLES */', () => indentedCss)
+    .replace('/* INLINE_SCRIPTS */', () => indentedJs);
+}
+
 const isCheckOnly = process.argv.includes('--check');
+const staticHtml = assembleDashboardHtml();
+validateHtmlScripts(staticHtml, 'dashboard_static');
+
 const dashboardSrc = fs.readFileSync('src/Dashboard.js', 'utf8');
-const sandbox = {};
+const sandbox = {
+  HtmlService: {
+    createHtmlOutputFromFile: (name) => {
+      if (name !== 'DashboardHtml') {
+        throw new Error('Unexpected HtmlService file name: ' + name);
+      }
+      return { getContent: () => staticHtml };
+    }
+  }
+};
 vm.createContext(sandbox);
 vm.runInContext(dashboardSrc, sandbox);
 
@@ -372,21 +417,23 @@ if (typeof sandbox.buildDashboardTemplate !== 'function') {
   process.exit(1);
 }
 
-const staticHtml = sandbox.buildDashboardTemplate('chat', '', '');
-validateHtmlScripts(staticHtml, 'dashboard_static');
-
-const gasHtml = sandbox.buildDashboardTemplate('memory', 'verify_key', 'verify_liff_id');
+const gasHtml = sandbox.buildDashboardTemplate('lists', 'verify$key', '');
 validateHtmlScripts(gasHtml, 'dashboard_gas');
+if (!gasHtml.includes('var INITIAL_TAB = "lists";') || !gasHtml.includes('var SERVER_PRE_KEY = "verify$key";')) {
+  console.error('❌ GAS boot variable injection check failed in buildDashboardTemplate');
+  process.exit(1);
+}
 
 const swCode = buildServiceWorkerJs();
 new vm.Script(swCode, { filename: 'sw.js' });
 
 if (isCheckOnly) {
-  console.log('✅ Dashboard template inline <script> & sw.js syntax OK');
+  console.log('✅ Web modules, DashboardHtml, inline <script> & sw.js syntax OK');
   process.exit(0);
 }
 
-// GitHub Pages用のPWA静的フロントエンド一式 (docs/) を自動生成
+// GAS Web App 用バンドルHTML (src/DashboardHtml.html) ＆ GitHub Pages PWA 一式 (docs/) を同時生成
+fs.writeFileSync('src/DashboardHtml.html', staticHtml, 'utf8');
 fs.mkdirSync('docs', { recursive: true });
 fs.writeFileSync('docs/index.html', staticHtml, 'utf8');
 fs.writeFileSync('docs/.nojekyll', '', 'utf8');
@@ -396,4 +443,4 @@ fs.writeFileSync('docs/apple-touch-icon.png', renderLeafIconPng(180));
 fs.writeFileSync('docs/icon-192.png', renderLeafIconPng(192));
 fs.writeFileSync('docs/icon-512.png', renderLeafIconPng(512));
 fs.writeFileSync('docs/sw.js', swCode, 'utf8');
-console.log('✅ Generated GitHub Pages PWA assets in docs/ (index.html: ' + staticHtml.length + ' bytes + PNG icons)');
+console.log('✅ Generated src/DashboardHtml.html & docs/ PWA assets (index.html: ' + staticHtml.length + ' bytes)');

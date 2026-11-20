@@ -153,3 +153,38 @@ function fetchWeatherAndPressure() {
     work: workResult
   };
 }
+
+/**
+ * Home ヘッダ用のコンパクト1行天気サマリーを整形（時刻なし・場所＋天気＋気温）
+ * @param {string} weatherInfo
+ * @param {string} pressureAlert 'TRUE' | 'FALSE'
+ * @param {string} workMode 'commute' | 'remote' | 'holiday'
+ * @return {string}
+ */
+function formatWeatherLineForHome(weatherInfo, pressureAlert, workMode) {
+  const raw = String(weatherInfo || '').trim();
+  if (!raw || raw.indexOf('取得エラー') !== -1) {
+    return pressureAlert === 'TRUE' ? '気圧急降下注意' : '横浜・磯子';
+  }
+  const parts = raw.split('｜').map(s => s.trim()).filter(Boolean);
+  const compactParts = [];
+  const limit = (workMode === 'commute') ? parts.length : 1;
+  for (let i = 0; i < Math.min(limit, parts.length); i++) {
+    // "自宅(磯子): 概ね晴れ 最高18℃/最低10℃ / 降水確率10%" -> "磯子 概ね晴れ 18℃"
+    const p = parts[i];
+    const loc = p.indexOf('渋谷') !== -1 ? '渋谷' : '磯子';
+    const descMatch = p.match(/:\s*([^\s]+)/);
+    const tempMatch = p.match(/最高(\d+℃)/);
+    const rainMatch = p.match(/降水確率(\d+%)/);
+    const bits = [loc];
+    if (descMatch) bits.push(descMatch[1]);
+    if (tempMatch) bits.push(tempMatch[1]);
+    else if (rainMatch) bits.push(rainMatch[1]);
+    compactParts.push(bits.join(' '));
+  }
+  let line = compactParts.join(' · ');
+  if (pressureAlert === 'TRUE') {
+    line += ' · 気圧低下注意';
+  }
+  return line;
+}

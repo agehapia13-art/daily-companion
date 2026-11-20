@@ -1,6 +1,6 @@
 /**
  * scripts/sync-prompts-to-sheet.js
- * src/Gemini.js 内の最新プロンプト関数群を
+ * src/Prompts.js 内の最新プロンプト関数群を
  * 本番スプレッドシートの memory シートへ直接一括同期するCLIツール
  * （※ custom_system_prompt はユーザー任意の上書き枠として上書きしない）
  */
@@ -10,7 +10,10 @@ const path = require('path');
 const vm = require('vm');
 const { google } = require('googleapis');
 
-const SPREADSHEET_ID = '1Qu8Q2TsvcXifw5AejjJILWyxjzX9d_VtGMQnXH7MJOA';
+const USE_TEST_SHEET = process.argv.includes('--test');
+const SPREADSHEET_ID = USE_TEST_SHEET
+  ? '1-Oy3zzEO6--OX8_ErFXZ6JpZShhFr-G44_jyB4B4yCI'
+  : '1Qu8Q2TsvcXifw5AejjJILWyxjzX9d_VtGMQnXH7MJOA';
 const KEY_FILE = path.resolve(__dirname, '../service-account.json');
 
 if (!fs.existsSync(KEY_FILE)) {
@@ -24,22 +27,17 @@ const auth = new google.auth.GoogleAuth({
 });
 const sheets = google.sheets({ version: 'v4', auth });
 
-// src/Gemini.js からプロンプト関数を動的ロード
-const geminiCode = fs.readFileSync(path.resolve(__dirname, '../src/Gemini.js'), 'utf8');
+// src/Prompts.js からプロンプト関数を動的ロード
+const promptsCode = fs.readFileSync(path.resolve(__dirname, '../src/Prompts.js'), 'utf8');
 const sandbox = {};
 vm.createContext(sandbox);
-vm.runInContext(geminiCode, sandbox);
+vm.runInContext(promptsCode, sandbox);
 
 const updatesToApply = {
   'prompt_core': sandbox.getDefaultPromptCore(),
-  'prompt_lite': sandbox.getDefaultPromptLite(),
-  'prompt_phase_a': sandbox.getDefaultPromptPhaseA(),
-  'prompt_phase_b': sandbox.getDefaultPromptPhaseB(),
-  'prompt_phase_c': sandbox.getDefaultPromptPhaseC(),
-  'prompt_phase_d': sandbox.getDefaultPromptPhaseD(),
   'prompt_schedule': sandbox.getDefaultPromptSchedule(),
   'prompt_db': sandbox.getDefaultPromptDb(),
-  'prompt_relief': sandbox.getDefaultPromptRelief()
+  'prompt_deck': sandbox.getDefaultPromptDeck()
 };
 
 async function main() {

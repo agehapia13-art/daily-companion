@@ -675,3 +675,115 @@ function applyCalendarActions(actions) {
 
   return results;
 }
+
+/**
+ * v2 用: 当日のカレンダー予定・日本の祝日・基本勤務形態から勤務モード（commute / remote / holiday）を判定し、
+ * Home ヘッダ表示用の次の境界ターゲット（label, targetMs, textOnly）を算出
+ * @param {Date=} nowOpt
+ * @param {string=} profileOpt
+ * @return {{ workMode: string, isHoliday: boolean, todayEvents: Array<string>, boundaryInfo: Object, heroBoundary: Object }}
+ */
+function getWorkModeAndBoundary(nowOpt, profileOpt) {
+  const now = nowOpt || new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+  const todayEvents = getTodayEventsList(now);
+  const boundaryInfo = getNextBoundaryInfo(now);
+
+  // 1. 日本の祝日判定
+  let isNationalHoliday = false;
+  try {
+    const holidayCal = CalendarApp.getCalendarById(SYSTEM_CONSTANTS.JAPAN_HOLIDAY_CALENDAR_ID);
+    if (holidayCal && holidayCal.getEvents(todayStart, todayEnd).length > 0) {
+      isNationalHoliday = true;
+    }
+  } catch (e) {}
+
+  // 2. カレンダー上の勤務/休暇キーワード判定
+  const joinedEvents = todayEvents.join(' ');
+  const hasOffice = /出社/.test(joinedEvents);
+  const hasRemote = /(リモート|在宅)/.test(joinedEvents);
+  const hasVacation = /(休暇|有給|有休|休み|公休|代休|振休)/.test(joinedEvents);
+
+  const dow = now.getDay(); // 0:Sun, 1:Mon, 2:Tue, 3:Wed, 4:Thu, 5:Fri, 6:Sat
+  let workMode = 'remote';
+  if (hasOffice && !hasVacation) {
+    workMode = 'commute';
+  } else if (hasVacation || dow === 0 || dow === 6 || isNationalHoliday) {
+    workMode = 'holiday';
+  } else if (hasRemote) {
+    workMode = 'remote';
+  } else {
+    // 予定未記載の平日は profile の基本リズム（火・水: 出社、月・木・金: リモート）をフォールバック適用
+    workMode = (dow === 2 || dow === 3) ? 'commute' : 'remote';
+  }
+
+  // 3. Home ヘッダ用の境界ターゲット算出
+  const nowMs = now.getTime();
+  const makeTarget = (h, m) => new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0).getTime();
+  let heroBoundary = null;
+
+  if (boundaryInfo && boundaryInfo.isDuringEvent && boundaryInfo.currentEventRemainingMinutes > 0) {
+    const endMs = nowMs + boundaryInfo.currentEventRemainingMinutes * 60000;
+    const endDt = new Date(endMs);
+    const hhmm = Utilities.formatDate(endDt, 'Asia/Tokyo', 'HH:mm');
+    heroBoundary = {
+      label: `進行中 · 〜${hhmm} ${boundaryInfo.currentEventTitle}`,
+      targetMs: endMs,
+      textOnly: ''
+    };
+  } else if (boundaryInfo && boundaryInfo.minutesUntilNext > 0 && boundaryInfo.summaryText.indexOf('次の予定「') === 0) {
+    const startMs = nowMs + boundaryInfo.minutesUntilNext * 60000;
+    const m = boundaryInfo.summaryText.match(/次の予定「(.+?) \((\d{2}:\d{2})〜/);
+    const title = m ? m[1] : '予定';
+    const hhmm = m ? m[2] : Utilities.formatDate(new Date(startMs), 'Asia/Tokyo', 'HH:mm');
+    heroBoundary = {
+      label: `次の予定 · ${hhmm} ${title}`,
+      targetMs: startMs,
+      textOnly: ''
+    };
+  } else if (workMode !== 'holiday') {
+    const depMs = makeTarget(8, 30);
+    const startMs = makeTarget(10, 0);
+    const lunchMs = makeTarget(12, 0);
+    const endWorkMs = makeTarget(19, 0);
+    const bedMs = makeTarget(23, 0);
+    if (workMode === 'commute' && nowMs < depMs) {
+      heroBoundary = { label: '次の目安 · 08:30 出発', targetMs: depMs, textOnly: '' };
+    } else if (nowMs < startMs) {
+      heroBoundary = { label: '次の目安 · 10:00 始業', targetMs: startMs, textOnly: '' };
+    } else if (nowMs < lunchMs) {
+      heroBoundary = { label: '次の目安 · 12:00 昼休憩', targetMs: lunchMs, textOnly: '' };
+    } else if (nowMs < endWorkMs) {
+      heroBoundary = { label: '次の目安 · 19:00 終業', targetMs: endWorkMs, textOnly: '' };
+    } else if (nowMs < bedMs) {
+      heroBoundary = { label: '次の目安 · 23:00 就寝', targetMs: bedMs, textOnly: '' };
+    } else {
+      heroBoundary = { label: '夜の区切り', targetMs: null, textOnly: 'そろそろ就寝の時間' };
+    }
+  } else {
+    const lunchMs = makeTarget(12, 30);
+    const bathMs = makeTarget(17, 0);
+    const dinnerMs = makeTarget(18, 0);
+    const bedMs = makeTarget(23, 0);
+    if (nowMs < lunchMs) {
+      heroBoundary = { label: '午前の時間 · 〜12:30頃', targetMs: lunchMs, textOnly: '' };
+    } else if (nowMs < bathMs) {
+      heroBoundary = { label: '午後の時間 · 〜17:00頃', targetMs: bathMs, textOnly: '' };
+    } else if (nowMs < dinnerMs) {
+      heroBoundary = { label: '夕方の目安 · 18:00 夕食', targetMs: dinnerMs, textOnly: '' };
+    } else if (nowMs < bedMs) {
+      heroBoundary = { label: '次の目安 · 23:00 就寝', targetMs: bedMs, textOnly: '' };
+    } else {
+      heroBoundary = { label: '夜の区切り', targetMs: null, textOnly: 'そろそろ就寝の時間' };
+    }
+  }
+
+  return {
+    workMode: workMode,
+    isHoliday: workMode === 'holiday',
+    todayEvents: todayEvents,
+    boundaryInfo: boundaryInfo,
+    heroBoundary: heroBoundary
+  };
+}

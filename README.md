@@ -1,162 +1,45 @@
-# 生活伴走システム（LINE Bot × GAS × Gemini 3.1 / 3.5 Flash-Lite × 3.8 Flash）
+# Companion Cockpit / Daily Companion v2 (PWA × GAS × Gemini × Spreadsheet × Notion)
 
-サウンドディレクター専属の生活伴走アシスタントとして、LINE・Google Apps Script (GAS)・**Gemini 3.1 Flash-Lite（前段司令塔）＋ Gemini 3.5 Flash-Lite / 3.1 Flash-Lite / 3.8 Flash（後段リアルタイム応答切替・深夜バッチ日報/記憶代謝）**・Googleスプレッドシート・Googleカレンダー・Notion API・Open-Meteoを完全統合したパーソナル自動化システムです。
+サウンドディレクター専属の生活伴走コックピットシステムです。  
+**「状況の鏡 × 行動の触媒（Home）」**・**「傾聴・整理・相談（Chat）」**・**「一覧・即実行（Lists）」** の 3タブ構成 PWA と、Google Apps Script (GAS)・Gemini（`gemini-3.5-flash-lite` / `gemini-3.8-flash`）・Googleスプレッドシート・Googleカレンダー・Google Drive/Docs・Notion API・Open-Meteo を統合しています（v2 で LINE Bot / Webhook は廃止し PWA 単一窓口へ一本化）。
 
-> 🧭 **最高憲章**: 本システムの存在意義・思想定義・行動原理は [GRAND_DESIGN.md](GRAND_DESIGN.md) に完全定義されています。すべての機能・プロンプト・改修は本グランドデザインを北極星として設計されます。
+> 🧭 **最高憲章**: 設計・実装原則はリポジトリ内の `AGENTS.md` および設計元 `companion-cockpit/GRAND_DESIGN.md` / `SPEC.md` に準拠します。
 
 ---
 
-## 🌟 システムの特徴と主要アーキテクチャ
+## 🌟 v2 アーキテクチャと主要機能
 
-### 1. 2モデル対応・2段階ハイブリッドアーキテクチャ（モジュール直交結合・柔軟モデル切替）
-- **第1段階: 司令塔・ルーター（`gemini-3.1-flash-lite` / `thinkingLevel: low`）**:
-  - ユーザー発言の意図分類（DB依頼、単発行動開始、過ごし方相談、体調不良、雑談等）、直前行動の状態、着目すべきタスク、段取り組み立て要否（`need_schedule_plan`）、未来日程の動的参照期間（`schedule_range_start` / `schedule_range_end`）、事実質問時の純粋検索質問抽出（`search_query`）、生活領域と本業勤務の境界判断、該当する生活習慣トピックに加え、`profile` / `lifestyle_habits` / `cycle_stamps` 照合による周期スタンプ実施検知（`matched_cycle_stamps`）を、`thinkingLevel: 'low'` による軽量推論＋Structured Outputs（厳密なJSONスキーマ）で高速かつ正確に判定。
-  - **三位一体タスクキュレーション（時間制約無条件全件 × 重要度・優先度指定 × 文脈適合）**:
-    未完了タスク全件の中から、客観的な時間制約を持つ「⚠️期限超過・📅本日期限タスク」は件数制限なく**無条件に全件選出**（見落とし・不可視化・ハルシネーションを完全根絶）。さらに、期限の有無に関わらずリマインド目安やメモに「最優先」「優先度高め」と指定された重要タスクを優先選出。それ以外のタスクの中から、ユーザーの求める姿勢・場所・負荷・時間制約に合致する「文脈適合タスク（最大2〜3件）」を選別（段取り相談時は当日着手可能なタスクを最大6〜8件選出し、私生活の余白時間帯で現在なにも進行中でなく次にすべきことも未定の状態——挨拶・雑談・完了報告・DB依頼/質問の後を含む——では対象タスクIDに加えて次の一歩となる提案候補1〜3件も併せて選出。フェーズCで未完了候補が0件となった場合はGASセーフティネット側でも優先・当日期限・残存タスクから最大3件を補完）。※なお、本業勤務中・固定予定の進行中やトラブル/体調不調対応中における純粋な一息・雑談など、私生活タスクの提案や調整が求められていない場面では私生活タスクを割り込ませず `focused_task_ids: []` に留める境界保護を実施。
-- **GAS ルール層: 対話フェーズ判断・DB操作・段取り設計の完全直交分離**:
-  - 前回のやり取りからの経過時間、次の生活境界（仕事・食事・就寝等）、未完了タスク・カレンダー予定（`自由時間` / `休息` / `休憩` 等の余白・作業アンブレラ枠を含む）の客観データをGAS側で機械的に集計し、状況に応じたフェーズ（Phase A: 進行中保護 / Phase B: 即時送り出し / Phase C: 余白・触媒提案 / Phase D: 通常対話）を確定。**「ユーザーが何かをしている最中（本業・固定予定の進行中、直前行動が `継続中`、突発トラブル・体調不調への向き合い最中）」および「次にすべきことが決まっている状態（即時行動宣言 `immediate_sendoff`、本発言または当日会話履歴で宣言済みの目標 `support_stated_goal`、就寝移行）」以外の私生活の余白時間帯（挨拶・雑談・完了トランジション・DB登録/更新・事実質問の後を含む）は原則 Phase C（`proactive_proposal`）** とし、非タスク行動（`lifestyle_habits`・`input_stock`・`cycle_stamps`・`skill_options`）とタスクを組み合わせた5領域バランス提案を実施。一方、本業・固定予定中の雑談/DB依頼、トラブル・不調対話、就寝移行は Phase D、直前行動が `継続中` の合間の会話/DB依頼は Phase A（モメンタム保護）へ振り分けて境界と集中を守る。
-  - **対話スタンス・DB操作能力・段取り設計の直交結合**: フェーズA/B（進行中保護・即時送り出し）であっても、ユーザーから指示されたタスク操作（完了・更新・追加）は100%確実にコンテキストへ注入し、送り出しと同時にタスク処理を実行。また、一日全体や部分時間帯（帰宅後の夜・午後〜夜等）のタイムスケジュール組み立ては、前段Liteの `need_schedule_plan` 判定によって `prompt_schedule` と必要コンテキスト（`lifestyle_habits`, `cycle_stamps`, `input_stock`, 1週間カレンダー等）をフェーズ横断で直交注入する構成へ分離。
-- **第2段階: 本思考・動的アセンブル実行（`lite` / `3.5-lite` / `flash` / `hydrogen` 切替 ＋ `thinking_level` 制御）**:
-  - スプレッドシート `memory` タブの `backend_model`（`lite` [`gemini-3.1-flash-lite`] / `3.5-lite` [`gemini-3.5-flash-lite`] / `flash` [`gemini-3.8-flash`] / `hydrogen` [`gemini-4-hydrogen`] / 任意 `gemini-...` 名）および `thinking_level`（`minimal` / `low` / `medium` / `high` / Hydrogen時 `xhigh`。※`minimal` 非対応モデルでは自動で `low` へ安全フォールバック）により、コード編集や再デプロイなしで精度・文脈理解・思考深度を即座に切り替え可能。深夜バッチの日報・月報・中長期記憶代謝では引き続き品質優先で `gemini-3.8-flash` を使用。
-  - 判定結果に基づき、必要なプロンプト断片（`prompt_core`, `prompt_phase_*`, `prompt_schedule`, `prompt_db`, `prompt_relief`）と必要最小限のコンテキストのみを動的に結合して注入（非不調・非目標宣言時の Phase C では非タスク行動提案のために `lifestyle_habits`・未消化 `input_stock`・`skill_options`・`cycle_stamps` を供給し、DB操作・外部検索併用時は確認/回答後に次手提案を含める出力契約を末尾付与。また `matched_cycle_stamps` 自動検知併用時はフルDBスキーマへ膨張させず主操作のマイクロスキーマへ `cycle_stamps_updates` を直交注入）。
-  - **主提案（カタリスト）と期限リマインド（状況の鏡）の調和**: 渡されたタスクを同列に並べてこじつけるのではなく、文脈適合タスクを手元の選択肢（主提案）とし、期限タスクは無理のない見通し・リフレクションとして自然に添える。
-  - **思考バジェット制御 ＆ 実運用トークン実績**: 前段（`gemini-3.1-flash-lite`）には `thinkingLevel: 'low'` を適用して祝日連動の日程範囲推定や境界判断の精度を担保し、後段のGemini 3/4系モデルには `memory.thinking_level`（標準 `minimal`、`3.8-flash` や `gemini-4-hydrogen` 等 `minimal` 非対応モデルでは自動で `low` へ安全フォールバック、2.5系レガシーモデル指定時のみ `thinkingBudget: 0`）を適用して応答品質・LINE Reply APIの即時応答性を両立（Gemini 3.5 Flash-Lite / 3.6以降で非推奨となった `temperature` パラメータは各リクエストから撤廃）。実運用では前後段の2回呼び出し＋直近4ターン全文コンテキスト＋未完了タスク一覧を含め、通常ターンで合計 **約8,500〜16,000トークン/ターン**（主に安価な Flash-Lite 系入力・キャッシュで低コスト維持）で稼働。
+### 1. 3タブ PWA UI/UX（Sheer Frosted Glass × Fluid Mist）
+`docs/index.html`（`src/Dashboard.js` から生成）は **GitHub Pages + Service Worker (`sw.js`) + iOS Safe Area (`viewport-fit=cover` / `black-translucent`)** 対応のスタンドアロン PWA として動作します。
 
-### 2. 完全コストゼロ運用（LINE Reply API限定）
-- Push APIは一切使用せず、全対話・通知を無料の **Reply API** のみで完結。
-- 深夜バッチも通知なしの完全サイレント処理。
+- **Home（状況の鏡 × 行動の触媒）**:
+  - **ヘッダ**: OS 時計と重複する現在時刻表示を省き、天気・気圧サマリー（`weatherLine`）と次の予定／就寝境界カウントダウン（`HH:MM:SS`）、前回完了行動からの経過時間 $\Delta t$（`deltaText`）を表示。
+  - **朝のブリーフィングカード**: 03:00 境界生成・05:00 天気最新化。`×` または行動開始時に自動クローズ。
+  - **3枚行動デッキ**: コード側担当の確定アンカーカード（朝の身支度ステップ細分化：朝食・着替え・メイク・ヘアセット＋出社移動、平日勤務ブロック `10:00〜19:00` / 昼 `12:00〜13:00`、日跨ぎ保護付き `就寝` カード）と、AI（`DeckEngine.js`）が生成・キャッシュした `aiDeck.cards` を統合表示。左スワイプで「今日は提案しない」（`apiDismissCardToday`）。
+  - **サブアクション**:
+    - `自分で始める`: タイトル入力 ＋ **非線形スライダー（`5分 / 10分 / 15分 / 30分 / 45分 / 1時間 / 1時間30分 / 2時間 / 2時間30分 / 3時間 / 4時間 / 6時間`、初期値 `30分`）**。
+    - `別の候補`: 事前キャッシュ済み候補のページ送り（枯渇時のみ `apiRefreshDeck` で補充）。
+    - `少しだるい / 通常に戻す`: AI が時間帯・状況に合わせて事前生成済みの低負荷候補 `aiDeck.lowCards`（3〜5件）へ待ち時間 0ms で切替。
+  - **進行中 Focus ＆ Reflection**: クリスタルダイヤル（`startedAtMs` 実時刻ベース・`60分` 経過時ソフト通知）、完了後の任意気分チップ・JPEG圧縮写真添付・感想入力（オートフォーカスなし）。
+  - **引き算カード（`isTriage`）**: 過密・低気圧・疲労サイン時に先頭配置し、1タップで重タスクを翌日へ一括リスケ。
+- **Chat（傾聴・整理・DB操作・Web検索相談）**:
+  - 論理日当日（03:00〜翌02:59）のログを復元。写真送信（JPEG圧縮 → Drive保存）、インライン変数ピル挿入（Lists タブ連携）、Google Docs/Drive リンクカード、エラー時の再試行・入力復元を完備。
+  - **スタンプ反応 vs テキスト返信（役割分離）**: DB操作・所要時間変更・相談・調べ物時は `reply_mode: "reply"`＋実行バッジ（`.quiet-badge`）、日常のつぶやき・振り返りはユーザー吹き出し下へ絵文字スタンプ反応（`.reaction-chip`）を中心に控えめに応答。
+- **Lists（一覧・即実行・変数挿入）**:
+  - `Tasks`（7大生活プリフィックス絞込）・`Shopping`・`Stock`・`Habits`（`cycle_stamps` 経過日数順）。
+  - カードタップで下部共有入力欄へ変数ピル挿入、`▶` ボタンで Home タイマー即開始、`Shopping` のみ `✓` で即時購入済切替。
 
-### 3. 睡眠ファースト ＆ 起床連動（ファースト・ハロー方式）
-- 起床時間（朝4時〜正午まで）の初回の発言（「作業する」「おはよ」等）の返信末尾に、**天気（最高/最低気温・降水確率）・当日活動時間帯（06:00〜24:00）の気圧急降下アラート・本日の予定・重要タスク（当日＆期限超過、および最優先指定の未完了タスク）**をまとめたデイリーブリーフィングを自動合流（正午以降や2回目以降の発言では誤発動しないガード付き）。
-- **出社予定連動の天気取得**: 本日の予定（メイン＋家族共用「♪」予定）に「出社」が含まれる日のみ「自宅(磯子)＋職場(渋谷)」の両方の天気を取得・表示し、在宅日は「自宅(磯子)」のみを表示してノイズを排除。
-- **プログラム制御による二重配信防止**: AIの出力に任せず、`PropertiesService` とスプレッドシート `memory` の両面ガード（`isBriefingDeliveredToday` / `markBriefingDeliveredToday`）で1日1回だけ確実に配信。
-
-### 4. 安心の単一ユーザーセキュリティ（あなた専用）
-- あなたのLINE User ID（`OWNER_USER_ID`）のみを受け付けるホワイトリスト認証。
-- 他者からのメッセージや偽造リクエストを即座に遮断し、予定・体調・タスクのプライバシーを保護。
-
-### 5. 記憶の3層管理 ＆ 用語辞書（前提知識の厳格遵守）
-- **短期記憶**: 当日の会話ログ（極小高密度フォーマット `HH:mm User: ... / AI: ...` で全ターン保持）。
-- **中期記憶**: `rolling_memory`（最近の関心・ログ：直近7〜10日分の活動・関心バッファ）。
-- **長期記憶**: `profile`（住居・家族・勤務形態などの恒久的事実。深夜バッチで厳格に代謝）。
-- **用語辞書**: 『ぽこあポケモン』『残響フラクタル』『ぱずぎり』などの独自用語・作品定義をAIが世間一般の作品と混同しないよう、コンテキストに常時注入。
-
-### 6. Web検索グラウンディング ＆ 願望つぶやきのDB自動昇華
-- **事実質問時の直交Web検索分離（`gemini-3.1-flash-lite` + `googleSearch` 前取得）**: 前段 Lite が `"事実質問"` タグを検知したターン（`needSearch`）のみ、Lite が会話文脈の指示語や対象時期を補完しつつ DB 依頼や体調などの私的文脈を取り除いて抽出した `search_query`（＋現在日時）だけを後段呼び出し直前の `gemini-3.1-flash-lite`（`thinkingLevel: 'medium'`、JSON制約・DBスキーマなしのプレーンテキスト ＋ `tools: [{ googleSearch: {} }]`）へ渡してWeb検索を単独実行し、確認できた一次情報と参照元URLを `【外部Web検索結果（一次情報）】` コンテキストへ注入する直交2パス分離を採用（検索要ターンには `【外部情報の確認方針】` を直交注入し、未確認事項の推測補完を防止）。私的な会話ログや不要依頼の検索側への漏洩を防ぎつつ、後段モデルは全ターンで `googleSearch` ツールを外し厳格な Structured Outputs（`responseMimeType: 'application/json'`）に専念するため、ツール競合による検索未発火・DBアクション欠落や不要ターン誤発火を防止。外部Web検索で調べた期日や店舗情報は、その場で勝手に追加せず「タスクに追加しておきましょうか？」と確認を添え、次のターンで「追加して」と言われた際に初めて期限付きタスクとして登録。
-- **日常の願望つぶやきの自動手札化**: 一方、ユーザーが自発的に発した日常の願望やつぶやき（「〜食べたい」「〜欲しい」「〜行きたい」「〜見たい」等）は、行動の原動力となる潜在的欲求・ネクストアクションの種として逃さず、食品・買いたい物は `shopping`（買物リスト）、作品コンテンツは `input_stock`（インプット作品）、外出体験は `tasks`（お出かけタスク）へ即座に自動分類・ストックして着手摩擦を極小化。
-
-### 7. Googleカレンダー双方向連携 ＆ 複数家族共用カレンダー安全参照
-- **メインカレンダー ＆ 動的ウィンドウ・関連タスク期限同期**: 読み取りおよび追加・削除に対応。毎週の曜日繰り返し予定（`recurrence_days: ["MON", "THU", "FRI"]`）にも対応し、重複単発予定を自動クリーンアップ。普段の予定・日本の祝日取得は直近の翌週月曜（日曜18時以降は翌週日曜）までの軽量ウィンドウに抑えつつ、前段 Lite には `getUpcomingHolidaysSummary_` による今後1年間の日本の祝日サマリー（ScriptCache保持）だけを渡し、遠い月・連休等の参照期間（`schedule_range_start` / `schedule_range_end`）が明示・特定された時のみ最大62日幅で対象期間の予定をピンポイント取得してトークン肥大と取りこぼしを両立解消。また、カレンダー操作時に対応する未完了タスクが着目されている場合は、マイクロスキーマでも `task_actions`（`update`）でタスク期限を同時同期可能。
-- **家族共用カレンダー（`FAMILY_CALENDAR_ID` ＆ `HOUSEHOLD_CALENDAR_ID`）**: 【完全読み取り専用】。ユーザー担当の「♪」付き予定に加え、記号なしの「家族全体」予定（ディナー予約、家族行事等）を自動抽出し、デイリーブリーフィングやスケジュール把握に安全に活用。
-
-### 8. 自律性と対等性を尊重した行動提案 ＆ スマートな生活伴走
-- **原則ベースの行動提案エンジン（5領域横断・ポートフォリオ分散・同日重複排除）**:
-  特定の定番行動への偏りを防ぐため、[①実務・家事 / ②創造・専門スキル / ③文化・教養・娯楽 / ④身体ケア・休息・日常手入れ / ⑤社会的・対外的行動] の全5領域を横断。現在のユーザー状態（所要時間・負荷・覚醒度・姿勢）と照合して提案。
-- **生活習慣・運動の多様性（`lifestyle_habits`）**:
-  散歩だけでなく、室内ストレッチ動画、自重筋トレ動画、フィットネスゲーム（フィットボクシング、リングフィット等）など、屋内外の多様な身体ケア選択肢を生活前提データから動的に参照・提案。
-- **周期メンテナンスとご無沙汰スキルの可視化・リアルタイム＆深夜バッチ自動追従（`cycle_stamps`）**:
-  美容院、外歩き・散歩、弦交換、楽器演奏、創作等の最終実施日を記録し、経過日数（例: `3日前`）を動的にアノテーションして提案エンジンへ連携。各項目に該当する条件（例: 最寄り駅までの徒歩移動を伴う出社・外出、仕事中のリファレンス試聴等）はプロンプトへハードコードせず `lifestyle_habits` 側にデータとして外出しし、リアルタイム対話（第1段階 Lite の `matched_cycle_stamps` 検知 → 第2段階への直交注入 → 更新時は返信末尾へ `📌 周期スタンプ更新:` 通知を自動付与）と深夜バッチの双方で取りこぼしなく更新（本日記録済み項目は第1段階の検知候補から除外し、書込側でも無変更スキップを実施して同日内の重複更新・ムダ書込を防止）。
-- **脱力表明時の極小摩擦カタリスト（脱力の受容 ＆ 気力の立ち上げ支援）**:
-  客観的な体調不良（不調）がない日常の「動きたくない」「だるい」に対しては、まず休息を全面的に受容・肯定。その際、受動的なだらけ（動画鑑賞や仮眠等）への逃避をAI側から推奨することは時間の融解を助長するため厳禁とする。初動の重さ（着手摩擦）を解消し自律的な気力の立ち上がりを支えるため、手元の未完了タスクや日常ケアの中から、座ったまま・数分でサクッと片付く最も負荷の低い選択肢（手元カード）を2〜3枚差し出し、「もし気力が湧いたら、この中から1つやってみませんか？」と軽やかに提案して行動の触媒（カタリスト）として機能。
-- **作品コンテンツと道具・機材・外出体験の直交データ責務分離**:
-  - **作品コンテンツ（映画・音楽・本・ゲーム等）**: 手元で鑑賞・視聴・読書・プレイして消費する対象として `input_stock` に限定。
-  - **道具・機材・ソフトウェア・日用品**: 単なる購入対象は `shopping`（買物リスト）、調査・比較・導入等のプロセスを伴うものは `tasks`（タスク追加または該当タスクのメモ更新）として登録。
-  - **外出体験（見学・展示・旅行等）**: 天候や休日の可処分時間と連動できるよう `tasks`（カテゴリ: `[お出かけ]`、リマインド目安: `休日お出かけ・晴れ` 等）へ一元化。
-  - **複数ジャンルの同時操作**: 買物とタスクなど複数ジャンルのDB操作が必要な場合は、前段Liteが `other` を出力し後段モデル（標準 Flash-Lite / 切替時 Flash）に総合スキーマを適用して同一ターンで両立実行。
-- **直交4大データプール体系の手札化原則（Principles over Patches）**:
-  ユーザーが日常会話の中で自発的に口にした願望やつぶやき・行動意志（「〜したい」「〜する」「〜やろう」等）は、個別具象キーワード（爪切り、片付け等）でモグラ叩きせず、客観的属性に基づいて直交4大データプールへ一意に分類・自動手札化する：
-  1. **買物メモ（`shopping`）**: 食品・日用品など、単に購入・入手したい対象（`shopping_actions: add`）。
-  2. **作品コンテンツ（`input_stock`）**: 映画・音楽・本・ゲームなど、手元で鑑賞・視聴・読書・プレイして消費する対象（`input_stock_actions: add`）。
-  3. **カレンダー予定（`calendar`）**: 日時やタイムボックスが確定した固定枠・段取り（`calendar_actions: add`）。
-  4. **行動・タスク全般（`tasks`）**: 本人が身体を動かして実践するあらゆる日常の作業、身だしなみ・手入れ、事務、外出・体験全般（`task_actions: add`）。適切なリマインド目安（`remind_context`）を自動付与して軽やかに手札化し、着手摩擦を極小化する。
-- **時間の鏡（リフレクション）の一元化と時報アナウンスの根絶**:
-  現在時刻や生活境界（就寝23:00等）までの残り時間は、AIの内的な判断材料（状況把握・引き際のスマートな見守り）として心の中で把握し、返信冒頭等で機械的に「現在〇〇時ですので〜」「現在〇〇時で、残り〇〇分です」と読み上げる時報アナウンスを `prompt_core` で一元的に禁止。各フェーズモジュールの重複記述を整理し、プロンプトの直交性とアテンション効率を最大化。
-- **対話スタンスとDB操作能力の直交化（フェーズB受託専念）**:
-  フェーズB（単発行動への即時送り出し）であっても、ユーザーからタスク操作や予定変更などの依頼が同時に含まれている場合は、確実にJSONアクションを出力した上で、本文は軽快に送り出す受託原則を徹底。
-- **AI主体の文脈タスク選出パイプライン**:
-  プログラミング的なハードコードフィルタ（文字列部分一致による二重絞り込み等）を撤廃し、前段Flash-Liteが文脈・状況・最新発言からセマンティックに推論・選出したタスク（`focused_task_ids`）をそのまま後段生成モデル（標準 Flash-Lite / 切替時 Flash）へ素直に渡す自然なアーキテクチャを採用。AI本来の高度な文脈理解を活かした柔軟なタスク操作・提案を実現。
-- **実施時期変更・リスケ方針の確実な状態同期（引き算の伴走・罪悪感のない休息）**:
-  一括・個別を問わず、対話や段取りの中で既存タスクの実施時期・期限を変更・先送りする方針が定まった時は、前段Liteが状態更新（`DB依頼` / `task_update`）として検出し、口頭の了解だけで済ませず、現在設定されている期限が目標日と異なる対象すべてに対して確実に `update`（目標日付）を出力（すでに目標日と一致している場合は不要な更新を行わない）。翌朝に不当な「期限超過」を残す心理的負債を根絶。
-- **可処分時間に応じた階層的タスク提示（普遍的生活力学）**:
-  時間帯（朝・昼・夜）を問わず、残存タスク照会時は次の生活境界までの「可処分時間」と各タスクの「見積負荷・所要時間」を客観的に照合。枠内でサクッと完結できる「手元タスク（短時間・低負荷）」を主候補とし、枠時間を明らかに超過する重タスクは「別枠・別日へのリスケ推奨」として階層的に提示して心理的圧迫感を解消。
-- **対象時間枠に応じたタイムスケジュール・段取り設計（`prompt_schedule` 直交注入）**:
-  一日全体の組み立て（起床〜就寝）に限らず、帰宅後の夜・午後〜夜・週末など特定時間帯のみの段取り相談でも前段Liteが `need_schedule_plan: true` と判定し、`prompt_schedule` をオンデマンド注入。先に固定予定や `lifestyle_habits` に基づく生活維持・準備・後処理（入浴〜ドライヤー・ケア一式や身支度等）の実時間を差し引いて正味の可処分時間を算出し、`HH:mm〜HH:mm` の具体的な時間ブロックと現実的な段取りを提示。余裕を持って収まりきらない時は無茶に圧縮して詰め込まず、残り時間の現実を映した上で適宜減らす・規模を軽くする・別日へ回す等の引き算の調整案を提示（`prompt_phase_c` 本体は対話スタンス・触媒提案のみにスリム化）。
-- **行動宣言に対する時間軸の限定（1文完結・先回りの完全排除）**:
-  「風呂入ってくる」「ご飯炊いてくる」などの行動宣言時は、その宣言された行動への了解と送り出しの1文のみで即座に完結。条件付きの先回り（「沸いたら〜しよう」等）を排除。
-- **大人の自律性尊重と予防的小言の排除**:
-  日常の生活行動に対して、怪我・冷え・体調に関する予防的気遣いフレーズ（「〜に気をつけて」等）を口出ししない。
-- **主語・視点の厳密な分離**:
-  AIは「聞き手・伴走者」であり行動の当事者ではない。ユーザーの食事や帰宅に対する「ごちそうさまでした」「ただいま」や、セルフケアへのお礼（「ありがとうございます」）などの主客転倒を厳禁化。
-- **タスク優先度・リマインド目安の動的更新（口頭承諾の完全排除）**:
-  ユーザーが「〜を優先度高めで提案してほしい」「早めに提案して」「〇〇を優先して」などと発言した場合、単なる口頭の相槌で終わらせず、前段Flash-Liteが確実にDB更新操作（`task_update`）としてルーティング。後段生成モデルがスプレッドシート `tasks` のメモ欄（背景・理由）およびリマインド目安（8列目: 例 `休日PC・最優先`）を即座に更新・永続化。
-- **主提案（カタリスト）と期限リマインド（状況の鏡）の分離調和**:
-  余白時間や過ごし方相談時において、ユーザーが特定の姿勢・場所・負荷・時間制約を求めている場合は、文脈に合致する手元カードを主提案として差し出す。本日期限や期限超過のタスクは主提案に無理にこじつけるのではなく、一日の見通し・注意喚起（リフレクション）として「なお、本日期限の［タスク名］もありますが〜」と自然に添えることで、着手摩擦の極小化と時間の境界保護を両立。
-- **生活境界・活動移行時の着手摩擦解消（対象の有無で出し分け）**:
-  固定予定や生活リズム（食事・入浴・睡眠等）の境界に配慮しつつ、未完了タスクや用事への着手摩擦（初動の重さ）に対しては、無理強いせず自然に受け止めた上で「やることがすでに決まっている時」はその対象の最初の一歩だけを1つ軽く差し出し（別タスクへのすり替えを行わない）、「やることが決まっておらず脱力している時」は今の姿勢で数分で片付く軽い手元カードを2〜3個差し出すことで自律的な動き出しを後押し。また、すでに動き出す宣言（Phase B）へは手順指示や先回りを足さず軽快に送り出す。客観的な体調不良時（`不調`）は Phase A〜D と競合させず専用モジュール（`prompt_relief`）を単独適用し、引き算と回復の判断を一貫して担う。
-- **体調判定の客観化（低調 vs 不調）と引き算セーフティの適正化**:
-  症状名の強弱だけでなく「現時点で生活・業務を継続できるか（進行形の破綻か、落ち着いた経過観察状態か）」を軸に判定。日常の揺らぎや、一時的な強い症状でも現時点で落ち着き省エネで活動継続できる状態は「低調（経過観察・省エネモード）」として扱い、生活基盤を維持しつつ過密負荷を抑制。強い症状が現時点で進行形にあり物理的に活動破綻している場合のみ「不調（緊急停止セーフティ）」を発動し、引き算対象から生活基盤（食事・水分・身支度）を除外して生活リズム崩壊を防止。
-- **7大生活プリフィックス体系によるタスク整流化（ダッシュボード視認性向上 ＆ スキーマ単一源化）**:
-  タスクの無秩序なプレフィックス乱立（孤立グループの増殖）を根本根絶するため、タスク命名規則として必ず角括弧による【7大生活プリフィックス】（`[仕事]`, `[制作・創作]`, `[家事・環境]`, `[実務・手続]`, `[趣味・文化]`, `[身体・ケア]`, `[お出かけ]`）のいずれかを先頭に付与することを定義（ただしユーザーから明示的なカテゴリ・領域指定がある場合は自動分類基準よりユーザー指定を優先）。7大プリフィックスの分類基準（生活伴走システムの保守・機能改善を `[実務・手続]` とする境界定義を含む）と未指定時の `due_date` 省略ルールは `getDefaultTaskPrefixGuide_()` / `resolveTaskPrefixGuide_()` で単一情報源化し、`prompt_db` 全体版だけでなくトークン節約用のマイクロDBスキーマ（`task_add`, `task_update`, `task_all`, `project_doc`, `routine`）でも `memory.prompt_db` の設定を継承・適用します。また、`findProjectCategoryEntry()` で7大カテゴリ定義の解決を共通化し、ダッシュボード側でも角括弧パーサーおよびクイック選択ボタンを完全連動させ、常に整理されたグループとピル絞り込みで直感的にタスクを探せる環境を確立。
-- **タスク操作の完全差分パッチ化 ＆ 安全更新・JSON出力トークン極小化**:
-  タスク更新（`update`）時は変更のあるキーのみ（例: リスケなら `task_id` と `due_date`、カテゴリ変更なら `task_id` と `category`、タイトル本文変更なら `task_id` と `new_title`）を出力する完全差分パッチ形式を採用。GAS側（`applyTaskActions`）では指定のないフィールドのセルを一切触らない安全更新と、先頭カテゴリプリフィックス付け替え・`task_id` 一致時の変更後タイトル救済・実質変更なし（No-op）更新時の通知抑止を徹底し、既存データの意図せぬ消去や偽の更新通知リスクを完全排除。完了（`complete`）・破棄（`delete`）時も `task_id` のみで即座にマッチ可能とし、出力トークンを大幅に削減。また、`[📄資料連携済]` タスクに対するカテゴリ／タイトル等の制御属性更新は `project_doc` に吸われず `task_update` として処理されるようルーティング境界を統一。
-- **カレンダー操作の軽量化（`HH:mm` 省略記法 ＆ デフォルトキー省略）**:
-  同日予定の `end_time` において `"HH:mm"` 形式（GAS側で開始日を自動補完）を許容し、`is_all_day: false` や `recurrence_days: []` などのデフォルト値を省略可能とすることで、1件あたりのJSON出力を約80tokから約35tokへ半減。
-- **操作結果の二重復唱防止（トークン激減 ＆ 視認性向上）**:
-  カレンダー反映（タイスケ作成など）や複数タスク操作（一括リスケ・完了等）時、GAS側で末尾に機械的通知（`📅 カレンダー追加: ...` / `📝 タスク更新: ...`）が自動付与されるため、AI返信本文（`reply_text`）での箇条書きによる全件復唱を原則禁止。「タイスケをカレンダーに登録しました！」「4件のタスクをリスケしました」等、要点を1〜2文でスッキリ完結させることで、Flashのアウトプットトークン急増（1,000tok超）を根本的に抑制。
-
-### 9. スプレッドシート連動によるモジュール型プロンプト運用（完全ノーデプロイ）
-- **モジュール型プロンプト体系**:
-  スプレッドシートの `memory` タブ（`prompt_core`, `prompt_phase_a~d`, `prompt_schedule`, `prompt_db`, `prompt_relief`, `prompt_lite`）に各モジュールを分割保持。
-- **完全ノーデプロイでのプロンプト即時反映**:
-  GASエディタでの再デプロイ（新バージョン発行）は一切不要。スプレッドシートの該当セルを書き換えるだけで、次のLINEメッセージから即時反映（追加遅延0ms）。
-- **Antigravity CLI連携（`scripts/sheet-cli.js`）**:
-  サービスアカウント経由で、チャットやCLIから直接モジュールプロンプトを個別に読み書き可能。
-
-### 10. 深夜03:00統合バッチ (Notion日報・月報連携)
-- `03:00〜翌02:59` の1日境界で共通ヘルパー（`getDailyReportWindowData_`）により対象日の会話ログ、完了タスク、消化したインプット作品（映画・音楽・本・ゲーム等）を重複なく抽出し（`tasks` 完了日・`input_stock` 消化日には `yyyy-MM-dd HH:mm:ss` の時刻付き記録を保存し、既存の日付のみデータも未明ログで境界切り分け）、`Gemini 3.8 Flash`（事前思考 `thinkingLevel: 'low'`）でMarkdown日報を生成してNotion日報DBへ投稿。
-- **重要度・テキストの温度を反映した階層的解像度 ＆ 水増し排除の日報プロンプト**:
-  全事象の平坦な一律羅列や件数ノルマによる穴埋めを廃止し、Principles over Examples（具体例排除・原則ベース）に則った3大原則（1. テキストの温度と等身大のジャーナル表現 ＆ 1日全体の俯瞰、2. 切り捨てではなく粒度で整理する階層的解像度、3. 直交8大領域）を採用。直近の時間帯（深夜の話題等）や事務的進捗だけで全体の印象を上書きせず、高い感情の温度が乗った出来事・趣味の楽しみを確実にピックアップし、硬直した業務報告調・翌日への持ち越し宣言・休養押し付けを排した自然で温かみのある振り返りを生成。一覧用ハイライトは Notion の `概要` プロパティへ一本化し、本文は「📌 コア活動・特筆すべき出来事（最大4点・下限なし）」で主活動や心動いた体験を文章描写し、「📋 日常の出来事・完了タスク」では具体的な食事・発見・興味・判断・完了タスク・体調を膨らませず1行ずつの軽やかな箇条書きとして漏れなく残す構成を採用（内容のない生存アクションや背景判断のないリスト整理・翌日予定のみを除外）。
-- **Notionプロパティ連携（中身を開かずに一目でわかる可視化 ＆ 「仕事・制作・創作」の完全分離）**:
-  - **日報DB**: `名前`(title: `YYYY-MM-DD(曜日) 日報・生活記録` で曜日を機械的自動付与)、`日付`(date)、`概要`(rich_text: プレフィックスなし・改行なしの1文ストレート要約。ログの時間軸・固有名詞・生活の重心をそのまま反映し、知的な成果への脚色や一般的語彙への言い換えを排除)、`主な領域`(multi_select: 8大領域カラータグ)、`トーン`(select: 心身の波・活動ペース)、`形態`(select: 🏢 出社 / 🏠 リモート / 🌿 休日)
-  - **月報DB**: `名前`(title)、`日付`(date: 月末日)、`月間サマリー`(rich_text: カテゴリプレフィックス+改行区切りの複数行サマリー)、`注力領域`(multi_select)、`月間リズム`(select: 月の全体傾向)
-  - **直交8大領域体系**: 「仕事（本業業務）」「制作（本業に繋がる音楽スキル開発・DTM/REAPER・作曲・ギター）」「創作（趣味としての小説『残響フラクタル』執筆・絵・イラスト）」を明確に3分化し、環境・実務・文化・身体・対人を合わせた8大領域（`💼 仕事`, `🎧 制作`, `🎨 創作`, `🛋️ 環境`, `📝 実務`, `🎮 文化`, `🌿 身体`, `🤝 対人`）で日報・月報を完全統一。
-  - Gemini生成冒頭のメタデータJSONブロックをGAS側で自動抽出し、Notion API経由でプロパティへ自動投入（本文側にはメタデータは混ざりません）。テーブルやカレンダー、ボードビューでページを開かずに生活リズムを俯瞰可能。
-- **Notionブロックパーサー完全対応**: 太字（`**...**`）のインラインアノテーション、区切り線（`divider` ブロック）、チェックボックス（`- [x]` / `- [ ]` の `to_do` ブロック）にネイティブ対応。ハイフン結合見出し（`- ## ` 等）の自動正規化救済も完備。
-- **思い出の写真自動埋め込み**: LINEで送信された画像（Google Drive保存）の中から、料理・風景・記念スクショなど日記として価値のある特筆すべき写真を厳選し、Notion日報および月報に自動埋め込み。
-- **振り返りの質向上**: AI側の返答・推測・相槌をインプットから除外し、箇条書き主体で数秒で把握できる視認性を確保。
-- **Notion投稿成功を確認してから**ログをクリアするデータ保護設計。また、Gemini APIの一時的な高負荷（503/429）に対する自動リトライ機構を完備。
-- **3点クロスチェックによる中長期記憶代謝 ＆ `cycle_stamps` 自動補完**:
-  深夜の `analyzeMemoryUpdates` では時系列ログ（タイムスタンプ付き）・対象日カレンダー予定（`targetDateEvents`）・完了タスク（`completedTasks`）・`lifestyle_habits`・既存 `rolling_memory` をすべて照合。リアルタイム対話での取りこぼしを安全に補完しつつ、**「①対象日のカレンダー予定 × ②当日の実態ログ/完了タスク × ③前日以前の `rolling_memory`（翌日の休暇取得・予定変更等の申し送り）」の3点クロスチェック**により、休暇日にカレンダーへ「♪出社」が残っていても誤って出社日や `外歩き・散歩` に更新しないガードを実装。
-- 毎月1日には前月日報を日付昇順で自動集約し、月間ハイライト・思い出ジャーナルをNotion月報DBへ投稿。平坦な全件要約や過剰な物語化・美談化・煽りポエムを完全排除し、5領域の等身大の前進・学び・感情の動いたエピソードを淡々と、かつ温かみをもって記録する原則ベースプロンプトを採用。
-
-### 11. 生活伴走 PWA チャットアプリ（GitHub Pages × LIFF × LINE共通伴走パイプライン）
-- **チャット中心・自然対話主体のレスポンシブ PWA UI (`Chat`, `Tasks`, `Shopping`, `Stock`, `Habits`)**:
-  - **Chat**: LINE Bot と当日の会話ログ (`logs`)・朝ファーストハロー・DB実行通知・Google Docsリンクをリアルタイムに統合表示。送信・エラー時の再試行／入力復元・バックグラウンド受信時 Web 通知（オプトイン）に対応。
-  - **インライン変数ピル入力（Appleショートカット流儀）**: `Tasks`（締切順＋カテゴリ絞込）・`Shopping`・`Stock`・`Habits`（最長経過順）の各カードをタップすると、文字入力カーソル位置へ項目ピルを直接埋め込んで自然な複合文をそのまま AI へ送信（`logs` シートには読みやすい自然な文章で保存）。
-  - **マルチデバイス＆テーマ対応**: モバイル1ペイン（下部5タブ）＋タブレット/PC 2ペイン（左チャット＋右カードワークスペース）。ライト／ダーク（Deep Forest Charcoal）自動追従＋手動切替を完備。
-  - **画像入力 ＆ iOSショートカット共有シート連携**: 写真ライブラリ選択・カメラ直接撮影（`capture="environment"`）・貼り付け・D&D に加え、クライアント側 `<canvas>` JPEG 自動リサイズ・軽量化を搭載。また `apiBufferCompanionImage` により iOS/macOS の「ショートカット」から共有シート画像を事前バッファリング（30分TTL）し、アプリ起動時に待機画像としてシームレスに合流可能（個別キャンセルは `apiRemoveBufferedImage`）。
-  - **モデルルーティングの忠実性**: 画像付きメッセージも通常ターン同様 `memory.backend_model` 設定に従属し、`executeAndPersistCompanionTurn_` を通じて LINE と完全に同一の伴走ロジックで処理・永続化。
-- **GitHub Pages × LIFF 連携**:
-  - **公開URL**: `https://agehapia13-art.github.io/daily-companion/`（`docs/manifest.json`・`docs/sw.js`・`docs/icon.svg`・`apple-touch-icon.png`・`icon-192.png`・`icon-512.png` によるホーム画面追加・スタンドアロンPWA動作に対応）
-  - **LIFF初回認証の整流化 ＆ 自動リカバリーリトライ**: LINE内ブラウザ・リッチメニュー（`tab=tasks|shopping|input|memory`）・直接PWA起動のいずれでもURLパラメータ / `liff.state` / `localStorage` をシームレスに引き継ぎ、設定モーダルからの手動接続・再同期にも対応。
-
-### 12. ログ基盤・タスク・ルーティンのローリング整理（30日保持）
-- **スプレッドシート `logs` の16列拡張**:
-  会話ログ（時刻・発言者・メッセージ・画像URL・AI返答）に加え、Lite/Flash各々の入力・出力・キャッシュトークン、総トークン、判定タグ/フェーズをリアルタイムに永続記録。
-- **直近30日ローリング保持（`logs` / `tasks` / `routines`）**:
-  `logs` に加え、完了・破棄済み `tasks`（`未完了` は対象外）および完了・期間満了 `routines`（`有効` は対象外）についても、直近30日分をスプレッドシート上に保持し、30日を超えた古い履歴行のみ深夜バッチ（Notion日報投稿成功後）で安全に自動パージ。`routines` シートは7列目まで拡張し、`ステータス(有効/完了/期間満了)` と `完了日` によるクリーンなライフサイクル管理およびAI指示（`routine_actions: complete`）からの終了に対応。
-
-### 13. Google Drive プロジェクトフォルダ ＆ Google Docs双方向連携（`DriveProject.js`）
-- **7大生活領域フォルダ階層（Option A + `_completed` アーカイブ運用）**:
-  マイドライブ直下に7大生活プレフィックスと直交対応する親フォルダ（`01_仕事`, `02_制作・創作`, `03_家事・環境`, `04_実務・手続`, `05_趣味・文化`, `06_身体・ケア`, `07_お出かけ`）を配置。カテゴリ直下にファイルを直置きせず、必ず **`YYMM_プロジェクト名`** 形式のサブフォルダを作り、検討・資料用の Google Docs を格納する構造を徹底（既存の無関係ファイル・フォルダは一切変更・移動しない）。また、完了・役割終了した `YYMM_プロジェクト名` フォルダを丸ごと移動するための各カテゴリ直下 **`_completed`** サブフォルダは `syncProjectFoldersIndex` での進行中プロジェクト走査対象から自動除外し、AIコンテキストの汚染を防ぐ。
-- **LINEチャットからの作成・追記・タスク連携（`project_actions`）**:
-  - `create_project`: カテゴリ判定＋`YYMM_` 自動付与でプロジェクトフォルダとGoogle Docを同時作成し、既存タスクまたは同ターン新規タスクへ即座に紐付け。
-  - `add_doc`: 既存プロジェクトフォルダ内へ新規Google Docを追加。
-  - `append_doc`: 連携済みGoogle Docの末尾へタイムスタンプ付きの箇条書きを追記（LINEで思いついた項目を蓄積し、後からPC・外部AIでの比較検討母艦として活用）。
-- **新規タスク追加・連携タスク更新時の直交自動判別**:
-  `memory` シートのプロジェクト台帳（`project_folders`）とタスクの `[📄資料連携済]` フラグを前段Flash-Lite・後段生成モデル双方へ注入。新規タスク追加時は同領域かつ主題が直接一致する既存プロジェクトのみを `project_name` で自動連携し、GAS側（`isProjectCategoryCompatibleWithTask_`）でも7大プリフィックスとフォルダ親カテゴリの直交不一致を遮断して誤紐付けを防止。また、`[📄資料連携済]` タスクに対する検討候補・URL・メモ追加は「ドキュメント」等の明示語が無くても `project_actions.append_doc`（Doc蓄積）へ、「期限・優先度変更」は `task_actions.update`（制御属性）へ直交ルーティング。
-- **キャッシュ最適化 ＆ 深夜バッチ自動同期**:
-  7大親フォルダIDを `project_root_ids` にキャッシュしてチャット応答のAPI遅延を極小化しつつ、毎晩の `dailyMidnightBatch` でDrive上の第1階層フォルダ手動変更も自動同期。
+### 2. 二層高速ステート ＆ 役割分離（Code vs AI）
+- **二層ステート（`FastState.js`）**:
+  - Layer 1（`PropertiesService` キー `V2_FAST_STATE`）とブラウザ `localStorage` (`cc_v2_snapshot`) により 0ms 起動・高速同期。スプレッドシート `memory.V2_FAST_STATE` へミラー保存し復旧性を担保。
+  - **論理日境界（03:00 JST）**: `03:00〜翌02:59` を1日とし、日跨ぎの `isSleepCard` 進行中セッションは 03:00 リセット時も消去せず保護。
+- **定時トリガー（3本：`03:00` / `05:00` / `17:00`）**:
+  1. `03:00` **`dailyMidnightBatch`**: 前日 `03:00〜02:59` の Notion 日報投稿、中長期メモリー代謝、ルーティンタスク自動投入、毎月1日の月報作成、Drive プロジェクト台帳同期、30日ローリング整理、**v2 論理日リセット・朝ブリーフィング・初期 `aiDeck` 生成（`gemini-3.8-flash`）**。
+  2. `05:00` **`morningWeatherBatch`**: Open-Meteo 天気・気圧急降下取得＆ブリーフィング天気表示最新化。
+  3. `17:00` **`eveningDeckBatch`**: 退勤〜夜間帯へ向けた `aiDeck` 先読み再編成。
+- **動的更新**:
+  - 天気は最終取得から **3時間以上経過後の初回起動時**（および取得エラー・出社日の渋谷欠損時）に再取得。
+  - `aiDeck` は行動開始時（業務ブロック・就寝を除く）、候補枯渇時の `別の候補`、Chat での DB/低負荷状態変化時にバックグラウンド再編成。
 
 ---
 
@@ -164,201 +47,123 @@
 
 ```
 .
-├── AGENTS.md             # Antigravity（AIエージェント）行動憲章・思考原則（README更新義務等）
-├── GRAND_DESIGN.md       # 最高憲章: 本システムの存在意義・思想定義・行動原則
-├── .agent/               # プロンプト設計ガバナンスルール ＆ プロンプト改善スキル
-├── .clasp.json           # clasp設定 (rootDir: "src", Git管理対象外)
-├── appsscript.json       # タイムゾーン (Asia/Tokyo) およびV8ランタイム設定
-├── service-account.json  # Google Cloud サービスアカウント秘密鍵 (Git管理対象外)
-├── docs/
-│   ├── index.html            # GitHub Pages配信用PWAアプリ (scripts/build-dashboard.jsで自動生成)
-│   ├── manifest.json         # PWA Web App Manifest (standalone / relative scope)
-│   ├── sw.js                 # PWA Service Worker (オフライン起動キャッシュ & 通知クリック復帰)
-│   ├── icon.svg              # PWA SVGアイコン (ヘッダーロゴ準拠の葉っぱマーク)
-│   ├── apple-touch-icon.png  # iOSホーム画面用PNGアイコン (180x180, 自動生成)
-│   ├── icon-192.png          # Android / Web Manifest用PNGアイコン (192x192, 自動生成)
-│   ├── icon-512.png          # 高解像度・maskable用PNGアイコン (512x512, 自動生成)
-│   └── .nojekyll             # GitHub Pages高速配信用設定
-├── src/                  # ★GAS本体コード (全機能のマスター。clasp push でGASへ同期)
-│   ├── appsscript.json   # GASデプロイ用マニフェスト
-│   ├── Config.js         # 設定・Script Properties検証・定数・モデル指定
-│   ├── Spreadsheet.js    # 全6タブ操作・タスク更新/破棄・ルーティン動的注入・メモリ管理
-│   ├── DriveProject.js   # Google Drive 7大カテゴリフォルダ・Google Docs作成/追記・台帳同期
-│   ├── Calendar.js       # 動的カレンダーウィンドウ・家族共用カレンダー(♪抽出)・繰り返し予定対応
-│   ├── Weather.js        # Open-Meteo 天気(最高/最低気温・出社連動渋谷天気) & 気圧急降下検知
-│   ├── Notion.js         # Notion API連携（日報・月報投稿・リッチテキスト/画像ブロック）
-│   ├── Gemini.js         # 2段階パイプライン（Dual Flash-Lite標準 ＋ backend_model切替・周期スタンプ直交検知・日報/記憶代謝）
-│   ├── Line.js           # LINE Reply API・Base64/LINE画像Drive保存・30分画像バッファ管理
-│   ├── Batch.js          # dailyMidnightBatch (深夜03:00バッチ / 消化インプット連携 / ログ保護)
-│   ├── Dashboard.js      # PWA/WebアプリAPI (`apiSendCompanionMessage` / 画像バッファAPI等)・SPAテンプレート・リッチメニュー登録
-│   ├── Webhook.js        # LINE・PWA共通伴走パイプライン (`executeAndPersistCompanionTurn_`)・doPost / doGet
-│   └── Setup.js          # 初期設定・メンテナンス・プロンプト検証ドライラン
+├── AGENTS.md                 # AIエージェント行動憲章・作業手順ルール
+├── .clasp.json               # clasp設定 (rootDir: "src", Git管理対象外)
+├── package.json              # npm run check / build:dashboard / push
+├── service-account.json      # Google Cloud サービスアカウント秘密鍵 (Git管理対象外)
+├── web/                      # PWA フロントエンドソース (build-dashboard.js の入力元)
+│   ├── index.html            # HTML シェル・モーダル・ブート設定アンカー
+│   ├── styles.css            # Fluid Mist & Glassmorphism スタイル定義
+│   └── js/                   # state-api / mist-theme / home-view / chat-lists-view
+├── docs/                     # GitHub Pages PWA 出力先 (build-dashboard.js が自動生成)
+│   ├── index.html
+│   ├── manifest.json
+│   ├── sw.js
+│   ├── icon.svg
+│   ├── apple-touch-icon.png
+│   ├── icon-192.png
+│   ├── icon-512.png
+│   └── .nojekyll
+├── src/                      # GAS ソースコード (clasp push 対象)
+│   ├── appsscript.json       # Asia/Tokyo / V8 / Web App 実行権限設定
+│   ├── Config.js             # 環境変数検証・認証キー・テストDB切替・定数
+│   ├── Prompts.js            # v2 デフォルト4プロンプト (Core/Schedule/Db/Deck) ＆ CHAT_RESPONSE_SCHEMA
+│   ├── Api.js                # doGet / doPost ＆ 7つのPWA APIエンドポイント
+│   ├── FastState.js          # 二層ステート・03:00境界・アンカーカード・デッキ合成
+│   ├── DeckEngine.js         # aiDeck (cards + lowCards) 構造化生成・天気ブリーフィング更新
+│   ├── Media.js              # Base64 JPEGデコード・Google Drive 画像保存
+│   ├── GeminiClient.js       # Gemini REST 通信・リトライ・モデル解決・JSON救済パース
+│   ├── CompanionChat.js      # Chat 1段構成＋オンデマンド Web検索/広域カレンダー・Prefix Cache最適化
+│   ├── ReportGenerator.js    # 深夜バッチ向け Notion 日報・月報生成 ＆ 中長期記憶代謝
+│   ├── Spreadsheet.js        # logs / tasks / routines / shopping / input_stock 操作・日次ウィンドウ集計
+│   ├── MemoryStore.js        # memory シート CRUD・安全更新ガード・AIコンテキスト整形
+│   ├── Calendar.js           # 勤務モード判定 (commute/remote/holiday)・境界ターゲット算出・カレンダー操作
+│   ├── Weather.js            # Open-Meteo 天気・気圧急降下検知・Home 1行整形
+│   ├── DriveProject.js       # Google Drive 7大領域プロジェクトフォルダ・Google Docs 連携
+│   ├── Notion.js             # Notion 日報・月報 DB 投稿
+│   ├── Batch.js              # dailyMidnightBatch (03:00) / morningWeatherBatch (05:00) / eveningDeckBatch (17:00)
+│   ├── Dashboard.js          # GAS HTML Service レンダラ (DashboardHtml.html を配信)
+│   ├── DashboardHtml.html    # build-dashboard.js が web/ から生成する GAS 配信用バンドルHTML
+│   ├── Setup.js              # 初期設定・3トリガー登録・プロンプト同期・月報再作成
+│   └── Tests.js              # 手動実行テスト・ドライランシナリオ・モデル疎通確認スイート
 ├── scripts/
-│   ├── build-dashboard.js       # src/Dashboard.js から docs/ PWA一式を自動生成 ＆ JS/SW構文を検証
-│   ├── migrate-task-prefixes.js # 未完了タスクを7大生活プリフィックス形式へ一括移行（tasks!A2:I全行対象）
-│   ├── sheet-cli.js             # Antigravity/ローカルからスプレッドシートを直接読み書き・同期する操作CLI
-│   └── sync-prompts-to-sheet.js # src/Gemini.js 内の最新プロンプト群を memory シートへ同期（custom_system_prompt は上書きしない）
+│   ├── build-dashboard.js       # web/ → src/DashboardHtml.html & docs/ ビルド ＆ 構文検証
+│   ├── migrate-task-prefixes.js # 未完了タスク7大プリフィックス移行ツール
+│   ├── sheet-cli.js             # スプレッドシート CLI 読み書きツール (--test 対応)
+│   ├── sync-prompts-to-sheet.js # src/Prompts.js のプロンプトを memory へ同期
+│   ├── verify-prompts-live.js   # v2 プロンプト実機応答 ＆ --dry-run 検証ランナー
+│   └── mock-server.js           # ローカルPWA/APIモックサーバー ＆ E2E自動検証 (--mock-gemini / 実Gemini対応)
 └── README.md
 ```
 
 ---
 
-## ⚙️ 環境変数（Script Properties: 全16項目）
+## 🌐 v2 PWA API エンドポイント（`src/Api.js`）
 
-Google Apps Script プロジェクトの「プロジェクトの設定」>「スクリプト プロパティ」に以下を設定してください。
+`doPost`（CORS `Content-Type: text/plain;charset=utf-8` JSON `{ apiAction, args }`）および GAS `google.script.run` の両方から同一インタフェースで呼び出されます。
 
-| キー | 必須 | 説明 | 設定例 / 備考 |
-| :--- | :---: | :--- | :--- |
-| `OWNER_USER_ID` | ○ | **あなたのLINE User ID** | LINE公式アカウントと会話した際の `event.source.userId`（`U...` 33桁） |
-| `LINE_CHANNEL_ACCESS_TOKEN` | ○ | LINE Messaging API チャネルアクセストークン（長期） | LINE Developers コンソール |
-| `GEMINI_API_KEY` | ○ | Google AI Studio APIキー | Google AI Studio |
-| `SPREADSHEET_ID` | ○ | 連携するGoogleスプレッドシートのID | スプレッドシートURLの `/d/{ID}/edit` 部分 |
-| `DRIVE_FOLDER_ID` | ○ | 受信画像を保存するGoogle DriveフォルダID | DriveフォルダURLの `/folders/{ID}` 部分 |
-| `NOTION_API_KEY` | ○ | Notion Internal Integration Secret | Notion Developers（`secret_...`） |
-| `NOTION_DAILY_DB_ID` | ○ | Notion日報データベースID | Notion日報DBのURL内の32桁英数字 |
-| `NOTION_MONTHLY_DB_ID` | ○ | Notion月報データベースID | Notion月報DBのURL内の32桁英数字 |
-| `HOME_LATITUDE` | ○ | 自宅（横浜市磯子区）の緯度 | `35.3970` |
-| `HOME_LONGITUDE` | ○ | 自宅（横浜市磯子区）の経度 | `139.6179` |
-| `WORK_LATITUDE` | - | 職場（渋谷区）の緯度（任意） | `35.6580` |
-| `WORK_LONGITUDE` | - | 職場（渋谷区）の経度（任意） | `139.7016` |
-| `FAMILY_CALENDAR_ID` | - | 家族共用GoogleカレンダーのID（任意） | カレンダー設定の「カレンダーID」（「♪」付き予定を安全に読み取り参照） |
-| `HOUSEHOLD_CALENDAR_ID` | - | 第2家族共用GoogleカレンダーのID（任意） | カレンダー設定の「カレンダーID」（「♪」付き本人予定 ＆ 記号なし家族全体予定を抽出） |
-| `WEBAPP_URL` | - | デプロイしたGASウェブアプリのURL | `https://script.google.com/macros/s/.../exec`（GitHub PagesからのAPI接続等に使用） |
-| `LIFF_ID` | - | LINE Front-end Framework の LIFF ID | `200...-xxxx`（ユーザー名義でのトーク自動発言・リッチメニュー連携に使用） |
+1. `apiGetHomeBootstrap(authKey)` — 起動時同期（03:00境界、天気3h鮮度更新、状態/デッキ/境界/天気行/$\Delta t$/リスト/論理日Chatログ）
+2. `apiStartAction(authKey, cardPayload)` — 行動開始・`activeSession` 保存・終了見込み時刻に基づく次手先読み
+3. `apiCompleteAction(authKey, completePayload)` — 完了/進行記録（`keepOpen: true` でタスク・ストックを未完のまま `【進行】` 記録可）・写真Drive保存・周期スタンプ・一括引き算リスケ・睡眠ログ反映
+4. `apiDismissCardToday(authKey, cardId)` — 左スワイプでの当日提案除外
+5. `apiSendChat(authKey, messagePayload)` — マルチモーダルChat送信（Gemini 3.5 Flash-Lite 1段＋必要時オンデマンド2段目、各種DB/Docs/Calendar更新、`state_changes`、スタンプ/返信永続化）
+6. `apiMutateListItem(authKey, mutation)` — Lists タブの Shopping 購入済トグル
+7. `apiRefreshDeck(authKey, excludeIds)` — `別の候補` キャッシュ枯渇時の新規手札補充
+
+---
+
+## ⚙️ Script Properties（GAS スクリプトプロパティ）
+
+| キー | 必須 | 説明 / 備考 |
+| :--- | :---: | :--- |
+| `GEMINI_API_KEY` | ○ | Google AI Studio API キー |
+| `SPREADSHEET_ID` | ○ | 本番 Google スプレッドシート ID |
+| `DRIVE_FOLDER_ID` | ○ | アップロード画像保存用 Google Drive フォルダ ID |
+| `NOTION_API_KEY` | ○ | Notion Internal Integration Secret |
+| `NOTION_DAILY_DB_ID` | ○ | Notion 日報データベース ID |
+| `NOTION_MONTHLY_DB_ID` | ○ | Notion 月報データベース ID |
+| `DASHBOARD_ACCESS_KEY` | - | PWA オーナー認証キー（未設定時はスクリプトID/ソルトから自動生成） |
+| `TEST_SPREADSHEET_ID` | - | 検証用コピーシート ID（`USE_TEST_SPREADSHEET=TRUE` 時に切替） |
+| `USE_TEST_SPREADSHEET` | - | `'TRUE'` 設定時のみ `TEST_SPREADSHEET_ID` を参照 |
+| `HOME_LATITUDE` / `HOME_LONGITUDE` | - | 自宅座標（既定: 横浜・磯子 `35.3970, 139.6179`） |
+| `WORK_LATITUDE` / `WORK_LONGITUDE` | - | 職場座標（既定: 渋谷 `35.6580, 139.7016`） |
+| `FAMILY_CALENDAR_ID` / `HOUSEHOLD_CALENDAR_ID` | - | 家族共用 Google カレンダー ID（読み取り専用） |
+| `OWNER_USER_ID` | - | 既存の認証キー互換維持用（任意） |
 
 ---
 
 ## 📊 スプレッドシート構造（全6タブ）
 
-1. **`logs`**（会話ログ ＆ トークン追跡・全16列対応）:
-   `[時刻, 発言者, メッセージ, 画像URL, AI返答, Lite入力, Lite出力, Liteキャッシュ, Flash入力, Flash出力, Flashキャッシュ, 新総トークン, 判定タグ/フェーズ, 旧AI返答（比較用）, 旧Flash総トークン, トークン削減差分]`
-   （※直近30日分を常時ローリング保持。30日を超えた古いログのみ深夜バッチで安全にパージ）
-2. **`tasks`**（単発タスク・全9列対応）:
-   `[タスクID, タスク名, 期限, ステータス(未完了/完了/破棄), 登録日, 完了日, メモ, リマインド目安, 関連URL]`
-   （※`完了`・`破棄` から30日を超えた古い行は深夜バッチで自動整理。`未完了` タスクは保持）
-3. **`routines`**（繰り返し定義・全7列対応）:
-   `[ルール名, タイプ(day_of_week/day_of_month/interval_days), 設定値, 最終生成日, メモ, ステータス(有効/完了/期間満了), 完了日]`
-   （※7大生活プリフィックス対応。`完了`・`期間満了` から30日を超えた古い行は深夜バッチで自動整理）
-4. **`shopping`**（買い物リスト）:
-   `[品名, カテゴリ, ステータス(未買/購入済/破棄), 登録日]`
-5. **`input_stock`**（映画・音楽・本のストック）:
-   `[種別, タイトル, メモ, ステータス(未/完/破棄), 消化日]`
-6. **`memory`**（中長期記憶 ＆ モジュール型プロンプト体系）: `[キー, 値]`
-   - **記憶・前提データ**:
-     - `profile`: ユーザー属性・生活前提条件
-     - `backend_model`: リアルタイムLINE対話の後段モデル指定（`lite` [`gemini-3.1-flash-lite`] / `3.5-lite` [`gemini-3.5-flash-lite`] / `flash` [`gemini-3.8-flash`] / `hydrogen` [`gemini-4-hydrogen`] / 任意 `gemini-...` 名。空欄フォールバック時は `gemini-3.8-flash`）
-     - `thinking_level`: 後段モデルの思考深度（`minimal` [Lite系既定] / `low` / `medium` / `high` / Hydrogen時 `xhigh`。※`3.8-flash` や `gemini-4-hydrogen` 等 `minimal` 非対応モデルでは自動で `low` へフォールバック。レガシー2.5系は `thinkingBudget: 0`）
-     - `ideal_self`: ありたい人間像・生活指針（提案・判断の羅針盤）
-     - `dictionary`: 用語辞書（客観的前提知識）
-     - `rolling_memory`: 最近の関心・ログ（直近7〜10日分の活動・関心バッファ）
-     - `weekly_summary`: 直近数日間の疲労・睡眠サマリー
-     - `lifestyle_habits`: 生活習慣（入浴〜ドライヤー・ケア一式の所要時間、身支度、睡眠軸等）・運動（散歩、最寄り駅徒歩移動を含む出社・外出条件、室内ストレッチ動画、フィットネスゲーム等）・身体ケアの前提定義
-     - `skill_options`: 能動的スキルアップメニュー（時間枠別の音楽・ビジネス選択肢）
-     - `cycle_stamps`: 周期メンテナンス ＆ 能動的活動記録（経過日数を動的に自動注釈。リアルタイム＋深夜バッチ両方で更新）
-     - `project_folders`: Google Drive プロジェクトフォルダ ＆ 代表Google Doc台帳（AI自動判別・紐付け用）
-     - `project_root_ids`: 7大カテゴリ親フォルダIDキャッシュJSON（API応答高速化用）
-     - `weather_info`: 今日の天気・最高/最低気温・降水確率
-     - `pressure_alert`: 当日活動時間帯（06:00〜24:00）の6時間以内5hPa気圧急降下アラート（TRUE/FALSE）
-     - `briefing_delivered_date`: 本日ブリーフィング配信済み日付（YYYY-MM-DD）
-     - `monthly_report_ready`: 月報作成完了フラグ（TRUE/FALSE）
-   - **モジュール型プロンプト（設定時はコードデフォルトより最優先適用）**:
-     - `prompt_lite`: 第1段階 Flash-Lite の意図判定・ルーティングプロンプト
-     - `prompt_core`: 第2段階 生成モデル（標準 Flash-Lite / 切替時 Flash）の基本姿勢・対話トーン・境界ルール（第1層）
-     - `prompt_phase_a`: フェーズA（進行中行動の保護）
-     - `prompt_phase_b`: フェーズB（直前の単発行動への即時了解・送り出し）
-     - `prompt_phase_c`: フェーズC（余白時間・完了/DB/質問後など未定状態における非タスク含む5領域触媒提案・着手摩擦への触媒・目標伴走）
-     - `prompt_phase_d`: フェーズD（通常対話・残存タスク確認・雑談・事実質問・純粋DB操作）
-     - `prompt_schedule`: タイムスケジュール・段取り組み立て仕様（全体・部分時間帯問わず `need_schedule_plan` 時に直交注入）
-     - `prompt_db`: DB・カレンダー・タスク操作時の厳密仕様（7大プリフィックス分類基準はマイクロDBスキーマにも継承適用）
-     - `prompt_relief`: 客観的不調時のケア＆引き算ルール（発動時は Phase A〜D に代えて単独適用）
-     - `custom_system_prompt`: 口調・話し方や任意追加ルールを定義するカスタマイズ層（`prompt_core` の振る舞いOSと直交分離。空欄時は適用なし）
+1. **`logs`**（会話ログ・16列・直近30日保持）: `[時刻, 発言者, メッセージ, 画像URL, AI返答, Lite入力, Lite出力, Liteキャッシュ, Flash入力, Flash出力, Flashキャッシュ, 新総トークン, 判定タグ/フェーズ, 旧AI返答（比較用）, 旧Flash総トークン, トークン削減差分]`
+2. **`tasks`**（タスク・**全10列**）: `[タスクID, タスク名, 期限, ステータス(未完了/完了/破棄), 登録日, 完了日, メモ, リマインド目安, 関連URL, 見込み所要時間(分)]`
+3. **`routines`**（繰り返し定義・7列）: `[ルール名, タイプ, 設定値, 最終生成日, メモ, ステータス(有効/完了/期間満了), 完了日]`
+4. **`shopping`**（買い物リスト・4列）: `[品名, カテゴリ, ステータス(未買/購入済/破棄), 登録日]`
+5. **`input_stock`**（インプットストック・**全6列**）: `[種別, タイトル, メモ, ステータス(未/完/破棄), 消化日, 見込み所要時間(分)]`
+6. **`memory`**（設定・記憶・プロンプト・2列 `[キー, 値]`）:
+   - 記憶・コンテキスト: `profile`, `ideal_self`, `dictionary`, `rolling_memory`, `weekly_summary`, `lifestyle_habits`, `skill_options`, `cycle_stamps`, `project_folders`, `project_root_ids`, `weather_info`, `pressure_alert`, `monthly_report_ready`, `V2_FAST_STATE`
+   - モデル制御: `backend_model`, `thinking_level`
+   - プロンプトモジュール: `prompt_core`, `prompt_schedule`, `prompt_db`, **`prompt_deck`**, `custom_system_prompt`
 
 ---
 
-## 🛠️ 開発・デプロイ運用ルール
-
-### 1. 開発とコード反映フロー（Antigravity / AI担当）
-
-本プロジェクトは **全コードをGit（GitHub）で一元管理** し、GASへは `clasp push` で直接同期します。
-コード修正時は、常に以下のワンストップフローで構文チェック・GAS反映・Git保存を行います：
+## 🛠️ 開発・検証・デプロイコマンド
 
 ```bash
-# 1. src/ 配下の全ファイル構文チェック（ダッシュボード埋め込みJS構文を含む）
+# 1. src/*.js ＆ web/js/*.js 構文チェック ＋ DashboardHtml/sw.js 検証
 npm run check
 
-# 2. (フロントエンド変更時) docs/ 配下のPWAアセットを再ビルド・構文検証
+# 2. web/ → src/DashboardHtml.html ＆ docs/ PWA 一式ビルド
 npm run build:dashboard
 
-# 3. clasp でGASプロジェクトへコードを直接プッシュ (src/ 配下をファイル分割のまま同期)
-npm run push   # (npx clasp push --force)
+# 3. ローカルモックサーバー ＆ E2E検証（インメモリDB ＋ .env 読み込み時実Gemini連携）
+npm run test:mock
+npm run mock:server
 
-# 4. 既存WebアプリデプロイIDを新バージョンへ更新（通常更新時）
-npx clasp deployments
-npx clasp deploy -i <デプロイID> -d "feat/fix: 変更内容の概要"
+# 4. プロンプト同期（検証シートへは --test オプション付与）
+node scripts/sync-prompts-to-sheet.js --test
+node scripts/sync-prompts-to-sheet.js
 
-# 5. GitHubへ最新コードと変更履歴を保存（毎回必ずコミット＆プッシュ）
-git add . && git commit -m "feat/fix: 変更内容の概要" && git push origin main
+# 5. GAS へ反映（確認・承認済みブランチの最終反映時）
+npm run push
+npx clasp deploy -i <デプロイID> -d "v2: Companion Cockpit"
 ```
-
-> [!IMPORTANT]
-> **通常のコード更新・バグ修正は上記のとおり `clasp push` ＋ `clasp deploy -i <デプロイID>` までCLI側から一気通貫で実施できます（初回デプロイやGoogle OAuthスコープ追加時など、権限承認が必要な場合のみGASエディタでの手動操作が必要です）。**
-
-### 2. GASエディタ側での承認・手動操作が必要なケース
-
-Googleアカウントの権限設定・OAuthスコープ承認が必要となる以下のケースでは、ユーザー自身がGASエディタ上で操作を行います：
-
-1. 新規デプロイ作成やアクセス権変更時：GASエディタ右上の **「デプロイ」＞「デプロイを管理」** から設定・デプロイを実行する。
-2. 新しいGoogle APIスコープ追加時（例: Google Docs / Drive 連携の初回導入等）：該当するセットアップ関数（例: `setupInitialProjectSystem`）をエディタ上で実行し、アクセス権限の承認画面で許可を完了する。
-
-### 3. プロンプト改善・即時反映運用（完全ノーデプロイ）
-
-#### プロンプト設計・改修の原則（ガバナンス）
-本システムのプロンプト改修にあたっては、以下の原則を厳格に順守します（[AGENTS.md](AGENTS.md) 参照）：
-1. **Principles over Examples（具体例排除・原則ベース）**:
-   プロンプト内に行動の具体名や時刻の具体例をハードコードせず、負荷（極小〜高）・覚醒度・所要時間・姿勢場所などの「客観的属性」で定義。
-2. **Generalizability（普遍性）**:
-   特定シーンへの場当たりパッチを排し、普遍的な生活力学・状態遷移として捉える。
-3. **データとプロンプトの完全分離（カプセル化）**:
-   生活習慣や運動の具体肢は `lifestyle_habits` に、周期記録は `cycle_stamps` に集約し、プロンプト内へデータを癒着させない。
-
-#### 即時反映フロー
-プロンプトの調整や改善は、**GASの再デプロイを行わずに即座に本番反映**できます（※スプレッドシート `memory` タブのプロンプトがコード初期デフォルトより最優先適用されるため、コード改修時は同期が必要です）：
-
-- **Antigravity（AI）からの直接書き換え**:
-  ```bash
-  # コード上の全プロンプトをスプレッドシートへ一括同期
-  node scripts/sheet-cli.js sync-prompts
-  # モジュール一覧・特定モジュールの確認・更新
-  node scripts/sheet-cli.js get-prompt
-  node scripts/sheet-cli.js get-prompt prompt_phase_c
-  node scripts/sheet-cli.js set-prompt prompt_phase_c "新しいプロンプト内容"
-  # memory キーの確認・更新（profile, project_folders 等）
-  node scripts/sheet-cli.js get-memory [key]
-  node scripts/sheet-cli.js set-memory <key> <value>
-  # タスク一覧（全行・関連URL列対応）・会話ログの確認
-  node scripts/sheet-cli.js get-tasks 未完了
-  node scripts/sheet-cli.js get-logs 10 検索キーワード
-  ```
-- **手動での直接編集**:
-  スプレッドシートの `memory` タブを開き、対象モジュールのセルを直接編集しても即時反映されます。
-- **コードからの初期同期 / 本番昇格**:
-  コード上の最新デフォルトプロンプト群をスプレッドシートへ一括同期したい場合は、GASエディタで `syncDefaultPromptsToSpreadsheet` を実行します。
-
-### 4. 初期設定・検証テスト関数（`Setup.gs`）
-
-- **初期構築・メンテナンス**:
-  - `setupSpreadsheet`: スプレッドシートの全6タブとヘッダー（`tasks` 9列対応を含む）を自動初期化
-  - `setupInitialProjectSystem`（`DriveProject.gs`）: 初回1回のみGASエディタから実行して Google Docs/Drive スコープ承認、マイドライブ直下の7大カテゴリフォルダ構築、および初期プロジェクトフォルダ＆Google Docsの作成・既存タスク紐付けを実行
-  - `syncProjectFoldersIndex`（`DriveProject.gs`）: 7大カテゴリ直下の手動変更を含む進行中プロジェクトフォルダ一覧（`_completed` 等は除外）をスキャンして `memory.project_folders` を同期（深夜バッチでも自動実行）
-  - `setupTriggers`: 毎日午前3時の深夜バッチタイマートリガーを自動登録
-  - `setupLineRichMenuFromSetup`: LINEトーク画面下部にリッチメニューを登録・有効化
-  - `syncDefaultPromptsToSpreadsheet`: コード上の最新全モジュールプロンプトをスプレッドシートの `memory` シートに一括同期
-- **検証テスト（完全ドライラン）**:
-  - `testCustomScenario`: 過去の会話ログ、指定時刻、モックメモリー（`mockMemory`）、および当時の未完了タスク一覧（`mockTasks`）をシミュレートし、本番データを汚さずに2段階アーキテクチャの推論（`matched_cycle_stamps`含む）・トークン消費・アクション出力および深夜バッチの3点クロスチェックを安全にドライラン検証
-  - `testGeminiConnection`: LiteモデルとFlashモデルの両方のAPI接続・疎通確認
-  - `testDailyBriefingOutput`: デイリーブリーフィング生成ドライラン
-  - `testDailyReportDryRun`: 日報生成の完全ドライラン検証（スプレッドシートの指定日データまたは検証用サンプルデータを用いて新プロンプトによる日報Markdownを生成し、Notion投稿なしで文字数・概算トークン数とともにログ出力）
-  - `testDailyReportSamplesDryRun`: 温度シグナル・水増し排除の挙動を確認するため、複数日（`2026-11-04`・`11-05`・`11-06`・`11-11`）の実ログに対して `testDailyReportDryRun` を連続実行する一括検証ラッパー
-  - `testMonthlyReportDryRun`: 月報生成の完全ドライラン検証（Notion日報集約からGemini 3.8 Flashによる月間ジャーナルMarkdown生成までをNotion投稿なしで実行し、プレーンテキストとしてログ出力）
-  - `recreateMonthlyReport`: 手動実行による指定月（デフォルト: 10月）の月報再生成＆Notion月報DBへの新規本番投稿
-  - `testMidnightBatchSimulation`: 深夜統合バッチの手動実行

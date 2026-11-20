@@ -15,7 +15,10 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 
-const SPREADSHEET_ID = '1Qu8Q2TsvcXifw5AejjJILWyxjzX9d_VtGMQnXH7MJOA';
+const USE_TEST_SHEET = process.argv.includes('--test');
+const SPREADSHEET_ID = USE_TEST_SHEET
+  ? '1-Oy3zzEO6--OX8_ErFXZ6JpZShhFr-G44_jyB4B4yCI'
+  : '1Qu8Q2TsvcXifw5AejjJILWyxjzX9d_VtGMQnXH7MJOA';
 const KEY_FILE = path.resolve(__dirname, '../service-account.json');
 
 if (!fs.existsSync(KEY_FILE)) {
@@ -31,15 +34,10 @@ const auth = new google.auth.GoogleAuth({
 const sheets = google.sheets({ version: 'v4', auth });
 
 const PROMPT_KEYS = [
-  'prompt_lite',
   'prompt_core',
-  'prompt_phase_a',
-  'prompt_phase_b',
-  'prompt_phase_c',
-  'prompt_phase_d',
   'prompt_schedule',
   'prompt_db',
-  'prompt_relief'
+  'prompt_deck'
 ];
 
 async function getMemory() {
@@ -93,14 +91,14 @@ async function setMemory(key, value) {
 async function getTasks(filterStatus) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'tasks!A2:I'
+    range: 'tasks!A2:J'
   });
   const rows = res.data.values || [];
   console.log(`=== タスク一覧 (全${rows.length}件${filterStatus ? '・フィルタ: ' + filterStatus : ''}) ===`);
   rows.forEach((r, i) => {
-    const [id, title, dueDate, status, createdDate, completedDate, memo, remindContext, docUrl] = r;
+    const [id, title, dueDate, status, createdDate, completedDate, memo, remindContext, docUrl, estimatedMins] = r;
     if (!filterStatus || status === filterStatus) {
-      console.log(`[Row ${i + 2}] [${id || ''}] ${title || ''} | 期限: ${dueDate || 'なし'} | 状態: ${status || ''} | 作成: ${createdDate || ''} | 完了: ${completedDate || ''} | メモ: ${memo || ''} | 目安: ${remindContext || ''}${docUrl ? ' | URL: ' + docUrl : ''}`);
+      console.log(`[Row ${i + 2}] [${id || ''}] ${title || ''} | 期限: ${dueDate || 'なし'} | 見込み: ${estimatedMins || '-'}分 | 状態: ${status || ''} | 作成: ${createdDate || ''} | 完了: ${completedDate || ''} | メモ: ${memo || ''} | 目安: ${remindContext || ''}${docUrl ? ' | URL: ' + docUrl : ''}`);
     }
   });
 }
@@ -127,7 +125,8 @@ async function getLogs(limit = 10, searchKeyword = '') {
 }
 
 async function main() {
-  const [,, cmd, arg1, arg2, ...rest] = process.argv;
+  const rawArgs = process.argv.slice(2).filter(a => a !== '--test');
+  const [cmd, arg1, arg2, ...rest] = rawArgs;
 
   switch (cmd) {
     case 'get-prompt': {
@@ -166,27 +165,22 @@ async function main() {
     case 'sync-prompts': {
       console.log('🔄 コード上の最新デフォルトプロンプトを読み込み中...');
       const vm = require('vm');
-      const geminiCode = fs.readFileSync(path.resolve(__dirname, '../src/Gemini.js'), 'utf8');
+      const promptsCode = fs.readFileSync(path.resolve(__dirname, '../src/Prompts.js'), 'utf8');
       const sandbox = { Logger: console, Utilities: { formatDate: () => '' } };
       vm.createContext(sandbox);
-      vm.runInContext(geminiCode, sandbox);
+      vm.runInContext(promptsCode, sandbox);
 
       const prompts = {
-        prompt_lite: sandbox.getDefaultPromptLite(),
         prompt_core: sandbox.getDefaultPromptCore(),
-        prompt_phase_a: sandbox.getDefaultPromptPhaseA(),
-        prompt_phase_b: sandbox.getDefaultPromptPhaseB(),
-        prompt_phase_c: sandbox.getDefaultPromptPhaseC(),
-        prompt_phase_d: sandbox.getDefaultPromptPhaseD(),
         prompt_schedule: sandbox.getDefaultPromptSchedule(),
         prompt_db: sandbox.getDefaultPromptDb(),
-        prompt_relief: sandbox.getDefaultPromptRelief()
+        prompt_deck: sandbox.getDefaultPromptDeck()
       };
 
       for (const [key, val] of Object.entries(prompts)) {
         await setMemory(key, val);
       }
-      console.log('🎉 全9モジュールのプロンプトをスプレッドシートの memory シートに同期しました！');
+      console.log('🎉 全4モジュールのプロンプトをスプレッドシートの memory シートに同期しました！');
       break;
     }
     case 'get-memory': {

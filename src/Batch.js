@@ -1,7 +1,8 @@
 /**
- * Batch.js - 深夜03:00統合バッチ処理モジュール
- * タイマートリガー（毎日 午前3:00〜4:00）により完全サイレントで実行（Push通知なし）
- * データ保護付きログクリア、ルーティン重複防止ガード、Open-Meteo & Notion連携
+ * Batch.js - v2 定時バッチ処理モジュール (03:00 / 05:00 / 17:00 JST)
+ * - dailyMidnightBatch (03:00): 日報・メモリー代謝・ルーティン投入・月報・Drive同期・30日整理・v2論理日境界リセット＆朝デッキ初期化
+ * - morningWeatherBatch (05:00): 起床直前の新鮮な天気・気圧急降下取得 ＆ ブリーフィング反映
+ * - eveningDeckBatch (17:00): 退勤〜夜間に向けた aiDeck 先読み再編成
  */
 
 /**
@@ -91,16 +92,19 @@ function dailyMidnightBatch() {
   }
 
   // ----------------------------------------------------
-  // 3. 天気・気圧急降下検知 (Open-Meteo API)
+  // 3. （※天気・気圧取得は 05:00 morningWeatherBatch へ分離。未設定時の保険のみ実施）
   // ----------------------------------------------------
-  try {
-    Logger.log('3. 天気・気圧急降下検知処理開始');
-    const weatherResult = fetchWeatherAndPressure();
-    setMemoryValue('weather_info', weatherResult.weatherInfo);
-    setMemoryValue('pressure_alert', weatherResult.pressureAlert);
-    Logger.log(`天気情報更新: ${weatherResult.weatherInfo}, 気圧アラート: ${weatherResult.pressureAlert}`);
-  } catch (weatherErr) {
-    Logger.log('天気・気圧更新エラー: ' + weatherErr.message);
+  if (!memory.weather_info) {
+    try {
+      Logger.log('3. 初回天気・気圧フォールバック取得');
+      const weatherResult = fetchWeatherAndPressure();
+      setMemoryValue('weather_info', weatherResult.weatherInfo);
+      setMemoryValue('pressure_alert', weatherResult.pressureAlert);
+      memory.weather_info = weatherResult.weatherInfo;
+      memory.pressure_alert = weatherResult.pressureAlert;
+    } catch (weatherErr) {
+      Logger.log('天気・気圧フォールバックエラー: ' + weatherErr.message);
+    }
   }
 
   // ----------------------------------------------------
@@ -194,7 +198,9 @@ function dailyMidnightBatch() {
           todayStr,
           '',
           r.memo || '定期ルーティン自動投入',
-          remindCtx
+          remindCtx,
+          '',
+          ''
         ]);
         updateRoutineLastGenerated(r.rowIndex, todayStr);
         Logger.log(`ルーティンタスク投入成功: ${r.ruleName}`);
@@ -264,7 +270,97 @@ function dailyMidnightBatch() {
     Logger.log('ローリング整理エラー: ' + clearErr.message);
   }
 
+  // ----------------------------------------------------
+  // 7. v2 論理日リセット・朝ブリーフィング・初期 aiDeck 生成 (就寝中セッション保護)
+  // ----------------------------------------------------
+  try {
+    Logger.log('7. v2 03:00論理日リセット ＆ 朝ブリーフィング・初期デッキ構築開始');
+    const fastState = loadFastState(now);
+    const freshMemory = getMemory();
+    const workBoundary = getWorkModeAndBoundary(now, freshMemory.profile);
+    const latestUncompletedTasks = getTasks('未完了');
+
+    fastState.dailyBriefing = buildDailyBriefingObj(
+      freshMemory.weather_info,
+      freshMemory.pressure_alert,
+      workBoundary.workMode,
+      workBoundary.todayEvents,
+      latestUncompletedTasks,
+      todayStr
+    );
+    fastState.aiDeck = generateAiDeck({
+      reason: 'midnight_init',
+      now: now,
+      memory: freshMemory,
+      fastState: fastState,
+      workMode: workBoundary.workMode,
+      todayEvents: workBoundary.todayEvents,
+      boundaryInfo: workBoundary.boundaryInfo,
+      useFlashModel: true
+    });
+    fastState.listCache = buildListsSnapshot(freshMemory, now);
+    saveFastState(fastState, true);
+    Logger.log(`v2 初期化完了 (dayKey: ${fastState.dayKey}, cards: ${fastState.aiDeck.cards.length}, lowCards: ${fastState.aiDeck.lowCards.length})`);
+  } catch (v2Err) {
+    Logger.log('v2 初期化エラー: ' + v2Err.message);
+  }
+
   Logger.log('=== 深夜統合バッチ終了 ===');
+}
+
+/**
+ * 朝05:00 天気・気圧定期更新バッチ（毎日 午前5:00〜6:00 JST トリガー）
+ */
+function morningWeatherBatch() {
+  Logger.log('=== 朝05:00 天気・気圧更新バッチ開始 ===');
+  const now = new Date();
+  try {
+    const weatherResult = fetchWeatherAndPressure();
+    setMemoryValue('weather_info', weatherResult.weatherInfo);
+    setMemoryValue('pressure_alert', weatherResult.pressureAlert);
+
+    const fastState = loadFastState(now);
+    const memory = getMemory();
+    const workBoundary = getWorkModeAndBoundary(now, memory.profile);
+    fastState.weatherFetchedAt = Utilities.formatDate(now, 'Asia/Tokyo', "yyyy-MM-dd'T'HH:mm:ss+09:00");
+    refreshBriefingWeatherLine(fastState, weatherResult.weatherInfo, weatherResult.pressureAlert, workBoundary.workMode);
+    saveFastState(fastState, true);
+
+    Logger.log(`朝05:00 天気更新完了: ${weatherResult.weatherInfo} (気圧アラート: ${weatherResult.pressureAlert})`);
+  } catch (err) {
+    Logger.log('朝05:00 天気更新エラー: ' + err.message);
+  }
+}
+
+/**
+ * 夕方17:00 夜シフト定期再編成バッチ（毎日 午後17:00〜18:00 JST トリガー）
+ * 午後の勤務中に長時間の空白があっても、終業〜夜間帯に最適化した手札を先読み準備する
+ */
+function eveningDeckBatch() {
+  Logger.log('=== 夕方17:00 夜デッキ再編成バッチ開始 ===');
+  const now = new Date();
+  try {
+    const fastState = loadFastState(now);
+    const memory = getMemory();
+    const workBoundary = getWorkModeAndBoundary(now, memory.profile);
+
+    fastState.aiDeck = generateAiDeck({
+      reason: 'evening_batch',
+      now: now,
+      memory: memory,
+      fastState: fastState,
+      workMode: workBoundary.workMode,
+      todayEvents: workBoundary.todayEvents,
+      boundaryInfo: workBoundary.boundaryInfo,
+      useFlashModel: false
+    });
+    fastState.listCache = buildListsSnapshot(memory, now);
+    saveFastState(fastState, true);
+
+    Logger.log(`夕方17:00 夜デッキ更新完了 (cards: ${fastState.aiDeck.cards.length}, lowCards: ${fastState.aiDeck.lowCards.length})`);
+  } catch (err) {
+    Logger.log('夕方17:00 夜デッキ更新エラー: ' + err.message);
+  }
 }
 
 /**

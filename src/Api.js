@@ -590,15 +590,17 @@ function apiSendChat(authKey, messagePayload) {
     loggedUserText = loggedUserText ? `${loggedUserText}\n${desc}` : desc;
   }
 
-  try {
-    appendLog(nowStr, 'user', loggedUserText, imageUrl, loggedAiReply, turnOutcome.logMeta);
-  } catch (logErr) {
-    Logger.log('Chatログ追記エラー: ' + logErr.message);
-  }
-
   const workBoundary = getWorkModeAndBoundary(now, memory.profile);
   const shouldRefreshDeck = deckNeedsRefresh === true ||
     (deckNeedsRefresh === 'check_low_cards' && composeHomeDeck(workBoundary.workMode, now, fastState).cards.length < 3);
+
+  try {
+    const logMeta = Object.assign({}, turnOutcome.logMeta || {});
+    logMeta.phaseTag = `${logMeta.phaseTag || 'chat'} | deckRefresh:${Boolean(shouldRefreshDeck)}`;
+    appendLog(nowStr, 'user', loggedUserText, imageUrl, loggedAiReply, logMeta);
+  } catch (logErr) {
+    Logger.log('Chatログ追記エラー: ' + logErr.message);
+  }
 
   const lists = buildListsSnapshot(null, now);
   fastState.listCache = lists;

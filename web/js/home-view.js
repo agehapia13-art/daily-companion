@@ -409,9 +409,11 @@ function startAction(card) {
 }
 
 function pauseFocus() {
+  state.pendingSessionLockUntil = Date.now() + 8000;
   state.fastState.activeSession = null;
   saveLocalSnapshot();
   renderHome();
+  callServerApi('apiStartAction', state.authKey, null).catch(function() {});
 }
 
 function finishFocus() {
@@ -569,6 +571,7 @@ function bindSwipeHandlers() {
           renderHome();
           return;
         }
+        if (e.target && e.target.closest && e.target.closest('button')) return;
         handleCardClick(cardId);
         return;
       }

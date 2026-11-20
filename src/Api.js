@@ -191,6 +191,11 @@ function apiStartAction(authKey, cardPayload) {
   const nowStr = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
   const nowIso = Utilities.formatDate(now, 'Asia/Tokyo', "yyyy-MM-dd'T'HH:mm:ss+09:00");
   const fastState = loadFastState(now);
+  if (!cardPayload || !cardPayload.title) {
+    fastState.activeSession = null;
+    saveFastState(fastState, true);
+    return { authorized: true, state: fastState };
+  }
   const c = cardPayload || {};
 
   const session = {

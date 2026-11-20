@@ -1810,7 +1810,7 @@
       <div class="custom-btns">
         <button type="button" onclick="saveSettings()" class="btn-solid" style="width:100%;padding:11px;">保存して同期</button>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v20</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v21</div>
     </div>
   </div>
 
@@ -2718,9 +2718,11 @@
     }
 
     function pauseFocus() {
+      state.pendingSessionLockUntil = Date.now() + 8000;
       state.fastState.activeSession = null;
       saveLocalSnapshot();
       renderHome();
+      callServerApi('apiStartAction', state.authKey, null).catch(function() {});
     }
 
     function finishFocus() {
@@ -2878,6 +2880,7 @@
               renderHome();
               return;
             }
+            if (e.target && e.target.closest && e.target.closest('button')) return;
             handleCardClick(cardId);
             return;
           }

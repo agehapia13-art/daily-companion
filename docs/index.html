@@ -1810,7 +1810,7 @@
       <div class="custom-btns">
         <button type="button" onclick="saveSettings()" class="btn-solid" style="width:100%;padding:11px;">保存して同期</button>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v21</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v22</div>
     </div>
   </div>
 
@@ -1971,9 +1971,12 @@
     function applyServerStatePayload(res) {
       if (res.state) {
         var localSession = state.fastState && state.fastState.activeSession;
-        var keepLocalSession = localSession && !res.state.activeSession && state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil;
+        var lockActive = Boolean(state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil);
+        var keepLocalSession = Boolean(localSession && !res.state.activeSession && lockActive);
+        var keepClearedSession = Boolean(!localSession && res.state.activeSession && lockActive);
         state.fastState = res.state;
         if (keepLocalSession) state.fastState.activeSession = localSession;
+        if (keepClearedSession) state.fastState.activeSession = null;
       }
       if (res.deck) state.composedDeck = res.deck;
       if (res.lists) state.lists = res.lists;
@@ -2755,7 +2758,7 @@
       var note = noteEl ? noteEl.value.trim() : (r.note || '').trim();
 
       // 楽観的UI: 即座にふりかえり画面を閉じてHomeへ戻り、裏でサーバーへ記録する
-      state.pendingSessionLockUntil = Date.now() + 8000;
+      state.pendingSessionLockUntil = Date.now() + 15000;
       state.reflection = null;
       state.fastState.activeSession = null;
       if (r.card && r.card.id && !r.card.isCustom) {

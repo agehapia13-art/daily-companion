@@ -446,7 +446,7 @@ function completeReflection(keepOpen) {
   var note = noteEl ? noteEl.value.trim() : (r.note || '').trim();
 
   // 楽観的UI: 即座にふりかえり画面を閉じてHomeへ戻り、裏でサーバーへ記録する
-  state.pendingSessionLockUntil = Date.now() + 8000;
+  state.pendingSessionLockUntil = Date.now() + 15000;
   state.reflection = null;
   state.fastState.activeSession = null;
   if (r.card && r.card.id && !r.card.isCustom) {

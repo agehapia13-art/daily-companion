@@ -267,14 +267,17 @@ function generateAiDeck(opts) {
       try {
         const u = res.usage;
         const tsStr = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
-        appendLog(tsStr, 'system', `[DeckEngine:${reason}]`, '', '', {
+        const reasonLabel = o.reason || 'auto';
+        appendLog(tsStr, 'system', `[DeckEngine:${reasonLabel}]`, '', '', {
           litePromptTokens: u.promptTokenCount || 0,
           liteCandidatesTokens: u.candidatesTokenCount || 0,
           liteCachedTokens: u.cachedContentTokenCount || 0,
           newTotalTokens: u.totalTokenCount || 0,
-          phaseTag: `deck_${reason}`
+          phaseTag: `deck_${reasonLabel}`
         });
-      } catch (logErr) {}
+      } catch (logErr) {
+        Logger.log('DeckEngine ログ追記エラー: ' + logErr.message);
+      }
     }
     const parsed = JSON.parse(res.text);
     const sanitizeCard = (c, idx, isLow) => ({

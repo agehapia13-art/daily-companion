@@ -577,8 +577,8 @@ function bindComposerListeners() {
       if (!comp) return;
       var kbHeight = Math.max(0, window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop);
       comp.style.bottom = kbHeight > 80
-        ? (kbHeight + 10) + 'px'
-        : 'calc(max(12px, env(safe-area-inset-bottom)) + 68px)';
+        ? Math.max(0, kbHeight - 66) + 'px'
+        : '';
     });
   }
 }

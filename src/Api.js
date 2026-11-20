@@ -646,6 +646,7 @@ function apiMutateListItem(authKey, mutation) {
     const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.SHOPPING);
     const nextStatus = m.done ? '購入済' : '未買';
     sheet.getRange(Number(m.rowIndex), 3).setValue(nextStatus);
+    if (typeof invalidateSheetCache_ === 'function') invalidateSheetCache_('shopping');
   } else {
     throw new Error('未対応のリスト操作です。');
   }

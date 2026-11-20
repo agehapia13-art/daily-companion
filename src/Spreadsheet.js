@@ -3,13 +3,44 @@
  * 全6タブ（logs, tasks, routines, shopping, input_stock, memory）の厳密な読み書きとデータ変換
  */
 
+const _reqSheetCache = {
+  ss: null,
+  memory: null,
+  tasks: null,
+  shopping: null,
+  inputStock: null,
+  routines: null,
+  logs: null
+};
+
 /**
- * スプレッドシートオブジェクトを取得
+ * リクエスト内キャッシュを破棄（引数省略時は全タブ破棄）
+ * @param {string=} keyOpt
+ */
+function invalidateSheetCache_(keyOpt) {
+  if (keyOpt) {
+    if (Object.prototype.hasOwnProperty.call(_reqSheetCache, keyOpt)) {
+      _reqSheetCache[keyOpt] = null;
+    }
+    return;
+  }
+  _reqSheetCache.memory = null;
+  _reqSheetCache.tasks = null;
+  _reqSheetCache.shopping = null;
+  _reqSheetCache.inputStock = null;
+  _reqSheetCache.routines = null;
+  _reqSheetCache.logs = null;
+}
+
+/**
+ * スプレッドシートオブジェクトを取得（リクエスト内キャッシュ）
  * @return {GoogleAppsScript.Spreadsheet.Spreadsheet}
  */
 function getSpreadsheet() {
+  if (_reqSheetCache.ss) return _reqSheetCache.ss;
   const config = getConfig();
-  return SpreadsheetApp.openById(config.spreadsheetId);
+  _reqSheetCache.ss = SpreadsheetApp.openById(config.spreadsheetId);
+  return _reqSheetCache.ss;
 }
 
 /**
@@ -435,6 +466,11 @@ function parsePositiveEstimatedMins_(val) {
 }
 
 function getTasks(filterStatus) {
+  if (_reqSheetCache.tasks) {
+    if (!filterStatus) return _reqSheetCache.tasks.slice();
+    const filtered = _reqSheetCache.tasks.filter(t => t.status === filterStatus);
+    return filterStatus === '未完了' ? sortTasksByUrgency_(filtered) : filtered;
+  }
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
@@ -461,6 +497,7 @@ function getTasks(filterStatus) {
     };
   });
 
+  _reqSheetCache.tasks = tasks.slice();
   if (filterStatus) {
     const filtered = tasks.filter(t => t.status === filterStatus);
     if (filterStatus === '未完了') {
@@ -652,6 +689,7 @@ function applyTaskCategoryPrefix_(currentTitle, rawCategory) {
  */
 function applyTaskActions(actions, extraProjectUrlMapOpt) {
   if (!actions || !Array.isArray(actions) || actions.length === 0) return [];
+  invalidateSheetCache_('tasks');
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.TASKS);
   const todayStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const results = [];
@@ -821,6 +859,7 @@ function applyTaskActions(actions, extraProjectUrlMapOpt) {
       }
     }
   }
+  invalidateSheetCache_('tasks');
   return results;
 }
 
@@ -927,6 +966,7 @@ function applyRoutineActions(actions) {
       }
     }
   }
+  invalidateSheetCache_('tasks');
   return results;
 }
 
@@ -986,6 +1026,9 @@ function updateRoutineLastGenerated(rowIndex, dateStr) {
  * @return {Array<Object>}
  */
 function getShoppingList(filterStatus) {
+  if (_reqSheetCache.shopping) {
+    return filterStatus ? _reqSheetCache.shopping.filter(s => s.status === filterStatus) : _reqSheetCache.shopping.slice();
+  }
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.SHOPPING);
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
@@ -999,6 +1042,7 @@ function getShoppingList(filterStatus) {
     createdDate: row[3] ? Utilities.formatDate(new Date(row[3]), 'Asia/Tokyo', 'yyyy-MM-dd') : ''
   }));
 
+  _reqSheetCache.shopping = list.slice();
   if (filterStatus) {
     return list.filter(item => item.status === filterStatus);
   }
@@ -1012,6 +1056,7 @@ function getShoppingList(filterStatus) {
  */
 function applyShoppingActions(actions) {
   if (!actions || !Array.isArray(actions) || actions.length === 0) return [];
+  invalidateSheetCache_('shopping');
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.SHOPPING);
   const todayStr = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const results = [];
@@ -1045,6 +1090,8 @@ function applyShoppingActions(actions) {
       }
     }
   }
+  invalidateSheetCache_('shopping');
+  invalidateSheetCache_('tasks');
   return results;
 }
 
@@ -1059,6 +1106,9 @@ function applyShoppingActions(actions) {
  * @return {Array<Object>}
  */
 function getInputStockList(filterStatus) {
+  if (_reqSheetCache.inputStock) {
+    return filterStatus ? _reqSheetCache.inputStock.filter(i => i.status === filterStatus) : _reqSheetCache.inputStock.slice();
+  }
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.INPUT_STOCK);
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
@@ -1081,6 +1131,7 @@ function getInputStockList(filterStatus) {
     };
   });
 
+  _reqSheetCache.inputStock = list.slice();
   if (filterStatus) {
     return list.filter(item => item.status === filterStatus);
   }
@@ -1094,6 +1145,7 @@ function getInputStockList(filterStatus) {
  */
 function applyInputStockActions(actions) {
   if (!actions || !Array.isArray(actions) || actions.length === 0) return [];
+  invalidateSheetCache_('inputStock');
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.INPUT_STOCK);
   const results = [];
 
@@ -1153,6 +1205,7 @@ function applyInputStockActions(actions) {
       }
     }
   }
+  invalidateSheetCache_('tasks');
   return results;
 }
 

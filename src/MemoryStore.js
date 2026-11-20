@@ -13,6 +13,9 @@
  * @return {Object}
  */
 function getMemory() {
+  if (typeof _reqSheetCache === 'object' && _reqSheetCache.memory) {
+    return Object.assign({}, _reqSheetCache.memory);
+  }
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.MEMORY);
   const lastRow = sheet.getLastRow();
   const memoryObj = {
@@ -60,6 +63,9 @@ function getMemory() {
       }
     }
   }
+  if (typeof _reqSheetCache === 'object') {
+    _reqSheetCache.memory = Object.assign({}, memoryObj);
+  }
   return memoryObj;
 }
 
@@ -69,6 +75,7 @@ function getMemory() {
  * @param {string} value
  */
 function setMemoryValue(key, value) {
+  if (typeof invalidateSheetCache_ === 'function') invalidateSheetCache_('memory');
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.MEMORY);
   const lastRow = sheet.getLastRow();
 

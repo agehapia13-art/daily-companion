@@ -1810,7 +1810,7 @@
       <div class="custom-btns">
         <button type="button" onclick="saveSettings()" class="btn-solid" style="width:100%;padding:11px;">保存して同期</button>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v23</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v24</div>
     </div>
   </div>
 
@@ -3629,6 +3629,19 @@
 
     window.addEventListener('DOMContentLoaded', function() {
       applyTheme();
+      if (window.matchMedia) {
+        var mq = window.matchMedia('(prefers-color-scheme: dark)');
+        var onSchemeChange = function(ev) {
+          var manual = '';
+          try { manual = localStorage.getItem('companion_theme') || ''; } catch (e) {}
+          if (!manual) {
+            state.isDark = Boolean(ev.matches);
+            applyTheme();
+          }
+        };
+        if (mq.addEventListener) mq.addEventListener('change', onSchemeChange);
+        else if (mq.addListener) mq.addListener(onSchemeChange);
+      }
       initStaticIcons();
       bindComposerListeners();
       startMistCanvas();

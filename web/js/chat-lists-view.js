@@ -683,6 +683,19 @@ function bindComposerListeners() {
 
 window.addEventListener('DOMContentLoaded', function() {
   applyTheme();
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    var onSchemeChange = function(ev) {
+      var manual = '';
+      try { manual = localStorage.getItem('companion_theme') || ''; } catch (e) {}
+      if (!manual) {
+        state.isDark = Boolean(ev.matches);
+        applyTheme();
+      }
+    };
+    if (mq.addEventListener) mq.addEventListener('change', onSchemeChange);
+    else if (mq.addListener) mq.addListener(onSchemeChange);
+  }
   initStaticIcons();
   bindComposerListeners();
   startMistCanvas();

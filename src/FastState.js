@@ -320,6 +320,11 @@ function buildRoutineAnchorCards(workMode, now, fastState) {
     }
   }
 
+  // 2.5 夕食アンカー（18:00以降、未完了・未スキップ時）
+  if (minsOfDay >= 18 * 60 && avail('anchor_dinner')) {
+    cards.push({ id: 'anchor_dinner', icon: 'utensils', title: '夕食', sub: '一息ついてしっかり食べる', mins: 45, isAnchor: true });
+  }
+
   // 3. 日跨ぎ「就寝」カード（21:30以降〜翌04:00前まで保証）
   if ((minsOfDay >= 21 * 60 + 30 || minsOfDay < 4 * 60) && avail('anchor_sleep')) {
     cards.push({

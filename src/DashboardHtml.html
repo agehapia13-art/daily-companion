@@ -1273,12 +1273,21 @@
       gap: 8px;
     }
 
-    .shared-composer {
+    .bottom-dock {
       position: absolute;
       left: 14px;
       right: 14px;
-      bottom: 50px;
-      z-index: 16;
+      bottom: 8px;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      pointer-events: none;
+    }
+
+    .shared-composer {
+      position: relative;
+      width: 100%;
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -1557,14 +1566,12 @@
     }
 
     .bottom-nav {
-      position: absolute;
-      left: 14px;
-      right: 14px;
-      bottom: 8px;
+      position: relative;
+      width: 100%;
       height: 60px;
       padding: 5px;
       border-radius: 999px;
-      z-index: 20;
+      pointer-events: auto;
       background: var(--dc-dock-glass);
       backdrop-filter: blur(20px) saturate(190%);
       -webkit-backdrop-filter: blur(20px) saturate(190%);
@@ -1758,23 +1765,25 @@
 
       <div class="bottom-fade-veil"></div>
 
-      <!-- Floating Shared Composer (Chat & Lists) -->
-      <div id="sharedComposer" class="shared-composer hidden">
-        <div id="chatPhotoPreview" class="attach-preview-bar hidden"></div>
-        <div class="composer-row">
-          <input id="chatPhotoInput" type="file" accept="image/*" class="hidden" onchange="handleChatPhotoSelect(event)" />
-          <button type="button" onclick="document.getElementById('chatPhotoInput').click()" class="attach-circle" aria-label="写真を添付"></button>
-          <div id="talkEditor" class="talk-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="メッセージ・リストをタップして挿入"></div>
-          <button type="button" onclick="submitTalkEditor()" class="send-circle" aria-label="送信"></button>
+      <div class="bottom-dock">
+        <!-- Floating Shared Composer (Chat & Lists) -->
+        <div id="sharedComposer" class="shared-composer hidden">
+          <div id="chatPhotoPreview" class="attach-preview-bar hidden"></div>
+          <div class="composer-row">
+            <input id="chatPhotoInput" type="file" accept="image/*" class="hidden" onchange="handleChatPhotoSelect(event)" />
+            <button type="button" onclick="document.getElementById('chatPhotoInput').click()" class="attach-circle" aria-label="写真を添付"></button>
+            <div id="talkEditor" class="talk-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="メッセージ・リストをタップして挿入"></div>
+            <button type="button" onclick="submitTalkEditor()" class="send-circle" aria-label="送信"></button>
+          </div>
         </div>
-      </div>
 
-      <!-- Floating Navigation Dock -->
-      <nav class="bottom-nav">
-        <button id="nav-home" onclick="switchTab('home')" class="nav-btn active"></button>
-        <button id="nav-talk" onclick="switchTab('talk')" class="nav-btn"></button>
-        <button id="nav-lists" onclick="switchTab('lists')" class="nav-btn"></button>
-      </nav>
+        <!-- Floating Navigation Dock -->
+        <nav class="bottom-nav">
+          <button id="nav-home" onclick="switchTab('home')" class="nav-btn active"></button>
+          <button id="nav-talk" onclick="switchTab('talk')" class="nav-btn"></button>
+          <button id="nav-lists" onclick="switchTab('lists')" class="nav-btn"></button>
+        </nav>
+      </div>
     </div>
   </div>
 

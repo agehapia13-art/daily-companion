@@ -320,8 +320,8 @@ function buildRoutineAnchorCards(workMode, now, fastState) {
     }
   }
 
-  // 2.5 夕食アンカー（18:00以降、未完了・未スキップ時）
-  if (minsOfDay >= 18 * 60 && avail('anchor_dinner')) {
+  // 2.5 夕食アンカー（17:00以降、未完了・未スキップ時）
+  if (minsOfDay >= 17 * 60 && avail('anchor_dinner')) {
     cards.push({ id: 'anchor_dinner', icon: 'utensils', title: '夕食', sub: '一息ついてしっかり食べる', mins: 45, isAnchor: true });
   }
 

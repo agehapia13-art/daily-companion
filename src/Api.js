@@ -498,7 +498,9 @@ function apiSendChat(authKey, messagePayload) {
     if (aiResult.task_actions && aiResult.task_actions.length > 0) {
       const taskRes = applyTaskActions(aiResult.task_actions, createdProjectUrlMap);
       executedNotices.push.apply(executedNotices, taskRes);
-      if (taskRes.length > 0) deckNeedsRefresh = true;
+      if (taskRes.length > 0 && aiResult.task_actions.some(a => a.action === 'complete' || a.action === 'delete')) {
+        deckNeedsRefresh = 'check_low_cards';
+      }
     }
     if (aiResult.calendar_actions && aiResult.calendar_actions.length > 0) {
       const calRes = applyCalendarActions(aiResult.calendar_actions);
@@ -512,18 +514,18 @@ function apiSendChat(authKey, messagePayload) {
     if (aiResult.input_stock_actions && aiResult.input_stock_actions.length > 0) {
       const inputRes = applyInputStockActions(aiResult.input_stock_actions);
       executedNotices.push.apply(executedNotices, inputRes);
-      if (inputRes.length > 0) deckNeedsRefresh = true;
+      if (inputRes.length > 0 && aiResult.input_stock_actions.some(a => a.action === 'complete' || a.action === 'delete')) {
+        deckNeedsRefresh = 'check_low_cards';
+      }
     }
     if (aiResult.routine_actions && aiResult.routine_actions.length > 0) {
       const routineRes = applyRoutineActions(aiResult.routine_actions);
       executedNotices.push.apply(executedNotices, routineRes);
-      if (routineRes.length > 0) deckNeedsRefresh = true;
     }
     if (aiResult.memory_updates && aiResult.memory_updates.cycle_stamps_updates) {
       const updatedStamps = updateCycleStampsSafely(aiResult.memory_updates.cycle_stamps_updates);
       if (updatedStamps && updatedStamps.length > 0) {
         updatedStamps.forEach(entry => executedNotices.push(`📌 周期スタンプ更新: ${entry}`));
-        deckNeedsRefresh = true;
       }
     }
   } catch (actErr) {
@@ -560,7 +562,6 @@ function apiSendChat(authKey, messagePayload) {
     if (sc.completed_anchor_id) {
       fastState.completedToday[String(sc.completed_anchor_id)] = true;
       stateChanged = true;
-      deckNeedsRefresh = true;
     }
   }
 
@@ -596,7 +597,9 @@ function apiSendChat(authKey, messagePayload) {
   }
 
   const workBoundary = getWorkModeAndBoundary(now, memory.profile);
-  if (deckNeedsRefresh) {
+  const shouldRefreshDeck = deckNeedsRefresh === true ||
+    (deckNeedsRefresh === 'check_low_cards' && composeHomeDeck(workBoundary.workMode, now, fastState).cards.length < 3);
+  if (shouldRefreshDeck) {
     try {
       fastState.aiDeck = generateAiDeck({
         reason: 'chat_update',

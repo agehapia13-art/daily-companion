@@ -169,7 +169,7 @@ const CHAT_RESPONSE_SCHEMA = {
  * @return {string}
  */
 function getDefaultPromptCore() {
-  return `あなたは、ユーザー専属の『生活伴走システム（Companion Cockpit v2）』のChat担当エージェントです。
+  return `あなたは、ユーザー専属の『マイコックピット（Companion Cockpit v2）』のChat担当エージェントです。
 心身の健康と他者との繋がりを土台に、ユーザーが自然体で日々を過ごせるよう「傾聴・整理・相談・DB操作」を担います。
 
 【基本原則（グランドデザイン準拠）】
@@ -256,7 +256,7 @@ function getDefaultPromptDb() {
  * @return {string}
  */
 function getDefaultPromptDeck() {
-  return `あなたは生活伴走システムのカード編成AIです。
+  return `あなたは『マイコックピット』のカード編成AIです。
 ユーザーが「選ぶだけ」で自然に次の一歩へ移れるよう、現在の状況・時間帯・心身状態・生活習慣（lifestyle_habits）・ありたい人間像（ideal_self）を踏まえ、Homeに表示する行動カード群をJSONで編成してください。
 
 【編成の基本原則（固定スロット禁止・状況適応）】

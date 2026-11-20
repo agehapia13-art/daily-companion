@@ -144,24 +144,16 @@ function polylineToSegments(pts) {
  * @return {Buffer}
  */
 function renderLeafIconPng(size) {
-  const bg = [244, 240, 252]; // Airy lavender-pearl
-  const fg = [109, 63, 224];  // Accent violet
+  const bg = [19, 17, 43];     // Deep slate-indigo (#13112B)
+  const fg = [167, 139, 250];  // Cockpit violet (#A78BFA)
 
   // .dc-logo-mark (24x24) 内の 14x14 アイコンと同じ中心配置比率
   const scale = (size * (14 / 24)) / 24;
   const offset = size * (5 / 24);
   const halfStroke = (2.1 * scale) / 2;
 
-  const path1Pts = [
-    ...sampleSvgArcSegments(11, 20, 7, 7, 0, 1, 9.8, 6.1, 48),
-    ...sampleCubicBezier([9.8, 6.1], [15.5, 5], [17, 4.48], [19, 2], 40).slice(1),
-    ...sampleCubicBezier([19, 2], [20, 4], [21, 6.18], [21, 10], 40).slice(1),
-    ...sampleCubicBezier([21, 10], [21, 15.5], [16.22, 20], [11, 20], 48).slice(1)
-  ];
-  const path2Pts = [
-    ...sampleCubicBezier([2, 21], [2, 18], [3.85, 15.64], [7.08, 15], 40),
-    ...sampleCubicBezier([7.08, 15], [9.5, 14.52], [12, 13], [13, 12], 40).slice(1)
-  ];
+  const path1Pts = sampleSvgArcSegments(5.3, 18.7, 9.5, 9.5, 1, 1, 18.7, 18.7, 96);
+  const path2Pts = [[15.8, 8.2], [13.4, 13.4], [8.2, 15.8], [10.6, 10.6], [15.8, 8.2]];
 
   const toPixel = (pt) => [offset + pt[0] * scale, offset + pt[1] * scale];
   const segs = [

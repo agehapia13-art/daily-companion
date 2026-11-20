@@ -347,10 +347,10 @@ function apiCompleteAction(authKey, completePayload) {
 
   // logs シートへの記録（行動完了・進行・起床・引き算をすべて記録）
   {
+    const startedMs = Number(session.startedAtMs) || 0;
+    const elapsedMins = startedMs > 0 ? Math.max(1, Math.round((now.getTime() - startedMs) / 60000)) : 0;
     let userMsg = '';
     if (session.isSleepCard) {
-      const startedMs = Number(session.startedAtMs) || 0;
-      const elapsedMins = startedMs > 0 ? Math.max(1, Math.round((now.getTime() - startedMs) / 60000)) : 0;
       const sleepDur = elapsedMins > 0
         ? (elapsedMins >= 60 ? `${Math.floor(elapsedMins / 60)}時間${elapsedMins % 60 > 0 ? (elapsedMins % 60) + '分' : ''}` : `${elapsedMins}分`)
         : '';
@@ -358,9 +358,9 @@ function apiCompleteAction(authKey, completePayload) {
     } else if (session.isTriage) {
       userMsg = `【引き算】${sessionTitle}`;
     } else if (keepOpen) {
-      userMsg = `【進行】${sessionTitle}`;
+      userMsg = `【進行】${sessionTitle}${elapsedMins > 0 ? `（実測${elapsedMins}分）` : ''}`;
     } else {
-      userMsg = `【完了】${sessionTitle}`;
+      userMsg = `【完了】${sessionTitle}${elapsedMins > 0 ? `（実測${elapsedMins}分）` : ''}`;
     }
 
     const detailParts = [];

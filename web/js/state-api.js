@@ -143,7 +143,12 @@ function loadLocalSnapshot() {
 }
 
 function applyServerStatePayload(res) {
-  if (res.state) state.fastState = res.state;
+  if (res.state) {
+    var localSession = state.fastState && state.fastState.activeSession;
+    var keepLocalSession = localSession && !res.state.activeSession && state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil;
+    state.fastState = res.state;
+    if (keepLocalSession) state.fastState.activeSession = localSession;
+  }
   if (res.deck) state.composedDeck = res.deck;
   if (res.lists) state.lists = res.lists;
   if (res.boundary) state.boundary = res.boundary;

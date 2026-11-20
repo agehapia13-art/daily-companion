@@ -1810,7 +1810,7 @@
       <div class="custom-btns">
         <button type="button" onclick="saveSettings()" class="btn-solid" style="width:100%;padding:11px;">保存して同期</button>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v17</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v18</div>
     </div>
   </div>
 
@@ -1969,7 +1969,12 @@
     }
 
     function applyServerStatePayload(res) {
-      if (res.state) state.fastState = res.state;
+      if (res.state) {
+        var localSession = state.fastState && state.fastState.activeSession;
+        var keepLocalSession = localSession && !res.state.activeSession && state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil;
+        state.fastState = res.state;
+        if (keepLocalSession) state.fastState.activeSession = localSession;
+      }
       if (res.deck) state.composedDeck = res.deck;
       if (res.lists) state.lists = res.lists;
       if (res.boundary) state.boundary = res.boundary;
@@ -2442,7 +2447,10 @@
           var cls = c.isTriage ? 'action-card triage' : 'action-card';
           var rightHtml = c.isTriage
             ? '<span class="card-right triage-badge">' + escapeHtml(c.rightLabel || '引き算') + ' ' + getIconSvg('chevron', 14) + '</span>'
-            : '<span class="card-right">' + (c.isSleepCard ? '' : formatCustomDurLabel(c.mins) + ' ') + getIconSvg('chevron', 14) + '</span>';
+            : '<span class="card-right">' +
+                (c.isSleepCard ? '' : '<button type="button" onclick="event.stopPropagation();openCardDurAdjust(\'' + escapeJsAttr(c.id) + '\')" style="background:none;border:none;color:inherit;font:inherit;padding:2px 4px;margin:-2px 0;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;" title="開始前に所要時間を調整">' + formatCustomDurLabel(c.mins) + '</button> ') +
+                getIconSvg('chevron', 14) +
+              '</span>';
           parts.push(
             '<div class="swipe-wrap" data-card-id="' + escapeHtml(c.id) + '">' +
               '<div class="swipe-behind">' +
@@ -2472,25 +2480,51 @@
         '</div>'
       );
 
+      function renderDurSliderHtml(sliderId, displayId, oninputFn, currentMins) {
+        var idx = 0;
+        var bestDiff = Infinity;
+        for (var i = 0; i < CUSTOM_DUR_STEPS.length; i++) {
+          var d = Math.abs(CUSTOM_DUR_STEPS[i] - (currentMins || 30));
+          if (d < bestDiff) { bestDiff = d; idx = i; }
+        }
+        return (
+          '<div class="dur-slider-wrap">' +
+            '<div class="dur-slider-head">' +
+              '<span id="' + displayId + '" class="dur-slider-val">' + formatCustomDurLabel(CUSTOM_DUR_STEPS[idx]) + '</span>' +
+            '</div>' +
+            '<input id="' + sliderId + '" type="range" class="dur-slider" min="0" max="' + (CUSTOM_DUR_STEPS.length - 1) + '" step="1" value="' + idx + '" oninput="' + oninputFn + '(this.value)" />' +
+            '<div class="dur-slider-ticks">' +
+              '<span>5分</span>' +
+              '<span style="left:27.3%;">30分</span>' +
+              '<span style="left:45.5%;">1時間</span>' +
+              '<span style="left:63.6%;">2時間</span>' +
+              '<span>6時間</span>' +
+            '</div>' +
+          '</div>'
+        );
+      }
+
+      if (state.adjustingCardId) {
+        var adjCard = (state.composedDeck.cards || []).find(function(c) { return c && c.id === state.adjustingCardId; });
+        if (adjCard) {
+          parts.push(
+            '<div class="custom-create-card glass-surface fade-in">' +
+              '<div style="font-size:13px;font-weight:600;color:var(--text-primary);">「' + escapeHtml(adjCard.title) + '」の見込み時間を調整</div>' +
+              renderDurSliderHtml('adjustDurSlider', 'adjustDurDisplay', 'setAdjustDurStep', state.adjustingCardMins || adjCard.mins || 30) +
+              '<div class="custom-btns">' +
+                '<button type="button" onclick="confirmCardDurStart()" class="btn-solid">この時間で始める</button>' +
+                '<button type="button" onclick="cancelCardDurAdjust()" class="btn-ghost">キャンセル</button>' +
+              '</div>' +
+            '</div>'
+          );
+        }
+      }
+
       if (state.showCustomForm) {
-        var stepIdx = CUSTOM_DUR_STEPS.indexOf(state.customDurMins);
-        if (stepIdx < 0) stepIdx = 3;
         parts.push(
           '<form onsubmit="startCustomCard(event)" class="custom-create-card glass-surface fade-in">' +
             '<input id="customTitleInput" type="text" class="custom-input" placeholder="これから始めること（例：ギター練習）" />' +
-            '<div class="dur-slider-wrap">' +
-              '<div class="dur-slider-head">' +
-                '<span id="customDurDisplay" class="dur-slider-val">' + formatCustomDurLabel(CUSTOM_DUR_STEPS[stepIdx]) + '</span>' +
-              '</div>' +
-              '<input id="customDurSlider" type="range" class="dur-slider" min="0" max="' + (CUSTOM_DUR_STEPS.length - 1) + '" step="1" value="' + stepIdx + '" oninput="setCustomDurStep(this.value)" />' +
-              '<div class="dur-slider-ticks">' +
-                '<span>5分</span>' +
-                '<span style="left:27.3%;">30分</span>' +
-                '<span style="left:45.5%;">1時間</span>' +
-                '<span style="left:63.6%;">2時間</span>' +
-                '<span>6時間</span>' +
-              '</div>' +
-            '</div>' +
+            renderDurSliderHtml('customDurSlider', 'customDurDisplay', 'setCustomDurStep', state.customDurMins) +
             '<div class="custom-btns">' +
               '<button type="button" onclick="toggleCustomForm(false)" class="btn-soft">閉じる</button>' +
               '<button type="submit" class="btn-solid">始める</button>' +
@@ -2590,6 +2624,35 @@
       });
     }
 
+    function openCardDurAdjust(cardId) {
+      var card = (state.composedDeck.cards || []).find(function(c) { return c && c.id === cardId; });
+      if (!card) return;
+      state.showCustomForm = false;
+      state.adjustingCardId = cardId;
+      state.adjustingCardMins = card.mins || 30;
+      renderHome();
+    }
+
+    function setAdjustDurStep(stepIdx) {
+      var idx = Math.max(0, Math.min(CUSTOM_DUR_STEPS.length - 1, Number(stepIdx) || 0));
+      state.adjustingCardMins = CUSTOM_DUR_STEPS[idx];
+      var disp = document.getElementById('adjustDurDisplay');
+      if (disp) disp.textContent = formatCustomDurLabel(state.adjustingCardMins);
+    }
+
+    function cancelCardDurAdjust() {
+      state.adjustingCardId = null;
+      renderHome();
+    }
+
+    function confirmCardDurStart() {
+      var card = (state.composedDeck.cards || []).find(function(c) { return c && c.id === state.adjustingCardId; });
+      state.adjustingCardId = null;
+      if (!card) { renderHome(); return; }
+      var updated = Object.assign({}, card, { mins: state.adjustingCardMins || card.mins || 30 });
+      startAction(updated);
+    }
+
     function handleCardClick(cardId) {
       var cards = getVisibleDeckCards();
       var card = cards.find(function(c) { return c.id === cardId; });
@@ -2598,6 +2661,7 @@
         executeTriageCard(card);
         return;
       }
+      state.pendingSessionLockUntil = Date.now() + 8000;
       startAction(card);
     }
 

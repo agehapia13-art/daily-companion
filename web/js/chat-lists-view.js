@@ -370,6 +370,9 @@ function renderLists() {
           if (t.due) metaParts.push('期限: ' + t.due);
           if (t.mins) metaParts.push(t.mins + '分');
           if (t.done) metaParts.push('完了済');
+          var durBtn = t.done
+            ? ''
+            : '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'task\',\'' + escapeJsAttr(t.id) + '\',' + (t.mins || 30) + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(t.mins || 30) + '</button>';
           var docBtn = t.docUrl
             ? '<a href="' + escapeHtml(t.docUrl) + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" class="circle-action-btn" aria-label="資料を開く" title="資料を開く" style="text-decoration:none;">' + getIconSvg('fileText', 14) + '</a>'
             : '';
@@ -382,8 +385,9 @@ function renderLists() {
                 '<div class="list-item-title">' + escapeHtml(t.title) + '</div>' +
                 '<div class="list-item-meta">' + escapeHtml(metaParts.join(' · ') || t.cat) + '</div>' +
               '</div>' +
-              '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + docBtn + playBtn + '</div>' +
-            '</div>'
+              '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + durBtn + docBtn + playBtn + '</div>' +
+            '</div>' +
+            renderListDurAdjustCard('task', t.id, t.cleanTitle || t.title)
           );
         }).join('');
     return;
@@ -414,6 +418,9 @@ function renderLists() {
     container.innerHTML = stocks.length === 0
       ? '<div class="chat-empty">インプットストックはありません</div>'
       : stocks.map(function(st) {
+          var durBtn = st.done
+            ? ''
+            : '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'stock\',\'' + escapeJsAttr(st.id) + '\',' + (st.mins || 30) + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(st.mins || 30) + '</button>';
           var playBtn = st.done
             ? ''
             : '<button type="button" onclick="event.stopPropagation();startFromList(\'stock\',\'' + escapeJsAttr(st.id) + '\')" class="circle-action-btn" aria-label="今すぐ始める">' + getIconSvg('play', 14) + '</button>';
@@ -423,8 +430,9 @@ function renderLists() {
                 '<div class="list-item-title">[' + escapeHtml(st.type) + '] ' + escapeHtml(st.title) + '</div>' +
                 '<div class="list-item-meta">' + (st.done ? '消化済' : st.mins + '分') + '</div>' +
               '</div>' +
-              playBtn +
-            '</div>'
+              '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + durBtn + playBtn + '</div>' +
+            '</div>' +
+            renderListDurAdjustCard('stock', st.id, st.title)
           );
         }).join('');
     return;
@@ -434,34 +442,81 @@ function renderLists() {
   container.innerHTML = habits.length === 0
     ? '<div class="chat-empty">周期・習慣記録はありません</div>'
     : habits.map(function(h) {
-        return (
+          var durBtn = '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'habits\',\'' + escapeJsAttr(h.id) + '\',' + (h.mins || 20) + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(h.mins || 20) + '</button>';
+          return (
           '<div class="list-item" onclick="insertPillToSharedComposer(\'habits\',\'' + escapeJsAttr(h.id) + '\',\'' + escapeJsAttr(h.title) + '\')">' +
             '<div class="list-item-main">' +
               '<div class="list-item-title">' + escapeHtml(h.title) + '</div>' +
               '<div class="list-item-meta">' + escapeHtml(h.elapsed || '') + ' · ' + (h.mins || 20) + '分</div>' +
             '</div>' +
-            '<button type="button" onclick="event.stopPropagation();startFromList(\'habits\',\'' + escapeJsAttr(h.id) + '\')" class="circle-action-btn" aria-label="今すぐ始める">' + getIconSvg('play', 14) + '</button>' +
-          '</div>'
+            '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + durBtn +
+            '<button type="button" onclick="event.stopPropagation();startFromList(\'habits\',\'' + escapeJsAttr(h.id) + '\')" class="circle-action-btn" aria-label="今すぐ始める">' + getIconSvg('play', 14) + '</button></div>' +
+          '</div>' +
+          renderListDurAdjustCard('habits', h.id, h.title)
         );
       }).join('');
 }
 
-function startFromList(kind, itemId) {
+function renderListDurAdjustCard(kind, itemId, title) {
+  if (!state.adjustingListItem || state.adjustingListItem.kind !== kind || state.adjustingListItem.id !== itemId) return '';
+  return (
+    '<div class="custom-create-card glass-surface fade-in" style="margin:6px 0 10px;">' +
+      '<div style="font-size:13px;font-weight:600;color:var(--text-primary);">「' + escapeHtml(title) + '」の見込み時間を調整</div>' +
+      renderDurSliderHtml('listDurSlider', 'listDurDisplay', 'setListDurStep', state.adjustingListMins || 30) +
+      '<div class="custom-btns">' +
+        '<button type="button" onclick="confirmListDurStart()" class="btn-solid">この時間で始める</button>' +
+        '<button type="button" onclick="cancelListDurAdjust()" class="btn-ghost">キャンセル</button>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+function openListDurAdjust(kind, itemId, currentMins) {
+  if (state.adjustingListItem && state.adjustingListItem.kind === kind && state.adjustingListItem.id === itemId) {
+    state.adjustingListItem = null;
+  } else {
+    state.adjustingListItem = { kind: kind, id: itemId };
+    state.adjustingListMins = currentMins || 30;
+  }
+  renderLists();
+}
+
+function setListDurStep(stepIdx) {
+  var idx = Math.max(0, Math.min(CUSTOM_DUR_STEPS.length - 1, Number(stepIdx) || 0));
+  state.adjustingListMins = CUSTOM_DUR_STEPS[idx];
+  var disp = document.getElementById('listDurDisplay');
+  if (disp) disp.textContent = formatCustomDurLabel(state.adjustingListMins);
+}
+
+function cancelListDurAdjust() {
+  state.adjustingListItem = null;
+  renderLists();
+}
+
+function confirmListDurStart() {
+  var item = state.adjustingListItem;
+  state.adjustingListItem = null;
+  if (!item) { renderLists(); return; }
+  startFromList(item.kind, item.id, state.adjustingListMins);
+}
+
+function startFromList(kind, itemId, overrideMins) {
   var card = null;
   if (kind === 'task') {
     var t = (state.lists.tasks || []).find(function(x) { return x.id === itemId; });
     if (!t) return;
-    card = { id: t.id, linkedType: 'task', linkedId: t.id, icon: 'checkCircle', title: t.cleanTitle || t.title, sub: t.memo || 'タスク', mins: t.mins || 30 };
+    card = { id: t.id, linkedType: 'task', linkedId: t.id, icon: 'checkCircle', title: t.cleanTitle || t.title, sub: t.memo || 'タスク', mins: overrideMins || t.mins || 30 };
   } else if (kind === 'stock') {
     var st = (state.lists.stock || []).find(function(x) { return x.id === itemId; });
     if (!st) return;
-    card = { id: st.id, linkedType: 'stock', linkedId: st.title, icon: st.type === '音楽' ? 'music' : 'book', title: st.title, sub: st.type, mins: st.mins || 30 };
+    card = { id: st.id, linkedType: 'stock', linkedId: st.title, icon: st.type === '音楽' ? 'music' : 'book', title: st.title, sub: st.type, mins: overrideMins || st.mins || 30 };
   } else if (kind === 'habits') {
     var h = (state.lists.habits || []).find(function(x) { return x.id === itemId; });
     if (!h) return;
-    card = { id: h.id, linkedType: 'habit', linkedId: h.title, cycleStampLabel: h.title, icon: 'wind', title: h.title, sub: h.elapsed || '習慣ケア', mins: h.mins || 20 };
+    card = { id: h.id, linkedType: 'habit', linkedId: h.title, cycleStampLabel: h.title, icon: 'wind', title: h.title, sub: h.elapsed || '習慣ケア', mins: overrideMins || h.mins || 20 };
   }
   if (!card) return;
+  state.pendingSessionLockUntil = Date.now() + 8000;
   switchTab('home');
   startAction(card);
 }

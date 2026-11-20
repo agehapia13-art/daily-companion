@@ -23,6 +23,30 @@ function getVisibleDeckCards() {
   return out;
 }
 
+function renderDurSliderHtml(sliderId, displayId, oninputFn, currentMins) {
+  var idx = 0;
+  var bestDiff = Infinity;
+  for (var i = 0; i < CUSTOM_DUR_STEPS.length; i++) {
+    var d = Math.abs(CUSTOM_DUR_STEPS[i] - (currentMins || 30));
+    if (d < bestDiff) { bestDiff = d; idx = i; }
+  }
+  return (
+    '<div class="dur-slider-wrap">' +
+      '<div class="dur-slider-head">' +
+        '<span id="' + displayId + '" class="dur-slider-val">' + formatCustomDurLabel(CUSTOM_DUR_STEPS[idx]) + '</span>' +
+      '</div>' +
+      '<input id="' + sliderId + '" type="range" class="dur-slider" min="0" max="' + (CUSTOM_DUR_STEPS.length - 1) + '" step="1" value="' + idx + '" oninput="' + oninputFn + '(this.value)" />' +
+      '<div class="dur-slider-ticks">' +
+        '<span>5分</span>' +
+        '<span style="left:27.3%;">30分</span>' +
+        '<span style="left:45.5%;">1時間</span>' +
+        '<span style="left:63.6%;">2時間</span>' +
+        '<span>6時間</span>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
 function renderHome() {
   var metaEl = document.getElementById('homeMeta');
   if (metaEl) metaEl.textContent = state.weatherLine || '横浜・磯子';
@@ -123,7 +147,17 @@ function renderHome() {
 
   var cards = getVisibleDeckCards();
   var parts = ['<div class="cards-stack fade-in">'];
-  if (cards.length === 0) {
+  if (state.isRefreshingDeck) {
+    parts.push(
+      '<div class="action-card" style="cursor:default;">' +
+        '<div class="card-icon-badge">' + getIconSvg('refresh', 18) + '</div>' +
+        '<div class="card-body">' +
+          '<div class="card-row1"><span class="card-title">新しい候補を探しています…</span></div>' +
+          '<div class="card-row2">反映まで少しお待ちください</div>' +
+        '</div>' +
+      '</div>'
+    );
+  } else if (cards.length === 0) {
     parts.push(
       '<div class="action-card" style="cursor:default;">' +
         '<div class="card-icon-badge">' + getIconSvg('checkCircle', 18) + '</div>' +
@@ -171,30 +205,6 @@ function renderHome() {
     '</div>'
   );
 
-  function renderDurSliderHtml(sliderId, displayId, oninputFn, currentMins) {
-    var idx = 0;
-    var bestDiff = Infinity;
-    for (var i = 0; i < CUSTOM_DUR_STEPS.length; i++) {
-      var d = Math.abs(CUSTOM_DUR_STEPS[i] - (currentMins || 30));
-      if (d < bestDiff) { bestDiff = d; idx = i; }
-    }
-    return (
-      '<div class="dur-slider-wrap">' +
-        '<div class="dur-slider-head">' +
-          '<span id="' + displayId + '" class="dur-slider-val">' + formatCustomDurLabel(CUSTOM_DUR_STEPS[idx]) + '</span>' +
-        '</div>' +
-        '<input id="' + sliderId + '" type="range" class="dur-slider" min="0" max="' + (CUSTOM_DUR_STEPS.length - 1) + '" step="1" value="' + idx + '" oninput="' + oninputFn + '(this.value)" />' +
-        '<div class="dur-slider-ticks">' +
-          '<span>5分</span>' +
-          '<span style="left:27.3%;">30分</span>' +
-          '<span style="left:45.5%;">1時間</span>' +
-          '<span style="left:63.6%;">2時間</span>' +
-          '<span>6時間</span>' +
-        '</div>' +
-      '</div>'
-    );
-  }
-
   if (state.adjustingCardId) {
     var adjCard = (state.composedDeck.cards || []).find(function(c) { return c && c.id === state.adjustingCardId; });
     if (adjCard) {
@@ -237,6 +247,7 @@ function dismissBriefing() {
 }
 
 function rotateDeck() {
+  if (state.isRefreshingDeck) return;
   var completed = state.fastState.completedToday || {};
   var dismissed = state.fastState.dismissedToday || {};
   var pool = (state.composedDeck.cards || []).filter(function(c) {
@@ -250,18 +261,22 @@ function rotateDeck() {
     return;
   }
   state.deckOffset = 0;
-  showToast('新しい候補を探しています…');
+  state.isRefreshingDeck = true;
+  renderHome();
   var excludeIds = pool.map(function(c) { return c.id; });
   callServerApi('apiRefreshDeck', state.authKey, excludeIds)
     .then(function(res) {
+      state.isRefreshingDeck = false;
       if (res && res.authorized) {
         state.fastState.aiDeck = res.aiDeck;
         state.composedDeck = res.deck;
         saveLocalSnapshot();
-        renderHome();
       }
+      renderHome();
     })
     .catch(function() {
+      state.isRefreshingDeck = false;
+      showToast('候補の更新に失敗しました');
       renderHome();
     });
 }

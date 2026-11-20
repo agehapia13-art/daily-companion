@@ -1810,7 +1810,7 @@
       <div class="custom-btns">
         <button type="button" onclick="saveSettings()" class="btn-solid" style="width:100%;padding:11px;">保存して同期</button>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v18</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v19</div>
     </div>
   </div>
 
@@ -2332,6 +2332,30 @@
       return out;
     }
 
+    function renderDurSliderHtml(sliderId, displayId, oninputFn, currentMins) {
+      var idx = 0;
+      var bestDiff = Infinity;
+      for (var i = 0; i < CUSTOM_DUR_STEPS.length; i++) {
+        var d = Math.abs(CUSTOM_DUR_STEPS[i] - (currentMins || 30));
+        if (d < bestDiff) { bestDiff = d; idx = i; }
+      }
+      return (
+        '<div class="dur-slider-wrap">' +
+          '<div class="dur-slider-head">' +
+            '<span id="' + displayId + '" class="dur-slider-val">' + formatCustomDurLabel(CUSTOM_DUR_STEPS[idx]) + '</span>' +
+          '</div>' +
+          '<input id="' + sliderId + '" type="range" class="dur-slider" min="0" max="' + (CUSTOM_DUR_STEPS.length - 1) + '" step="1" value="' + idx + '" oninput="' + oninputFn + '(this.value)" />' +
+          '<div class="dur-slider-ticks">' +
+            '<span>5分</span>' +
+            '<span style="left:27.3%;">30分</span>' +
+            '<span style="left:45.5%;">1時間</span>' +
+            '<span style="left:63.6%;">2時間</span>' +
+            '<span>6時間</span>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+
     function renderHome() {
       var metaEl = document.getElementById('homeMeta');
       if (metaEl) metaEl.textContent = state.weatherLine || '横浜・磯子';
@@ -2432,7 +2456,17 @@
 
       var cards = getVisibleDeckCards();
       var parts = ['<div class="cards-stack fade-in">'];
-      if (cards.length === 0) {
+      if (state.isRefreshingDeck) {
+        parts.push(
+          '<div class="action-card" style="cursor:default;">' +
+            '<div class="card-icon-badge">' + getIconSvg('refresh', 18) + '</div>' +
+            '<div class="card-body">' +
+              '<div class="card-row1"><span class="card-title">新しい候補を探しています…</span></div>' +
+              '<div class="card-row2">反映まで少しお待ちください</div>' +
+            '</div>' +
+          '</div>'
+        );
+      } else if (cards.length === 0) {
         parts.push(
           '<div class="action-card" style="cursor:default;">' +
             '<div class="card-icon-badge">' + getIconSvg('checkCircle', 18) + '</div>' +
@@ -2480,30 +2514,6 @@
         '</div>'
       );
 
-      function renderDurSliderHtml(sliderId, displayId, oninputFn, currentMins) {
-        var idx = 0;
-        var bestDiff = Infinity;
-        for (var i = 0; i < CUSTOM_DUR_STEPS.length; i++) {
-          var d = Math.abs(CUSTOM_DUR_STEPS[i] - (currentMins || 30));
-          if (d < bestDiff) { bestDiff = d; idx = i; }
-        }
-        return (
-          '<div class="dur-slider-wrap">' +
-            '<div class="dur-slider-head">' +
-              '<span id="' + displayId + '" class="dur-slider-val">' + formatCustomDurLabel(CUSTOM_DUR_STEPS[idx]) + '</span>' +
-            '</div>' +
-            '<input id="' + sliderId + '" type="range" class="dur-slider" min="0" max="' + (CUSTOM_DUR_STEPS.length - 1) + '" step="1" value="' + idx + '" oninput="' + oninputFn + '(this.value)" />' +
-            '<div class="dur-slider-ticks">' +
-              '<span>5分</span>' +
-              '<span style="left:27.3%;">30分</span>' +
-              '<span style="left:45.5%;">1時間</span>' +
-              '<span style="left:63.6%;">2時間</span>' +
-              '<span>6時間</span>' +
-            '</div>' +
-          '</div>'
-        );
-      }
-
       if (state.adjustingCardId) {
         var adjCard = (state.composedDeck.cards || []).find(function(c) { return c && c.id === state.adjustingCardId; });
         if (adjCard) {
@@ -2546,6 +2556,7 @@
     }
 
     function rotateDeck() {
+      if (state.isRefreshingDeck) return;
       var completed = state.fastState.completedToday || {};
       var dismissed = state.fastState.dismissedToday || {};
       var pool = (state.composedDeck.cards || []).filter(function(c) {
@@ -2559,18 +2570,22 @@
         return;
       }
       state.deckOffset = 0;
-      showToast('新しい候補を探しています…');
+      state.isRefreshingDeck = true;
+      renderHome();
       var excludeIds = pool.map(function(c) { return c.id; });
       callServerApi('apiRefreshDeck', state.authKey, excludeIds)
         .then(function(res) {
+          state.isRefreshingDeck = false;
           if (res && res.authorized) {
             state.fastState.aiDeck = res.aiDeck;
             state.composedDeck = res.deck;
             saveLocalSnapshot();
-            renderHome();
           }
+          renderHome();
         })
         .catch(function() {
+          state.isRefreshingDeck = false;
+          showToast('候補の更新に失敗しました');
           renderHome();
         });
     }
@@ -3259,6 +3274,9 @@
               if (t.due) metaParts.push('期限: ' + t.due);
               if (t.mins) metaParts.push(t.mins + '分');
               if (t.done) metaParts.push('完了済');
+              var durBtn = t.done
+                ? ''
+                : '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'task\',\'' + escapeJsAttr(t.id) + '\',' + (t.mins || 30) + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(t.mins || 30) + '</button>';
               var docBtn = t.docUrl
                 ? '<a href="' + escapeHtml(t.docUrl) + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" class="circle-action-btn" aria-label="資料を開く" title="資料を開く" style="text-decoration:none;">' + getIconSvg('fileText', 14) + '</a>'
                 : '';
@@ -3271,8 +3289,9 @@
                     '<div class="list-item-title">' + escapeHtml(t.title) + '</div>' +
                     '<div class="list-item-meta">' + escapeHtml(metaParts.join(' · ') || t.cat) + '</div>' +
                   '</div>' +
-                  '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + docBtn + playBtn + '</div>' +
-                '</div>'
+                  '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + durBtn + docBtn + playBtn + '</div>' +
+                '</div>' +
+                renderListDurAdjustCard('task', t.id, t.cleanTitle || t.title)
               );
             }).join('');
         return;
@@ -3303,6 +3322,9 @@
         container.innerHTML = stocks.length === 0
           ? '<div class="chat-empty">インプットストックはありません</div>'
           : stocks.map(function(st) {
+              var durBtn = st.done
+                ? ''
+                : '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'stock\',\'' + escapeJsAttr(st.id) + '\',' + (st.mins || 30) + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(st.mins || 30) + '</button>';
               var playBtn = st.done
                 ? ''
                 : '<button type="button" onclick="event.stopPropagation();startFromList(\'stock\',\'' + escapeJsAttr(st.id) + '\')" class="circle-action-btn" aria-label="今すぐ始める">' + getIconSvg('play', 14) + '</button>';
@@ -3312,8 +3334,9 @@
                     '<div class="list-item-title">[' + escapeHtml(st.type) + '] ' + escapeHtml(st.title) + '</div>' +
                     '<div class="list-item-meta">' + (st.done ? '消化済' : st.mins + '分') + '</div>' +
                   '</div>' +
-                  playBtn +
-                '</div>'
+                  '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + durBtn + playBtn + '</div>' +
+                '</div>' +
+                renderListDurAdjustCard('stock', st.id, st.title)
               );
             }).join('');
         return;
@@ -3323,34 +3346,81 @@
       container.innerHTML = habits.length === 0
         ? '<div class="chat-empty">周期・習慣記録はありません</div>'
         : habits.map(function(h) {
-            return (
+              var durBtn = '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'habits\',\'' + escapeJsAttr(h.id) + '\',' + (h.mins || 20) + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(h.mins || 20) + '</button>';
+              return (
               '<div class="list-item" onclick="insertPillToSharedComposer(\'habits\',\'' + escapeJsAttr(h.id) + '\',\'' + escapeJsAttr(h.title) + '\')">' +
                 '<div class="list-item-main">' +
                   '<div class="list-item-title">' + escapeHtml(h.title) + '</div>' +
                   '<div class="list-item-meta">' + escapeHtml(h.elapsed || '') + ' · ' + (h.mins || 20) + '分</div>' +
                 '</div>' +
-                '<button type="button" onclick="event.stopPropagation();startFromList(\'habits\',\'' + escapeJsAttr(h.id) + '\')" class="circle-action-btn" aria-label="今すぐ始める">' + getIconSvg('play', 14) + '</button>' +
-              '</div>'
+                '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + durBtn +
+                '<button type="button" onclick="event.stopPropagation();startFromList(\'habits\',\'' + escapeJsAttr(h.id) + '\')" class="circle-action-btn" aria-label="今すぐ始める">' + getIconSvg('play', 14) + '</button></div>' +
+              '</div>' +
+              renderListDurAdjustCard('habits', h.id, h.title)
             );
           }).join('');
     }
 
-    function startFromList(kind, itemId) {
+    function renderListDurAdjustCard(kind, itemId, title) {
+      if (!state.adjustingListItem || state.adjustingListItem.kind !== kind || state.adjustingListItem.id !== itemId) return '';
+      return (
+        '<div class="custom-create-card glass-surface fade-in" style="margin:6px 0 10px;">' +
+          '<div style="font-size:13px;font-weight:600;color:var(--text-primary);">「' + escapeHtml(title) + '」の見込み時間を調整</div>' +
+          renderDurSliderHtml('listDurSlider', 'listDurDisplay', 'setListDurStep', state.adjustingListMins || 30) +
+          '<div class="custom-btns">' +
+            '<button type="button" onclick="confirmListDurStart()" class="btn-solid">この時間で始める</button>' +
+            '<button type="button" onclick="cancelListDurAdjust()" class="btn-ghost">キャンセル</button>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+
+    function openListDurAdjust(kind, itemId, currentMins) {
+      if (state.adjustingListItem && state.adjustingListItem.kind === kind && state.adjustingListItem.id === itemId) {
+        state.adjustingListItem = null;
+      } else {
+        state.adjustingListItem = { kind: kind, id: itemId };
+        state.adjustingListMins = currentMins || 30;
+      }
+      renderLists();
+    }
+
+    function setListDurStep(stepIdx) {
+      var idx = Math.max(0, Math.min(CUSTOM_DUR_STEPS.length - 1, Number(stepIdx) || 0));
+      state.adjustingListMins = CUSTOM_DUR_STEPS[idx];
+      var disp = document.getElementById('listDurDisplay');
+      if (disp) disp.textContent = formatCustomDurLabel(state.adjustingListMins);
+    }
+
+    function cancelListDurAdjust() {
+      state.adjustingListItem = null;
+      renderLists();
+    }
+
+    function confirmListDurStart() {
+      var item = state.adjustingListItem;
+      state.adjustingListItem = null;
+      if (!item) { renderLists(); return; }
+      startFromList(item.kind, item.id, state.adjustingListMins);
+    }
+
+    function startFromList(kind, itemId, overrideMins) {
       var card = null;
       if (kind === 'task') {
         var t = (state.lists.tasks || []).find(function(x) { return x.id === itemId; });
         if (!t) return;
-        card = { id: t.id, linkedType: 'task', linkedId: t.id, icon: 'checkCircle', title: t.cleanTitle || t.title, sub: t.memo || 'タスク', mins: t.mins || 30 };
+        card = { id: t.id, linkedType: 'task', linkedId: t.id, icon: 'checkCircle', title: t.cleanTitle || t.title, sub: t.memo || 'タスク', mins: overrideMins || t.mins || 30 };
       } else if (kind === 'stock') {
         var st = (state.lists.stock || []).find(function(x) { return x.id === itemId; });
         if (!st) return;
-        card = { id: st.id, linkedType: 'stock', linkedId: st.title, icon: st.type === '音楽' ? 'music' : 'book', title: st.title, sub: st.type, mins: st.mins || 30 };
+        card = { id: st.id, linkedType: 'stock', linkedId: st.title, icon: st.type === '音楽' ? 'music' : 'book', title: st.title, sub: st.type, mins: overrideMins || st.mins || 30 };
       } else if (kind === 'habits') {
         var h = (state.lists.habits || []).find(function(x) { return x.id === itemId; });
         if (!h) return;
-        card = { id: h.id, linkedType: 'habit', linkedId: h.title, cycleStampLabel: h.title, icon: 'wind', title: h.title, sub: h.elapsed || '習慣ケア', mins: h.mins || 20 };
+        card = { id: h.id, linkedType: 'habit', linkedId: h.title, cycleStampLabel: h.title, icon: 'wind', title: h.title, sub: h.elapsed || '習慣ケア', mins: overrideMins || h.mins || 20 };
       }
       if (!card) return;
+      state.pendingSessionLockUntil = Date.now() + 8000;
       switchTab('home');
       startAction(card);
     }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dc-pwa-v16';
+const CACHE_NAME = 'dc-pwa-v17';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -37,7 +37,7 @@ self.addEventListener('fetch', (event) => {
   const isDocument = req.mode === 'navigate' || url.pathname.endsWith('/') || url.pathname.endsWith('/index.html');
   if (isDocument) {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-store' })
         .then((res) => {
           if (res && res.ok) {
             const copy = res.clone();

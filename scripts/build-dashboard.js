@@ -270,7 +270,7 @@ function encodeRgbPng(width, height, rawScanlines) {
 }
 
 function buildServiceWorkerJs() {
-  return `const CACHE_NAME = 'dc-pwa-v16';
+  return `const CACHE_NAME = 'dc-pwa-v17';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -309,7 +309,7 @@ self.addEventListener('fetch', (event) => {
   const isDocument = req.mode === 'navigate' || url.pathname.endsWith('/') || url.pathname.endsWith('/index.html');
   if (isDocument) {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-store' })
         .then((res) => {
           if (res && res.ok) {
             const copy = res.clone();
@@ -383,7 +383,10 @@ function assembleDashboardHtml() {
   const indentedCss = indentBlock(cssSrc, 4);
   const indentedJs = indentBlock(jsChunks.join('\n\n'), 4);
 
+  const swMatch = buildServiceWorkerJs().match(/const CACHE_NAME = '([^']+)'/);
+  const cacheVersion = swMatch ? swMatch[1] : 'dev';
   return indexTpl
+    .replace('__PWA_CACHE_VERSION__', cacheVersion)
     .replace('/* INLINE_STYLES */', () => indentedCss)
     .replace('/* INLINE_SCRIPTS */', () => indentedJs);
 }

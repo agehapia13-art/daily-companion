@@ -173,7 +173,7 @@ function renderHome() {
       var rightHtml = c.isTriage
         ? '<span class="card-right triage-badge">' + escapeHtml(c.rightLabel || '引き算') + ' ' + getIconSvg('chevron', 14) + '</span>'
         : '<span class="card-right">' +
-            (c.isSleepCard ? '' : '<button type="button" onclick="event.stopPropagation();openCardDurAdjust(\'' + escapeJsAttr(c.id) + '\')" style="background:none;border:none;color:inherit;font:inherit;padding:2px 4px;margin:-2px 0;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;" title="開始前に所要時間を調整">' + formatCustomDurLabel(c.mins) + '</button> ') +
+            (c.isSleepCard ? '' : '<button type="button" onclick="event.stopPropagation();openCardDurAdjust(\'' + escapeJsAttr(c.id) + '\')" style="background:rgba(139,92,246,0.12);border:none;border-radius:999px;color:inherit;font:inherit;font-weight:600;padding:6px 10px;margin:-4px 2px -4px 0;cursor:pointer;" title="開始前に所要時間を調整">' + formatCustomDurLabel(c.mins) + '</button> ') +
             getIconSvg('chevron', 14) +
           '</span>';
       parts.push(

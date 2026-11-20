@@ -225,27 +225,31 @@ function findProjectEntry(entries, query) {
   if (!entries || entries.length === 0 || !query) return null;
   const q = String(query).trim();
   const qNoDate = q.replace(/^\d{4}_/, '').trim();
+  if (!qNoDate || qNoDate.toLowerCase() === 'outputs' || /^(仕事|制作・創作|家事・環境|実務・手続|趣味・文化|身体・ケア|お出かけ)$/.test(qNoDate)) {
+    return null;
+  }
+  const candidates = entries.filter(e => e && e.projectName && e.projectName.toLowerCase() !== 'outputs' && !isArchiveProjectFolderName_(e.projectName));
 
   // 1. 完全一致
-  for (let i = 0; i < entries.length; i++) {
-    if (entries[i].projectName === q) return entries[i];
+  for (let i = 0; i < candidates.length; i++) {
+    if (candidates[i].projectName === q) return candidates[i];
   }
   // 2. 年月プレフィックス除外での完全一致
-  for (let i = 0; i < entries.length; i++) {
-    const pNoDate = entries[i].projectName.replace(/^\d{4}_/, '').trim();
-    if (pNoDate === qNoDate) return entries[i];
+  for (let i = 0; i < candidates.length; i++) {
+    const pNoDate = candidates[i].projectName.replace(/^\d{4}_/, '').trim();
+    if (pNoDate === qNoDate) return candidates[i];
   }
   // 3. 部分一致（より長い一致を優先）
   let best = null;
   let bestScore = 0;
-  for (let i = 0; i < entries.length; i++) {
-    const pName = entries[i].projectName;
+  for (let i = 0; i < candidates.length; i++) {
+    const pName = candidates[i].projectName;
     const pNoDate = pName.replace(/^\d{4}_/, '').trim();
     if (pName.includes(q) || q.includes(pName) || pNoDate.includes(qNoDate) || qNoDate.includes(pNoDate)) {
       const score = Math.min(qNoDate.length, pNoDate.length);
       if (score > bestScore) {
         bestScore = score;
-        best = entries[i];
+        best = candidates[i];
       }
     }
   }

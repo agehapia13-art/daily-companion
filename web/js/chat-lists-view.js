@@ -212,7 +212,10 @@ function submitTalkEditor() {
   }
   collectEditorNodes(editor);
 
-  var plainText = tokens.map(function(t) { return t.type === 'pill' ? '「' + t.label + '」' : t.value; }).join('').trim();
+  var plainText = tokens.map(function(t) {
+    if (t.type !== 'pill') return t.value;
+    return (t.kind === 'tasks' && t.id) ? ('「' + t.label + '」(ID:' + t.id + ')') : ('「' + t.label + '」');
+  }).join('').trim();
   var photo = state.pendingChatPhoto;
   if (!plainText && !photo) return;
 

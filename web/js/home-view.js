@@ -369,8 +369,18 @@ function completeReflection(keepOpen) {
   var noteEl = document.getElementById('reflectNoteInput');
   var note = noteEl ? noteEl.value.trim() : (r.note || '').trim();
 
-  state.isSubmittingReflect = true;
-  renderHome();
+  // 楽観的UI: 即座にふりかえり画面を閉じてHomeへ戻り、裏でサーバーへ記録する
+  state.reflection = null;
+  state.fastState.activeSession = null;
+  if (r.card && r.card.id && !r.card.isCustom) {
+    state.fastState.completedToday[r.card.id] = true;
+  }
+  if (!keepOpen && r.card && r.card.linkedType === 'task' && r.card.linkedId) {
+    state.fastState.completedToday[r.card.linkedId] = true;
+  }
+  saveLocalSnapshot();
+  renderAll();
+  showToast(keepOpen ? 'ここまでの進行を記録しました' : (r.feeling || note || r.photoBase64 ? '記録して次へ進みました' : 'お疲れさまでした'));
 
   callServerApi('apiCompleteAction', state.authKey, {
     session: r.card,
@@ -381,8 +391,6 @@ function completeReflection(keepOpen) {
     photoMimeType: r.photoMimeType || 'image/jpeg'
   })
     .then(function(res) {
-      state.isSubmittingReflect = false;
-      state.reflection = null;
       if (res && res.authorized) {
         applyServerStatePayload(res);
         if (res.addedChatMessage) {
@@ -390,15 +398,11 @@ function completeReflection(keepOpen) {
         }
         saveLocalSnapshot();
         renderAll();
-        showToast(r.feeling || note || r.photoBase64 ? '記録して次へ進みました' : 'お疲れさまでした');
       } else {
-        renderHome();
         showToast('記録の同期に失敗しました');
       }
     })
     .catch(function(err) {
-      state.isSubmittingReflect = false;
-      renderHome();
       showToast('送信エラー: ' + (err.message || err));
     });
 }

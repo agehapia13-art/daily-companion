@@ -44,7 +44,7 @@ const CHAT_RESPONSE_SCHEMA = {
       description: '疲労申告による低負荷モード切替やシステムアンカー完了時のみ出力',
       properties: {
         mark_low_mode: { type: 'BOOLEAN', description: '疲労・だるさ・体調不良の申告時にtrueを出力' },
-        completed_anchor_id: { type: 'STRING', description: '食事・入浴・就寝等の完了報告時にアンカーIDを出力（anchor_breakfast / anchor_lunch / anchor_dinner / anchor_bath / anchor_skincare / anchor_sleep）' }
+        completed_anchor_id: { type: 'STRING', description: '食事・入浴・就寝等の完了報告時にアンカーIDを出力（anchor_breakfast / anchor_lunch / anchor_dinner / anchor_bath / anchor_sleep）' }
       }
     },
     image_summary: {

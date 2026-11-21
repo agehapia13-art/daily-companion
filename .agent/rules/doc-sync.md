@@ -1,8 +1,6 @@
 ---
 trigger: glob
-globs:
-  - src/**
-  - web/**
+globs: "src/**, web/**"
 ---
 
 # ドキュメント同期ルール（README.md / SPEC.md）

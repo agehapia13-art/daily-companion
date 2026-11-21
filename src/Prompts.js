@@ -57,7 +57,7 @@ const CHAT_RESPONSE_SCHEMA = {
         type: 'OBJECT',
         properties: {
           action: { type: 'STRING', enum: ['add', 'update', 'complete', 'delete'], description: '操作種別。update時はtask_idと変更対象キー(estimated_mins/due_date等)を必ず出力' },
-          task_id: { type: 'STRING', description: '既存タスクID（T_...）。update/complete/delete時は可能な限り指定' },
+          task_id: { type: 'STRING', description: '既存タスクID（T_... または R_...）。update/complete/delete時は可能な限り指定' },
           estimated_mins: { type: 'INTEGER', description: '【時間指定・変更時必須】見込み所要時間（分・正の整数。例: 「45分に変えて」→ 45）' },
           due_date: { type: 'STRING', description: '期限・実施日（YYYY-MM-DD）。明示指定・変更時のみ出力' },
           new_title: { type: 'STRING', description: 'update時にタイトル文言自体を変更する場合のみ指定' },
@@ -142,7 +142,7 @@ const CHAT_RESPONSE_SCHEMA = {
       items: {
         type: 'OBJECT',
         properties: {
-          action: { type: 'STRING', enum: ['add', 'complete'] },
+          action: { type: 'STRING', enum: ['add', 'complete'], description: 'add=定期ルール新規登録 / complete=定期ルール自体の今後の生成を永久停止（1回分の消化報告には使わない）' },
           title: { type: 'STRING' },
           type: { type: 'STRING', enum: ['day_of_week', 'day_of_month', 'interval_days'] },
           value: { type: 'STRING' },
@@ -219,16 +219,18 @@ function getDefaultPromptSchedule() {
  */
 function getDefaultPromptDb() {
   return `【データベース・カレンダー・Docs操作仕様】
-チャット中の依頼・完了報告・期限変更・自発的な行動意志や欲求の表明（「〜したい」「〜食べたい」「〜見たい」等）は単なる雑談で流さず、該当プールへ漏れなくJSONアクションで反映する（※単なる迷いや既存タスクへの言及のみとは区別する）。変更・操作がないアクション配列は省略する。
+チャット中の依頼・完了報告・期限変更・自発的な行動意志や欲求の表明（「〜したい」「〜食べたい」「〜見たい」等）は単なる雑談で流さず、該当プールへ漏れなくJSONアクションで反映する（※単なる迷いや既存タスクへの言及のみ、およびAI・システム自身への操作・生成・回答の依頼はユーザー自身の行動ではないため登録対象外）。変更・操作がないアクション配列は省略する。
 
 1. 4大プールの使い分け（直交原則）:
-   - \`task_actions\`: 本人が行う単発行動・調査・制作・家事・外出・手続き。
+   - \`task_actions\`: 本人が行う単発行動・調査・制作・家事・外出・手続き（定期ルーティンから生成された当日タスク \`R_...\` も含む）。
    - \`shopping_actions\`: 食品・スイーツ・日用品などの買う物・欲しい物。
    - \`input_stock_actions\`: 映画・音楽・本・ゲーム等の鑑賞・視聴・プレイ作品。
    - \`calendar_actions\`: 日時指定のある確定予定（個人メインカレンダーのみ書込可。家族共用は読取専用）。
-   - \`routine_actions\`: 定期繰り返し日課の追加（\`add\`）および終了・停止（\`complete\`）。
+   - \`routine_actions\`: 定期繰り返しルールの新規登録（\`add\`）およびルール自体の永久停止（\`complete\`）。その日の1回分の消化報告には使わず \`task_actions\` を使う。
 
 2. \`task_actions\` 規則:
+   - タスクID体系: \`T_...\` は通常タスク、\`R_...\` は定期ルーティンから生成された当日タスクであり、いずれも \`task_actions\` で操作する。
+   - 新規追加（\`add\`）の単発完結: \`due_date\`・\`estimated_mins\`・\`remind_context\` 等の属性は \`add\` 1オブジェクトにすべてまとめ、同一タスクに対して \`add\` と \`update\` を同時に出力しない。
    - 7大生活プリフィックス: タイトル先頭に \`[仕事]\` / \`[制作・創作]\` / \`[家事・環境]\` / \`[実務・手続]\` / \`[趣味・文化]\` / \`[身体・ケア]\` / \`[お出かけ]\` のいずれかを角括弧で必ず付与する（ユーザー指定カテゴリがあればそちらを優先）。時間制約がある時は末尾に \`（〜HH:mmまで）\` を記す。
    - \`due_date\`: 期限・実施日の明示がある場合はその日を \`YYYY-MM-DD\` で付与する。未指定時でも埋もれ防止のため、緊急度・文脈に応じた適度な仮期限（例: 今週中・次の休日・1週間後等）を推論して設定する。
    - \`remind_context\`: 提案に適したタイミング・実施日・条件・環境（例: \`夜・自室\`, \`休日PC\`, \`晴れの日中\`, \`指定日当日・外出時\` 等）を文脈から推論して付与する。実施日（\`due_date\`）や実施する条件・環境の宣言・変更があった時は、既存の \`remind_context\`（\`直近の空き枠\` 等）を放置せず必ず最新の条件へ同時更新する。

@@ -334,7 +334,7 @@ function buildChatPayload_(userText, imageBlobs, todayLogsText, memory, precompu
     dynamicLines.push(`【インプットストック(未消化)】: ${inputItems.join(', ')}`);
   }
   if (pre.routines && pre.routines.length > 0) {
-    dynamicLines.push(`【登録済み定期ルーティン】: ${pre.routines.map(r => `${r.ruleName}(${r.type}:${r.value})`).join(', ')}`);
+    dynamicLines.push(`【登録済み定期ルーティン（ルール定義）】: ${pre.routines.map(r => `${r.ruleName}(${r.type}:${r.value})`).join(', ')}`);
   }
   if (pre.relevantDict) {
     dynamicLines.push(`【用語辞書（関連項目）】:\n${pre.relevantDict}`);

@@ -235,7 +235,6 @@ function getDefaultPromptDb() {
    - \`estimated_mins\`: 新規追加（\`add\`）時・変更時は、時間の明示がなくてもタスク内容から妥当な見込み所要時間（分・数値、例: \`15\`, \`30\`, \`45\`, \`60\`）を推論して必ず出力する。
    - 更新（\`update\`）は差分パッチ: \`task_id\` と変更するキーのみ（例: \`due_date\`, \`estimated_mins\`, \`category\`, \`new_title\`, \`remind_context\`, \`memo\`, \`project_name\`）をセットで出力する（例: \`{"action":"update","task_id":"T_...","estimated_mins":45}\`）。一覧の表示文字列を \`title\` にコピーしたり変更しないキーを出力したりしない。期限の一括変更方針が決まった時は該当未完了タスクすべてを \`update\` で同期する。
    - 完了（\`complete\`）・破棄（\`delete\`）は \`task_id\` を指定する。
-   - 経過報告（「少し進めた」「1話見た」「今日はここまで」等）では \`complete\` を出さず会話ログのみにとどめ、\`complete\` は「すべて終わった・見終えた・読了した」と本人が完了を明示した時だけ使う。
    - 既存プロジェクト紐付け（\`project_name\`）: 【既存プロジェクトフォルダ一覧】内に同領域かつ主題が直接一致するフォルダがある場合のみ指定し、無関係な連想紐付けはしない。
 
 3. Google Drive プロジェクト ＆ Google Docs 連携（\`project_actions\`）:

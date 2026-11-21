@@ -200,7 +200,7 @@ function dailyMidnightBatch() {
           r.memo || '定期ルーティン自動投入',
           remindCtx,
           '',
-          ''
+          r.estimatedMins || (typeof getDefaultTaskEstimatedMins_ === 'function' ? getDefaultTaskEstimatedMins_(r.ruleName) : 30)
         ]);
         updateRoutineLastGenerated(r.rowIndex, todayStr);
         Logger.log(`ルーティンタスク投入成功: ${r.ruleName}`);

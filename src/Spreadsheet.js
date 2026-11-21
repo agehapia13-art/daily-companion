@@ -723,7 +723,7 @@ function applyTaskActions(actions, extraProjectUrlMapOpt) {
       const actForUrl = addTitle === act.title ? act : Object.assign({}, act, { title: addTitle });
       const resolvedUrl = resolveTaskDocUrl_(actForUrl, extraProjectUrlMapOpt, getProjectEntriesCached);
       const docUrl = resolvedUrl || '';
-      const estMins = parsePositiveEstimatedMins_(act.estimated_mins) || '';
+      const estMins = parsePositiveEstimatedMins_(act.estimated_mins) || getDefaultTaskEstimatedMins_(addTitle);
       appendRowSafely_(sheet, [taskId, addTitle, dueDate, '未完了', todayStr, '', memo, remindContext, docUrl, estMins]);
       const formattedTitle = formatTaskTitleWithBadge(addTitle);
       results.push(`📝 タスク追加: ${formattedTitle}${dueDate ? ` (期限: ${dueDate})` : ''}${estMins ? ` (${estMins}分)` : ''}${docUrl ? ' 🔗 資料連携' : ''}`);
@@ -894,7 +894,7 @@ function getRoutines(filterStatus) {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
 
-  const colCount = Math.min(Math.max(sheet.getLastColumn(), 5), 7);
+  const colCount = Math.min(Math.max(sheet.getLastColumn(), 5), 8);
   const values = sheet.getRange(2, 1, lastRow - 1, colCount).getValues();
   const routines = values.map((row, index) => {
     const ruleName = String(row[0] || '');
@@ -919,7 +919,8 @@ function getRoutines(filterStatus) {
       lastGeneratedDate: lastGeneratedDate,
       memo: memo,
       status: status,
-      completedDate: completedDate
+      completedDate: completedDate,
+      estimatedMins: colCount >= 8 ? parsePositiveEstimatedMins_(row[7]) : null
     };
   });
 
@@ -1154,7 +1155,7 @@ function applyInputStockActions(actions) {
     if (!act || !act.action) continue;
 
     if (act.action === 'add' && act.title) {
-      const estMins = parsePositiveEstimatedMins_(act.estimated_mins) || '';
+      const estMins = parsePositiveEstimatedMins_(act.estimated_mins) || getDefaultTaskEstimatedMins_(addTitle);
       appendRowSafely_(sheet, [act.type || '映画', act.title, act.memo || '', '未', '', estMins]);
       results.push(`🎬 インプット追加: ${act.title}${estMins ? ` (${estMins}分)` : ''}`);
     } else if (act.action === 'update' && (act.title || act.target_title)) {

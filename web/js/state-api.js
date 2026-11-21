@@ -180,6 +180,9 @@ function applyServerStatePayload(res) {
     var keepClearedSession = Boolean(!localSession && res.state.activeSession && lockActive);
     var briefingDismissed = sameDay && Boolean((prev.dailyBriefing && prev.dailyBriefing.dismissed) || mergedDismissed['__briefing__']);
     state.fastState = res.state;
+    if (sameDay && typeof prev.isLowMode === 'boolean') {
+      state.fastState.isLowMode = prev.isLowMode;
+    }
     state.fastState.completedToday = mergedCompleted;
     state.fastState.dismissedToday = mergedDismissed;
     if (briefingDismissed && state.fastState.dailyBriefing) {

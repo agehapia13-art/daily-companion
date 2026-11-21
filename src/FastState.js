@@ -304,13 +304,10 @@ function buildRoutineAnchorCards(workMode, now, fastState) {
     }
   }
 
-  // 2. 平日勤務ブロック（10:00〜19:00、昼休憩 12:00〜13:00）
+  // 2. 平日勤務ブロック（10:00〜19:00）
   if (workMode !== 'holiday') {
     if (minsOfDay >= 9 * 60 + 30 && minsOfDay < 12 * 60 && avail('anchor_work_am')) {
       cards.push({ id: 'anchor_work_am', icon: 'laptop', title: '本業（午前）', sub: '12:00の昼休憩まで集中', mins: 120, isWorkBlock: true, isAnchor: true });
-    }
-    if (minsOfDay >= 12 * 60 && minsOfDay < 14 * 60 && avail('anchor_lunch')) {
-      cards.push({ id: 'anchor_lunch', icon: 'utensils', title: '昼食・昼休憩', sub: 'しっかり休んで午後に備える', mins: 60, isAnchor: true });
     }
     if (minsOfDay >= 12 * 60 + 45 && minsOfDay < 18 * 60 + 30 && avail('anchor_work_pm')) {
       cards.push({ id: 'anchor_work_pm', icon: 'laptop', title: '本業（午後）', sub: '19:00の終業まで進める', mins: 240, isWorkBlock: true, isAnchor: true });
@@ -318,6 +315,18 @@ function buildRoutineAnchorCards(workMode, now, fastState) {
     if (workMode === 'commute' && minsOfDay >= 18 * 60 && minsOfDay < 22 * 60 && avail('anchor_return')) {
       cards.push({ id: 'anchor_return', icon: 'train', title: '帰路（帰宅移動）', sub: '業務終了、自宅へ帰る', mins: 90, isAnchor: true, cycleStampLabel: '外歩き・散歩' });
     }
+  }
+
+  // 2.2 昼食アンカー（11:30以降、平日・休日問わず未完了・未非表示なら生成）
+  if (minsOfDay >= 11 * 60 + 30 && avail('anchor_lunch')) {
+    cards.push({
+      id: 'anchor_lunch',
+      icon: 'utensils',
+      title: workMode === 'holiday' ? '昼食' : '昼食・昼休憩',
+      sub: workMode === 'holiday' ? 'しっかり食べて午後に備える' : 'しっかり休んで午後に備える',
+      mins: workMode === 'holiday' ? 45 : 60,
+      isAnchor: true
+    });
   }
 
   const rawAiCards = (fastState.aiDeck && Array.isArray(fastState.aiDeck.cards)) ? fastState.aiDeck.cards : [];
@@ -387,11 +396,9 @@ function composeHomeDeck(workMode, now, fastState) {
     return true;
   });
 
-  // 引き算カードは最上位、次に朝・勤務の直近アンカー、その後 AI カード、最後に就寝アンカーを自然配置
+  // 引き算カードは最上位、その後は AI が編成した順序を例外なく尊重し、AI が未配置のアンカーのみ後方へ補完
   const triageCards = aiCards.filter(c => c.isTriage);
   const normalAiCards = aiCards.filter(c => !c.isTriage);
-  const nonSleepAnchors = anchors.filter(c => !c.isSleepCard);
-  const sleepAnchors = anchors.filter(c => c.isSleepCard);
 
   // 重複ID排除
   const seen = {};
@@ -406,9 +413,8 @@ function composeHomeDeck(workMode, now, fastState) {
   };
 
   pushUnique(triageCards);
-  pushUnique(nonSleepAnchors);
   pushUnique(normalAiCards);
-  pushUnique(sleepAnchors);
+  pushUnique(anchors);
 
   const lowCards = aiLowRaw.filter(isAvail);
   return {

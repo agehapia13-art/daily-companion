@@ -336,8 +336,8 @@ function apiCompleteAction(authKey, completePayload) {
     Logger.log('完了反映エラー: ' + applyErr.message);
   }
 
-  // 完了フラグ・直前状態更新
-  if (session.id && !session.isCustom) {
+  // 完了フラグ・直前状態更新（日跨ぎの就寝セッション完了＝起床時は当日の就寝フラグを立てない）
+  if (session.id && !session.isCustom && !session.isSleepCard) {
     fastState.completedToday[session.id] = true;
   }
   if (!keepOpen && session.linkedType === 'task' && session.linkedId) {

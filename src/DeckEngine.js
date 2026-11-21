@@ -222,7 +222,7 @@ function generateAiDeck(opts) {
   const anchorCards = (typeof buildRoutineAnchorCards === 'function')
     ? buildRoutineAnchorCards(workMode, now, fastState)
     : [];
-  const anchorTitles = anchorCards.map(c => String(c.title || '').trim()).filter(Boolean);
+  const anchorPrompts = anchorCards.map(c => `id:"${c.id}" ${c.title}(${c.mins}分)`).filter(Boolean);
 
   const userPrompt = [
     // --- 準静的プレフィックス（キャッシュ効率化） ---
@@ -234,8 +234,7 @@ function generateAiDeck(opts) {
     `【生成理由】: ${o.reason || 'auto'}`,
     `【時間軸】:\n${targetTimeContext}`,
     `【勤務モード】: ${workMode}（commute=出社, remote=在宅リモート, holiday=休日）`,
-    anchorTitles.length > 0 ? `【システム管理済みカード（重複生成不要）】: ${anchorTitles.join(', ')}` : '',
-    (now.getHours() >= 17 && !(fastState.completedToday && fastState.completedToday.anchor_dinner) && !(fastState.dismissedToday && fastState.dismissedToday.anchor_dinner) ? '【17時以降の生活アンカー（状況に合う順で cards に配置可）】: id:"anchor_dinner" 夕食(45分)' + (!(fastState.completedToday && fastState.completedToday.anchor_bath) && !(fastState.dismissedToday && fastState.dismissedToday.anchor_bath) ? ' / id:"anchor_bath" 入浴・スキンケア(60分)' : '') : (!(fastState.completedToday && fastState.completedToday.anchor_bath) && !(fastState.dismissedToday && fastState.dismissedToday.anchor_bath) && now.getHours() >= 17 ? '【17時以降の生活アンカー（状況に合う順で cards に配置可）】: id:"anchor_bath" 入浴・スキンケア(60分)' : '')),
+    anchorPrompts.length > 0 ? `【現在時間帯の生活・勤務アンカー（状況に合う順で cards に配置可）】: ${anchorPrompts.join(' / ')}` : '',
     `【次の予定境界】: ${boundaryInfo ? boundaryInfo.summaryText : 'なし'}`,
     `【本日の予定】: ${todayEvents && todayEvents.length > 0 ? todayEvents.join(' / ') : '登録なし'}`,
     `【天気・気圧】: ${memory.weather_info || '情報なし'} / 気圧急降下: ${memory.pressure_alert === 'TRUE' ? 'TRUE（注意）' : 'FALSE'}`,

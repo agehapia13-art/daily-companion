@@ -90,7 +90,7 @@ function renderChat() {
     }
 
     var parts = [];
-    var userImgs = Array.isArray(m.imageUrls) ? m.imageUrls : (m.localPhotoUrl ? [m.localPhotoUrl] : []);
+    var userImgs = (Array.isArray(m.imageUrls) && m.imageUrls.length > 0) ? m.imageUrls : (m.localPhotoUrl ? [m.localPhotoUrl] : []);
     if (m.userText || userImgs.length > 0) {
       var imgHtml = userImgs.map(function(u) {
         return '<img src="' + escapeHtml(u) + '" class="bubble-photo" alt="画像" onclick="openImageLightbox(\'' + escapeJsAttr(u) + '\')" />';

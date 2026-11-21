@@ -3,14 +3,23 @@
 サウンドディレクター専属の生活伴走コックピットシステムです。  
 **「状況の鏡 × 行動の触媒（Home）」**・**「傾聴・整理・相談（Chat）」**・**「一覧・即実行（Lists）」** の 3タブ構成 PWA と、Google Apps Script (GAS)・Gemini（`gemini-3.5-flash-lite` / `gemini-3.8-flash`）・Googleスプレッドシート・Googleカレンダー・Google Drive/Docs・Notion API・Open-Meteo を統合しています（v2 で LINE Bot / Webhook は廃止し PWA 単一窓口へ一本化）。
 
-> 🧭 **最高憲章**: 設計・実装原則はリポジトリ内の `AGENTS.md` および設計元 `companion-cockpit/GRAND_DESIGN.md` / `SPEC.md` に準拠します。
+> 🧭 **最高憲章**: 設計・実装原則はリポジトリ内の [GRAND_DESIGN.md](GRAND_DESIGN.md)・[SPEC.md](SPEC.md)・[AGENTS.md](AGENTS.md)・[.agent/rules/prompt-architecture.md](.agent/rules/prompt-architecture.md) に準拠します。
+
+---
+
+## 📚 ドキュメント・設計資産
+- [GRAND_DESIGN.md](GRAND_DESIGN.md) — 最上位憲章（思想定義）
+- [SPEC.md](SPEC.md) — Daily Companion v2 設計仕様書（二層State・コード/AI境界・03:00/05:00/17:00バッチ・7 API・Chat 1段構成・PWA UI/UX）
+- [AGENTS.md](AGENTS.md) — AIエージェント行動憲章 ＆ 思考原則
+- [.agent/rules/prompt-architecture.md](.agent/rules/prompt-architecture.md) — プロンプト設計・分離原則・Prefix Cache ルール
+- [.agent/skills/companion-prompt-optimizer/SKILL.md](.agent/skills/companion-prompt-optimizer/SKILL.md) — プロンプト監査・最適化スキル
 
 ---
 
 ## 🌟 v2 アーキテクチャと主要機能
 
 ### 1. 3タブ PWA UI/UX（Sheer Frosted Glass × Fluid Mist）
-`docs/index.html`（`src/Dashboard.js` から生成）は **GitHub Pages + Service Worker (`sw.js`) + iOS Safe Area (`viewport-fit=cover` / `black-translucent`)** 対応のスタンドアロン PWA として動作します。
+`docs/index.html`（`scripts/build-dashboard.js` が `web/` から生成。GAS 直接配信時は `src/Dashboard.js` が `src/DashboardHtml.html` を提供）は **GitHub Pages + Service Worker (`sw.js`) + iOS Safe Area (`viewport-fit=cover` / `black-translucent`)** 対応のスタンドアロン PWA として動作します。
 
 - **Home（状況の鏡 × 行動の触媒）**:
   - **ヘッダ**: OS 時計と重複する現在時刻表示を省き、天気・気圧サマリー（`weatherLine`）と次の予定／就寝境界カウントダウン（`HH:MM:SS`）、前回完了行動からの経過時間 $\Delta t$（`deltaText`）を表示。
@@ -47,9 +56,19 @@
 
 ```
 .
-├── AGENTS.md                 # AIエージェント行動憲章・作業手順ルール
+├── .agent/
+│   ├── rules/
+│   │   └── prompt-architecture.md                  # プロンプト設計・分離原則・Prefix Cache ルール
+│   └── skills/
+│       └── companion-prompt-optimizer/SKILL.md     # プロンプト監査・最適化スキル
 ├── .clasp.json               # clasp設定 (rootDir: "src", Git管理対象外)
+├── .gitignore                # 秘匿ファイル保護 (.env / .clasp.json / service-account.json 等)
+├── AGENTS.md                 # AIエージェント行動憲章・作業手順ルール
+├── GRAND_DESIGN.md           # 最上位憲章（思想定義）
+├── SPEC.md                   # Daily Companion v2 設計仕様書
+├── appsscript.json           # ルート参照用マニフェスト（clasp push 対象は src/appsscript.json）
 ├── package.json              # npm run check / build:dashboard / push
+├── package-lock.json
 ├── service-account.json      # Google Cloud サービスアカウント秘密鍵 (Git管理対象外)
 ├── web/                      # PWA フロントエンドソース (build-dashboard.js の入力元)
 │   ├── index.html            # HTML シェル・モーダル・ブート設定アンカー

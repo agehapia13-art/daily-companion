@@ -241,8 +241,10 @@ function renderHome() {
 function dismissBriefing() {
   if (state.fastState.dailyBriefing) {
     state.fastState.dailyBriefing.dismissed = true;
+    state.fastState.dismissedToday['__briefing__'] = true;
     saveLocalSnapshot();
     renderHome();
+    runMutationApi('apiDismissCardToday', state.authKey, '__briefing__').catch(function() {});
   }
 }
 

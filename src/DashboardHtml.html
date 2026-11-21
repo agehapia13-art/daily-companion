@@ -1810,7 +1810,7 @@
       <div class="custom-btns">
         <button type="button" onclick="saveSettings()" class="btn-solid" style="width:100%;padding:11px;">保存して同期</button>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v24</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v25</div>
     </div>
   </div>
 
@@ -2004,9 +2004,13 @@
         var lockActive = Boolean(state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil);
         var keepLocalSession = Boolean(localSession && !res.state.activeSession && lockActive);
         var keepClearedSession = Boolean(!localSession && res.state.activeSession && lockActive);
+        var briefingDismissed = sameDay && Boolean((prev.dailyBriefing && prev.dailyBriefing.dismissed) || mergedDismissed['__briefing__']);
         state.fastState = res.state;
         state.fastState.completedToday = mergedCompleted;
         state.fastState.dismissedToday = mergedDismissed;
+        if (briefingDismissed && state.fastState.dailyBriefing) {
+          state.fastState.dailyBriefing.dismissed = true;
+        }
         if (keepLocalSession) state.fastState.activeSession = localSession;
         if (keepClearedSession) state.fastState.activeSession = null;
       }
@@ -2590,8 +2594,10 @@
     function dismissBriefing() {
       if (state.fastState.dailyBriefing) {
         state.fastState.dailyBriefing.dismissed = true;
+        state.fastState.dismissedToday['__briefing__'] = true;
         saveLocalSnapshot();
         renderHome();
+        runMutationApi('apiDismissCardToday', state.authKey, '__briefing__').catch(function() {});
       }
     }
 

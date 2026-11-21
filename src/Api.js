@@ -431,6 +431,9 @@ function apiDismissCardToday(authKey, cardId) {
   const fastState = loadFastState(now);
   if (cardId) {
     fastState.dismissedToday[String(cardId)] = true;
+    if (cardId === '__briefing__' && fastState.dailyBriefing) {
+      fastState.dailyBriefing.dismissed = true;
+    }
     saveFastState(fastState, true);
   }
   const workBoundary = getWorkModeAndBoundary(now);

@@ -178,9 +178,13 @@ function applyServerStatePayload(res) {
     var lockActive = Boolean(state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil);
     var keepLocalSession = Boolean(localSession && !res.state.activeSession && lockActive);
     var keepClearedSession = Boolean(!localSession && res.state.activeSession && lockActive);
+    var briefingDismissed = sameDay && Boolean((prev.dailyBriefing && prev.dailyBriefing.dismissed) || mergedDismissed['__briefing__']);
     state.fastState = res.state;
     state.fastState.completedToday = mergedCompleted;
     state.fastState.dismissedToday = mergedDismissed;
+    if (briefingDismissed && state.fastState.dailyBriefing) {
+      state.fastState.dailyBriefing.dismissed = true;
+    }
     if (keepLocalSession) state.fastState.activeSession = localSession;
     if (keepClearedSession) state.fastState.activeSession = null;
   }

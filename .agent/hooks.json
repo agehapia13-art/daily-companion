@@ -1,14 +1,33 @@
 {
-  "hooks": {
-    "Stop": [
+  "pre-tool-guard": {
+    "PreToolUse": [
       {
-        "matcher": "",
+        "matcher": "read_file|edit_file|write_file|run_command",
         "hooks": [
           {
             "type": "command",
-            "command": "./scripts/check-doc-sync.sh"
+            "command": "node ../scripts/hook-pre-tool.js",
+            "timeout": 10
           }
         ]
+      }
+    ]
+  },
+  "principle-reminder": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node ../scripts/hook-pre-invocation.js",
+        "timeout": 5
+      }
+    ]
+  },
+  "doc-sync": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "../scripts/check-doc-sync.sh",
+        "timeout": 10
       }
     ]
   }

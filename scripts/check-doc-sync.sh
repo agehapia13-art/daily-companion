@@ -1,52 +1,95 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# git status --porcelain で src/ または web/ の変更と README.md / SPEC.md の更新状況を確認する
-STATUS=$(git status --porcelain 2>/dev/null || true)
+node -e '
+const fs = require("fs");
+const { execSync } = require("child_process");
 
-if [ -z "$STATUS" ]; then
-  exit 0
-fi
+let payload = {};
+try {
+  const raw = fs.readFileSync(0, "utf8");
+  if (raw.trim()) payload = JSON.parse(raw);
+} catch {
+  console.log("{}");
+  process.exit(0);
+}
 
-HAS_CODE_CHANGE=0
-HAS_README_UPDATE=0
-HAS_SPEC_UPDATE=0
+// 無限ループ防止: すでに Stop フックで継続中、または 2回目以降の実行なら通過
+if (payload.continuationActive === true || Number(payload.executionNum || 0) > 1) {
+  console.log("{}");
+  process.exit(0);
+}
 
-while IFS= read -r line; do
-  # git status --porcelain の先頭3文字（ステータス2文字 + スペース1文字）を除いたパスを取得
-  file_path="${line:3}"
-  # リネーム時は "old -> new" 形式になるため、矢印以降を優先して取得
-  if [[ "$file_path" == *" -> "* ]]; then
-    file_path="${file_path##* -> }"
-  fi
-  # 引用符が付いている場合は除去
-  file_path="${file_path%\"}"
-  file_path="${file_path#\"}"
+// この会話(transcriptPath)内で src/ または web/ を編集したツール呼び出しがあるか Path のみで厳密に確認
+const tp = payload.transcriptPath;
+if (!tp || !fs.existsSync(tp)) {
+  console.log("{}");
+  process.exit(0);
+}
 
-  if [[ "$file_path" == src/* || "$file_path" == web/* ]]; then
-    HAS_CODE_CHANGE=1
-  fi
-  if [[ "$file_path" == "README.md" ]]; then
-    HAS_README_UPDATE=1
-  fi
-  if [[ "$file_path" == "SPEC.md" ]]; then
-    HAS_SPEC_UPDATE=1
-  fi
-done <<< "$STATUS"
+let editedCodeInThisChat = false;
+try {
+  const lines = fs.readFileSync(tp, "utf8").split("\n").filter(Boolean);
+  for (const line of lines) {
+    try {
+      const step = JSON.parse(line);
+      const calls = step.tool_calls || [];
+      for (const tc of calls) {
+        const name = tc.name || (tc.function && tc.function.name) || "";
+        if (name === "edit_file" || name === "write_file") {
+          const args = tc.args || tc.arguments || {};
+          const targetPath = String(args.Path || args.path || "").replace(/\\/g, "/");
+          if (/(^|\/)(src|web)\//.test(targetPath)) {
+            editedCodeInThisChat = true;
+            break;
+          }
+        }
+      }
+      if (editedCodeInThisChat) break;
+    } catch {}
+  }
+} catch {}
 
-if [ "$HAS_CODE_CHANGE" -eq 1 ]; then
-  MISSING=()
-  if [ "$HAS_README_UPDATE" -eq 0 ]; then
-    MISSING+=("README.md")
-  fi
-  if [ "$HAS_SPEC_UPDATE" -eq 0 ]; then
-    MISSING+=("SPEC.md")
-  fi
+if (!editedCodeInThisChat) {
+  console.log("{}");
+  process.exit(0);
+}
 
-  if [ "${#MISSING[@]}" -gt 0 ]; then
-    echo "⚠️ [doc-sync] src/ または web/ に変更がありますが、以下のドキュメントの更新が検出されていません: ${MISSING[*]}"
-    echo "完了前に README.md と SPEC.md の両方を照合し、必要に応じて更新してください。"
-  fi
-fi
+// git status --porcelain で src/ または web/ の変更と README.md / SPEC.md の更新状況を確認
+let status = "";
+try {
+  status = execSync("git status --porcelain", { encoding: "utf8" });
+} catch {
+  console.log("{}");
+  process.exit(0);
+}
 
-exit 0
+let hasCode = false;
+let hasReadme = false;
+let hasSpec = false;
+
+for (const line of status.split("\n")) {
+  if (!line.trim()) continue;
+  let filePath = line.slice(3).trim();
+  if (filePath.includes(" -> ")) filePath = filePath.split(" -> ").pop().trim();
+  filePath = filePath.replace(/^"|"$/g, "");
+  if (filePath.startsWith("src/") || filePath.startsWith("web/")) hasCode = true;
+  if (filePath === "README.md") hasReadme = true;
+  if (filePath === "SPEC.md") hasSpec = true;
+}
+
+if (hasCode) {
+  const missing = [];
+  if (!hasReadme) missing.push("README.md");
+  if (!hasSpec) missing.push("SPEC.md");
+  if (missing.length > 0) {
+    console.log(JSON.stringify({
+      decision: "continue",
+      reason: `⚠️ [doc-sync] src/ または web/ に変更がありますが、以下のドキュメントが未更新です: ${missing.join(" ")}。完了前に README.md と SPEC.md の両方を照合・更新してください。`
+    }));
+    process.exit(0);
+  }
+}
+
+console.log("{}");
+'

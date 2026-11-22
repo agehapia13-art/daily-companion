@@ -1810,7 +1810,7 @@
       <div class="custom-btns">
         <button type="button" onclick="saveSettings()" class="btn-solid" style="width:100%;padding:11px;">保存して同期</button>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v28</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v29</div>
     </div>
   </div>
 
@@ -3507,29 +3507,50 @@
           }).join('');
     }
 
-    function isListMemoExpanded(kind, itemId) {
-      return Boolean(state.expandedListMemo && state.expandedListMemo.kind === kind && state.expandedListMemo.id === itemId);
+    function getListMemoCardId(kind, itemId) {
+      return 'list-memo-card-' + kind + '-' + String(itemId).replace(/[^a-zA-Z0-9_-]/g, '_');
     }
 
     function buildListMemoBtnHtml(kind, itemId, memo) {
       if (!memo || !String(memo).trim()) return '';
-      var activeStyle = isListMemoExpanded(kind, itemId) ? ' style="border-color:var(--accent);color:var(--accent);"' : '';
-      return '<button type="button" onclick="event.stopPropagation();toggleListMemo(\'' + escapeJsAttr(kind) + '\',\'' + escapeJsAttr(itemId) + '\')" class="circle-action-btn" aria-label="メモを確認" title="メモを確認"' + activeStyle + '>' + getIconSvg('message', 14) + '</button>';
+      var k = escapeJsAttr(kind);
+      var id = escapeJsAttr(itemId);
+      return '<button type="button"' +
+        ' onclick="event.stopPropagation()"' +
+        ' onpointerdown="event.stopPropagation();event.preventDefault();showListMemoPeek(\'' + k + '\',\'' + id + '\',this)"' +
+        ' onpointerup="event.stopPropagation();hideListMemoPeek(\'' + k + '\',\'' + id + '\',this)"' +
+        ' onpointercancel="event.stopPropagation();hideListMemoPeek(\'' + k + '\',\'' + id + '\',this)"' +
+        ' onpointerleave="hideListMemoPeek(\'' + k + '\',\'' + id + '\',this)"' +
+        ' oncontextmenu="event.preventDefault();event.stopPropagation()"' +
+        ' onblur="hideListMemoPeek(\'' + k + '\',\'' + id + '\',this)"' +
+        ' class="circle-action-btn" aria-label="長押しでメモを確認" title="押している間メモを表示"' +
+        ' style="touch-action:none;user-select:none;-webkit-user-select:none;">' +
+        getIconSvg('message', 14) + '</button>';
     }
 
-    function toggleListMemo(kind, itemId) {
-      state.expandedListMemo = isListMemoExpanded(kind, itemId) ? null : { kind: kind, id: itemId };
-      renderLists();
+    function showListMemoPeek(kind, itemId, btn) {
+      var card = document.getElementById(getListMemoCardId(kind, itemId));
+      if (card) card.style.display = 'block';
+      if (btn) {
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.color = 'var(--accent)';
+      }
+    }
+
+    function hideListMemoPeek(kind, itemId, btn) {
+      var card = document.getElementById(getListMemoCardId(kind, itemId));
+      if (card) card.style.display = 'none';
+      if (btn) {
+        btn.style.borderColor = '';
+        btn.style.color = '';
+      }
     }
 
     function renderListMemoCard(kind, itemId, title, memo) {
-      if (!memo || !String(memo).trim() || !isListMemoExpanded(kind, itemId)) return '';
+      if (!memo || !String(memo).trim()) return '';
       return (
-        '<div class="custom-create-card glass-surface fade-in" style="margin:6px 0 10px;" onclick="event.stopPropagation()">' +
-          '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">' +
-            '<div style="font-size:12px;font-weight:600;color:var(--text-secondary);">メモ · ' + escapeHtml(title) + '</div>' +
-            '<button type="button" onclick="toggleListMemo(\'' + escapeJsAttr(kind) + '\',\'' + escapeJsAttr(itemId) + '\')" class="btn-ghost" style="padding:2px 8px;font-size:11px;">閉じる</button>' +
-          '</div>' +
+        '<div id="' + escapeHtml(getListMemoCardId(kind, itemId)) + '" class="custom-create-card glass-surface fade-in" style="margin:6px 0 10px;display:none;" onclick="event.stopPropagation()">' +
+          '<div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">メモ · ' + escapeHtml(title) + '</div>' +
           '<div style="font-size:13px;line-height:1.55;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;">' + escapeHtml(String(memo).trim()) + '</div>' +
         '</div>'
       );

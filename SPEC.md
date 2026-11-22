@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-23 01:26 JST
+> **最終更新**: 2026-11-23 01:38 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -378,3 +378,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 | **2026-11-23 00:11** | Lists タブのメモ表示（タスク / ストック）操作性改善 | トグル展開式（閉じるボタン操作が必要）から、ボタンを押している間（`pointerdown` 〜 `pointerup`/`pointercancel`/`pointerleave`）のみメモを表示するプレス＆ホールド（Peek）方式へ変更（`dc-pwa-v29`）。 |
 | **2026-11-22 23:53** | `2026-11-22 00:08` / `16:23` / `23:12` ログのタスク登録崩れ（タイトル内への `due_date:` 等改行混入・期限欠落・過剰補完） | ① `CHAT_RESPONSE_SCHEMA` の `task_actions.propertyOrdering` で `title` が最後尾にあったため後続キーが出力不可になっていた順序欠陥を修正（`title` を `target_title` 直後へ移動し `new_title` との役割を明確化）。② `prompt_db` に `title` のデータ契約（簡潔な1行・`memo`/`due_date` 分離）を1文追加。③ Lists タブ（Tasks / Stock）に `memo` 確認用の吹き出しボタン＋インライン展開 UI を追加（`dc-pwa-v28`）。④ `Spreadsheet.js` `applyInputStockActions` の未定義変数参照バグ修正、および破損タスク（Row 137/138）修復。 |
 | **2026-11-23 01:26** | 日報・月報の `summary`（概要）でゲームタイトル等の固有名詞が「ゲーム」等にぼかされる問題 | `src/ReportGenerator.js` の日報（L99）・月報（L320）メタデータJSON `summary` 定義に、固有名詞（作品名・タイトル・店名・ツール名等）を上位カテゴリへ抽象化せず具体的に記載する原則を追記。 |
+| **2026-11-23 01:38** | `2026-11-21` 日報・`rolling_memory` における時系列の前後および意図しない寝落ちの肯定的書き換え | `src/ReportGenerator.js` の `generateDailyReport` および `analyzeMemoryUpdates`（`rolling_memory`）に、①各セクション内・記録全体の時系列順の厳守、②AIの慰め応答ではなくユーザー自身の発言・感情トーンを一次情報として忠実に記録し、ネガティブな出来事を肯定的な意味付けへ書き換えない原則を追記。 |

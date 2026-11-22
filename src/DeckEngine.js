@@ -198,9 +198,11 @@ function generateAiDeck(opts) {
 
   // 開始中行動がある場合は「その行動が終わる見込み時刻」を基準点としてAIへ伝える
   let targetTimeContext = `現在時刻: ${nowStr}`;
+  let anchorTargetTime = now;
   if (o.startedCard && !o.startedCard.isSleepCard) {
     const estMins = parsePositiveEstimatedMins_(o.startedCard.mins) || 30;
     const expectedEnd = new Date(now.getTime() + estMins * 60000);
+    anchorTargetTime = expectedEnd;
     const endStr = Utilities.formatDate(expectedEnd, 'Asia/Tokyo', 'HH:mm');
     targetTimeContext =
       `現在時刻: ${nowStr}\n` +
@@ -220,7 +222,7 @@ function generateAiDeck(opts) {
   const stampsFormatted = formatCycleStampsWithElapsed_(memory.cycle_stamps || '', now);
 
   const anchorCards = (typeof buildRoutineAnchorCards === 'function')
-    ? buildRoutineAnchorCards(workMode, now, fastState)
+    ? buildRoutineAnchorCards(workMode, anchorTargetTime, fastState)
     : [];
   const anchorPrompts = anchorCards.map(c => `id:"${c.id}" ${c.title}(${c.mins}分)`).filter(Boolean);
 

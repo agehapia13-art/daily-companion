@@ -69,6 +69,8 @@ var state = {
   lastFetchedAt: 0,
   syncEpoch: 0,
   inFlightMutations: 0,
+  pendingOutbox: [],
+  isFlushingOutbox: false,
   toastTimer: null
 };
 
@@ -163,6 +165,110 @@ function runMutationApi(funcName) {
     });
 }
 
+function loadOutbox() {
+  try {
+    var raw = localStorage.getItem('cc_v2_outbox');
+    if (!raw) return;
+    var parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      state.pendingOutbox = parsed;
+    }
+  } catch (e) {}
+}
+
+function saveOutbox() {
+  try {
+    localStorage.setItem('cc_v2_outbox', JSON.stringify(state.pendingOutbox || []));
+  } catch (e) {
+    // 容量超過時は写真データを落としてテキスト記録を優先保護する
+    try {
+      var slim = (state.pendingOutbox || []).map(function(item) {
+        if (item && item.payload && typeof item.payload === 'object' && item.payload.photoBase64) {
+          var p = Object.assign({}, item.payload);
+          delete p.photoBase64;
+          delete p.photoMimeType;
+          return Object.assign({}, item, { payload: p });
+        }
+        return item;
+      });
+      localStorage.setItem('cc_v2_outbox', JSON.stringify(slim));
+    } catch (e2) {}
+  }
+}
+
+loadOutbox();
+
+function enqueueOutboxMutation(funcName, payload) {
+  var clientOpId = 'op_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  var body = (payload && typeof payload === 'object')
+    ? Object.assign({}, payload, { clientOpId: clientOpId })
+    : payload;
+  state.pendingOutbox.push({
+    id: clientOpId,
+    funcName: funcName,
+    payload: body,
+    createdAt: Date.now()
+  });
+  saveOutbox();
+  return flushOutbox();
+}
+
+function flushOutbox() {
+  if (state.isFlushingOutbox || !state.pendingOutbox || state.pendingOutbox.length === 0) {
+    return Promise.resolve(true);
+  }
+  state.isFlushingOutbox = true;
+
+  function processNext() {
+    if (!state.pendingOutbox || state.pendingOutbox.length === 0) {
+      state.isFlushingOutbox = false;
+      return Promise.resolve(true);
+    }
+    var item = state.pendingOutbox[0];
+    return runMutationApi(item.funcName, state.authKey, item.payload)
+      .then(function(res) {
+        if (!res || !res.authorized) {
+          throw new Error((res && res.error) ? res.error : '同期に失敗しました');
+        }
+        state.pendingOutbox.shift();
+        saveOutbox();
+        if (state.pendingOutbox.length === 0) {
+          if (!res._stale) {
+            applyServerStatePayload(res);
+          }
+          if (res.addedChatMessage) {
+            state.messages.push(res.addedChatMessage);
+          }
+          saveLocalSnapshot();
+          renderAll();
+          state.isFlushingOutbox = false;
+          return true;
+        }
+        return processNext();
+      })
+      .catch(function(err) {
+        state.isFlushingOutbox = false;
+        if (typeof renderHome === 'function') renderHome();
+        return false;
+      });
+  }
+
+  return processNext();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', function() {
+    flushOutbox();
+  });
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible') {
+      flushOutbox();
+    }
+  });
+}
+
 function applyServerStatePayload(res) {
   if (!res || res._stale) return;
   if (res.state) {
@@ -175,7 +281,8 @@ function applyServerStatePayload(res) {
       ? Object.assign({}, prev.dismissedToday || {}, res.state.dismissedToday || {})
       : (res.state.dismissedToday || {});
     var localSession = prev.activeSession;
-    var lockActive = Boolean(state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil);
+    var hasPendingOutbox = Boolean(state.pendingOutbox && state.pendingOutbox.length > 0);
+    var lockActive = hasPendingOutbox || Boolean(state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil);
     var keepLocalSession = Boolean(localSession && !res.state.activeSession && lockActive);
     var keepClearedSession = Boolean(!localSession && res.state.activeSession && lockActive);
     var briefingDismissed = sameDay && Boolean((prev.dailyBriefing && prev.dailyBriefing.dismissed) || mergedDismissed['__briefing__']);
@@ -202,6 +309,16 @@ function syncFromServer(manual) {
   if (state.isSyncing) return;
   if (!manual && state.inFlightMutations > 0) return;
   if (!manual && state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil) return;
+  if (state.pendingOutbox && state.pendingOutbox.length > 0) {
+    flushOutbox().then(function(ok) {
+      if (ok && (!state.pendingOutbox || state.pendingOutbox.length === 0)) {
+        syncFromServer(manual);
+      } else if (manual) {
+        showToast('未送信の記録を再送できませんでした');
+      }
+    });
+    return;
+  }
   state.isSyncing = true;
   var reqEpoch = state.syncEpoch || 0;
   var btn = document.getElementById('syncBtn');

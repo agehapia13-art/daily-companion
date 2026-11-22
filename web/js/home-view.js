@@ -68,7 +68,11 @@ function renderHome() {
 
   var subEl = document.getElementById('homeSubLine');
   var sess = state.fastState.activeSession;
-  if (state.deltaText && !sess && !state.reflection) {
+  var pendingCount = (state.pendingOutbox && state.pendingOutbox.length) || 0;
+  if (pendingCount > 0 && !sess && !state.reflection) {
+    subEl.textContent = '未同期の記録が' + pendingCount + '件あります（再送待機中）';
+    subEl.classList.remove('hidden');
+  } else if (state.deltaText && !sess && !state.reflection) {
     subEl.textContent = state.deltaText;
     subEl.classList.remove('hidden');
   } else {
@@ -378,14 +382,7 @@ function executeTriageCard(card) {
   saveLocalSnapshot();
   renderHome();
   showToast('今日の残り負荷を軽くしました');
-  runMutationApi('apiCompleteAction', state.authKey, { session: card })
-    .then(function(res) {
-      if (res && res.authorized) {
-        applyServerStatePayload(res);
-        renderAll();
-      }
-    })
-    .catch(function() { showToast('リスケ同期に失敗しました'); });
+  enqueueOutboxMutation('apiCompleteAction', { session: card });
 }
 
 function startAction(card) {
@@ -397,16 +394,7 @@ function startAction(card) {
   saveLocalSnapshot();
   renderHome();
 
-  runMutationApi('apiStartAction', state.authKey, started)
-    .then(function(res) {
-      if (res && res.authorized) {
-        if (res.aiDeck) state.fastState.aiDeck = res.aiDeck;
-        if (res.deck) state.composedDeck = res.deck;
-        if (res.boundary) state.boundary = res.boundary;
-        saveLocalSnapshot();
-      }
-    })
-    .catch(function() {});
+  enqueueOutboxMutation('apiStartAction', started);
 }
 
 function pauseFocus() {
@@ -414,7 +402,7 @@ function pauseFocus() {
   state.fastState.activeSession = null;
   saveLocalSnapshot();
   renderHome();
-  runMutationApi('apiStartAction', state.authKey, null).catch(function() {});
+  enqueueOutboxMutation('apiStartAction', null);
 }
 
 function finishFocus() {
@@ -460,29 +448,14 @@ function completeReflection(keepOpen) {
   renderAll();
   showToast(keepOpen ? 'ここまでの進行を記録しました' : (r.feeling || note || r.photoBase64 ? '記録して次へ進みました' : 'お疲れさまでした'));
 
-  runMutationApi('apiCompleteAction', state.authKey, {
+  enqueueOutboxMutation('apiCompleteAction', {
     session: r.card,
     mood: r.feeling,
     note: note,
     keepOpen: Boolean(keepOpen),
     photoBase64: r.photoBase64 || '',
     photoMimeType: r.photoMimeType || 'image/jpeg'
-  })
-    .then(function(res) {
-      if (res && res.authorized) {
-        applyServerStatePayload(res);
-        if (res.addedChatMessage) {
-          state.messages.push(res.addedChatMessage);
-        }
-        saveLocalSnapshot();
-        renderAll();
-      } else {
-        showToast('記録の同期に失敗しました');
-      }
-    })
-    .catch(function(err) {
-      showToast('送信エラー: ' + (err.message || err));
-    });
+  });
 }
 
 function handleReflectPhotoSelect(ev) {

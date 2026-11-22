@@ -271,11 +271,31 @@ function apiCompleteAction(authKey, completePayload) {
   }
 
   const p = completePayload || {};
+  const clientOpId = String(p.clientOpId || '').trim();
   const now = new Date();
   const nowStr = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
   const nowIso = Utilities.formatDate(now, 'Asia/Tokyo', "yyyy-MM-dd'T'HH:mm:ss+09:00");
   const logicalDayStr = getLogicalDayKey(now);
   const fastState = loadFastState(now);
+
+  if (clientOpId) {
+    try {
+      const cache = CacheService.getScriptCache();
+      if (cache && cache.get('op_' + clientOpId)) {
+        const memoryDup = getMemory();
+        const workBoundaryDup = getWorkModeAndBoundary(now, memoryDup.profile);
+        return {
+          authorized: true,
+          duplicateSkipped: true,
+          state: fastState,
+          deck: composeHomeDeck(workBoundaryDup.workMode, now, fastState),
+          lists: fastState.listCache || buildListsSnapshot(memoryDup, now),
+          boundary: workBoundaryDup.heroBoundary
+        };
+      }
+    } catch (e) {}
+  }
+
   const session = p.session || fastState.activeSession || {};
 
   const mood = String(p.mood || '').trim();
@@ -403,6 +423,13 @@ function apiCompleteAction(authKey, completePayload) {
 
   const workBoundary = getWorkModeAndBoundary(now, memory.profile);
   const deck = composeHomeDeck(workBoundary.workMode, now, fastState);
+
+  if (clientOpId) {
+    try {
+      const cache = CacheService.getScriptCache();
+      if (cache) cache.put('op_' + clientOpId, '1', 3600);
+    } catch (e) {}
+  }
 
   return {
     authorized: true,

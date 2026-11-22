@@ -271,11 +271,12 @@ function generateAiDeck(opts) {
         const tsStr = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
         const reasonLabel = o.reason || 'auto';
         appendLog(tsStr, 'system', `[DeckEngine:${reasonLabel}]`, '', '', {
+          isTwoModel: true,
           litePromptTokens: u.promptTokenCount || 0,
           liteCandidatesTokens: u.candidatesTokenCount || 0,
           liteCachedTokens: u.cachedContentTokenCount || 0,
           newTotalTokens: u.totalTokenCount || 0,
-          phaseTag: `deck_${reasonLabel}`
+          phaseAndTags: `[v2 DeckEngine / reason:${reasonLabel}]`
         });
       } catch (logErr) {
         Logger.log('DeckEngine ログ追記エラー: ' + logErr.message);

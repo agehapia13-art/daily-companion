@@ -286,7 +286,7 @@ function appendLog(timestamp, sender, message, imageUrl, aiReply, logMeta) {
   const sheet = getOrCreateSheet(SYSTEM_CONSTANTS.SHEET_NAMES.LOGS);
   const ts = timestamp || Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
 
-  if (logMeta && logMeta.isTwoModel) {
+  if (logMeta && (logMeta.isTwoModel || logMeta.newTotalTokens !== undefined)) {
     appendRowSafely_(sheet, [
       ts,
       sender || 'user',
@@ -300,7 +300,7 @@ function appendLog(timestamp, sender, message, imageUrl, aiReply, logMeta) {
       logMeta.flashCandidatesTokens !== undefined ? logMeta.flashCandidatesTokens : '',
       logMeta.flashCachedTokens !== undefined ? logMeta.flashCachedTokens : '',
       logMeta.newTotalTokens !== undefined ? logMeta.newTotalTokens : '',
-      logMeta.phaseAndTags || '',
+      logMeta.phaseAndTags || logMeta.phaseTag || '',
       logMeta.oldAiReply || '',
       logMeta.oldTotalTokens !== undefined ? logMeta.oldTotalTokens : '',
       logMeta.tokenReductionDiff || ''

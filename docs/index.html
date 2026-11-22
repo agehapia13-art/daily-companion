@@ -1810,7 +1810,7 @@
       <div class="custom-btns">
         <button type="button" onclick="saveSettings()" class="btn-solid" style="width:100%;padding:11px;">保存して同期</button>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v27</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v28</div>
     </div>
   </div>
 
@@ -1868,6 +1868,7 @@
       tab: normalizeTabName(urlParams.tab || INITIAL_TAB),
       listSubTab: 'tasks',
       taskCategoryFilter: 'ALL',
+      expandedListMemo: null,
       weatherLine: '天気情報を同期中…',
       boundary: null,
       deltaText: '',
@@ -3418,6 +3419,7 @@
               var durBtn = t.done
                 ? ''
                 : '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'task\',\'' + escapeJsAttr(t.id) + '\',' + (t.mins || 30) + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(t.mins || 30) + '</button>';
+              var memoBtn = buildListMemoBtnHtml('task', t.id, t.memo);
               var docBtn = t.docUrl
                 ? '<a href="' + escapeHtml(t.docUrl) + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" class="circle-action-btn" aria-label="資料を開く" title="資料を開く" style="text-decoration:none;">' + getIconSvg('fileText', 14) + '</a>'
                 : '';
@@ -3430,8 +3432,9 @@
                     '<div class="list-item-title">' + escapeHtml(t.title) + '</div>' +
                     '<div class="list-item-meta">' + escapeHtml(metaParts.join(' · ') || t.cat) + '</div>' +
                   '</div>' +
-                  '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + durBtn + docBtn + playBtn + '</div>' +
+                  '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + durBtn + memoBtn + docBtn + playBtn + '</div>' +
                 '</div>' +
+                renderListMemoCard('task', t.id, t.cleanTitle || t.title, t.memo) +
                 renderListDurAdjustCard('task', t.id, t.cleanTitle || t.title)
               );
             }).join('');
@@ -3466,6 +3469,7 @@
               var durBtn = st.done
                 ? ''
                 : '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'stock\',\'' + escapeJsAttr(st.id) + '\',' + (st.mins || 30) + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(st.mins || 30) + '</button>';
+              var memoBtn = buildListMemoBtnHtml('stock', st.id, st.memo);
               var playBtn = st.done
                 ? ''
                 : '<button type="button" onclick="event.stopPropagation();startFromList(\'stock\',\'' + escapeJsAttr(st.id) + '\')" class="circle-action-btn" aria-label="今すぐ始める">' + getIconSvg('play', 14) + '</button>';
@@ -3475,8 +3479,9 @@
                     '<div class="list-item-title">[' + escapeHtml(st.type) + '] ' + escapeHtml(st.title) + '</div>' +
                     '<div class="list-item-meta">' + (st.done ? '消化済' : st.mins + '分') + '</div>' +
                   '</div>' +
-                  '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + durBtn + playBtn + '</div>' +
+                  '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + durBtn + memoBtn + playBtn + '</div>' +
                 '</div>' +
+                renderListMemoCard('stock', st.id, st.title, st.memo) +
                 renderListDurAdjustCard('stock', st.id, st.title)
               );
             }).join('');
@@ -3500,6 +3505,34 @@
               renderListDurAdjustCard('habits', h.id, h.title)
             );
           }).join('');
+    }
+
+    function isListMemoExpanded(kind, itemId) {
+      return Boolean(state.expandedListMemo && state.expandedListMemo.kind === kind && state.expandedListMemo.id === itemId);
+    }
+
+    function buildListMemoBtnHtml(kind, itemId, memo) {
+      if (!memo || !String(memo).trim()) return '';
+      var activeStyle = isListMemoExpanded(kind, itemId) ? ' style="border-color:var(--accent);color:var(--accent);"' : '';
+      return '<button type="button" onclick="event.stopPropagation();toggleListMemo(\'' + escapeJsAttr(kind) + '\',\'' + escapeJsAttr(itemId) + '\')" class="circle-action-btn" aria-label="メモを確認" title="メモを確認"' + activeStyle + '>' + getIconSvg('message', 14) + '</button>';
+    }
+
+    function toggleListMemo(kind, itemId) {
+      state.expandedListMemo = isListMemoExpanded(kind, itemId) ? null : { kind: kind, id: itemId };
+      renderLists();
+    }
+
+    function renderListMemoCard(kind, itemId, title, memo) {
+      if (!memo || !String(memo).trim() || !isListMemoExpanded(kind, itemId)) return '';
+      return (
+        '<div class="custom-create-card glass-surface fade-in" style="margin:6px 0 10px;" onclick="event.stopPropagation()">' +
+          '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">' +
+            '<div style="font-size:12px;font-weight:600;color:var(--text-secondary);">メモ · ' + escapeHtml(title) + '</div>' +
+            '<button type="button" onclick="toggleListMemo(\'' + escapeJsAttr(kind) + '\',\'' + escapeJsAttr(itemId) + '\')" class="btn-ghost" style="padding:2px 8px;font-size:11px;">閉じる</button>' +
+          '</div>' +
+          '<div style="font-size:13px;line-height:1.55;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;">' + escapeHtml(String(memo).trim()) + '</div>' +
+        '</div>'
+      );
     }
 
     function renderListDurAdjustCard(kind, itemId, title) {

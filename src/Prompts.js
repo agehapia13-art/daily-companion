@@ -60,8 +60,8 @@ const CHAT_RESPONSE_SCHEMA = {
           task_id: { type: 'STRING', description: '既存タスクID（T_... または R_...）。update/complete/delete時は可能な限り指定' },
           estimated_mins: { type: 'INTEGER', description: '【時間指定・変更時必須】見込み所要時間（分・正の整数。例: 「45分に変えて」→ 45）' },
           due_date: { type: 'STRING', description: '期限・実施日（YYYY-MM-DD）。明示指定・変更時のみ出力' },
-          new_title: { type: 'STRING', description: 'update時にタイトル文言自体を変更する場合のみ指定' },
-          title: { type: 'STRING', description: '新規add時専用のタイトル（[大分類] 内容）。※update時は元の表示行をコピーせず省略すること' },
+          new_title: { type: 'STRING', description: 'update時にタスク名を変更する場合のみ指定（他項目と同時変更可）' },
+          title: { type: 'STRING', description: '新規add時専用の1行タイトル（[大分類] 内容）。※update時は使わず、名称変更はnew_titleを使う' },
           target_title: { type: 'STRING', description: 'task_id不明時に対象タスクを検索するための既存タイトル' },
           category: { type: 'STRING', description: 'update時にカテゴリのみ付け替える場合の7大カテゴリ名（仕事/制作・創作/家事・環境/実務・手続/趣味・文化/身体・ケア/お出かけ）' },
           memo: { type: 'STRING', description: 'タスク補足メモ（変更・追加時のみ出力。※資料連携済みの情報蓄積はproject_actions.append_docを使う）' },
@@ -70,7 +70,7 @@ const CHAT_RESPONSE_SCHEMA = {
           doc_url: { type: 'STRING', description: '関連Google Docs URL（指定時のみ）' }
         },
         required: ['action'],
-        propertyOrdering: ['action', 'task_id', 'target_title', 'estimated_mins', 'due_date', 'category', 'new_title', 'remind_context', 'memo', 'project_name', 'doc_url', 'title']
+        propertyOrdering: ['action', 'task_id', 'target_title', 'title', 'new_title', 'category', 'due_date', 'estimated_mins', 'remind_context', 'memo', 'project_name', 'doc_url']
       }
     },
     project_actions: {
@@ -232,6 +232,7 @@ function getDefaultPromptDb() {
    - タスクID体系: \`T_...\` は通常タスク、\`R_...\` は定期ルーティンから生成された当日タスクであり、いずれも \`task_actions\` で操作する。
    - 新規追加（\`add\`）の単発完結: \`due_date\`・\`estimated_mins\`・\`remind_context\` 等の属性は \`add\` 1オブジェクトにすべてまとめ、同一タスクに対して \`add\` と \`update\` を同時に出力しない。
    - 7大生活プリフィックス: タイトル先頭に \`[仕事]\` / \`[制作・創作]\` / \`[家事・環境]\` / \`[実務・手続]\` / \`[趣味・文化]\` / \`[身体・ケア]\` / \`[お出かけ]\` のいずれかを角括弧で必ず付与する（ユーザー指定カテゴリがあればそちらを優先）。時間制約がある時は末尾に \`（〜HH:mmまで）\` を記す。
+   - \`title\` のデータ契約: ユーザーが意図した行動そのものを表す簡潔な1行とし、補足は \`memo\`、日付期限は \`due_date\` へ分離する（タイトル末尾の括弧は時刻制約のみ）。
    - \`due_date\`: 期限・実施日の明示がある場合はその日を \`YYYY-MM-DD\` で付与する。未指定時でも埋もれ防止のため、緊急度・文脈に応じた適度な仮期限（例: 今週中・次の休日・1週間後等）を推論して設定する。
    - \`remind_context\`: 提案に適したタイミング・実施日・条件・環境（例: \`夜・自室\`, \`休日PC\`, \`晴れの日中\`, \`指定日当日・外出時\` 等）を文脈から推論して付与する。実施日（\`due_date\`）や実施する条件・環境の宣言・変更があった時は、既存の \`remind_context\`（\`直近の空き枠\` 等）を放置せず必ず最新の条件へ同時更新する。
    - \`estimated_mins\`: 新規追加（\`add\`）時・変更時は、時間の明示がなくてもタスク内容から妥当な見込み所要時間（分・数値、例: \`15\`, \`30\`, \`45\`, \`60\`）を推論して必ず出力する。

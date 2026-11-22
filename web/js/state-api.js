@@ -42,6 +42,7 @@ var state = {
   tab: normalizeTabName(urlParams.tab || INITIAL_TAB),
   listSubTab: 'tasks',
   taskCategoryFilter: 'ALL',
+  expandedListMemo: null,
   weatherLine: '天気情報を同期中…',
   boundary: null,
   deltaText: '',

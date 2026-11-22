@@ -1155,7 +1155,7 @@ function applyInputStockActions(actions) {
     if (!act || !act.action) continue;
 
     if (act.action === 'add' && act.title) {
-      const estMins = parsePositiveEstimatedMins_(act.estimated_mins) || getDefaultTaskEstimatedMins_(addTitle);
+      const estMins = parsePositiveEstimatedMins_(act.estimated_mins) || getDefaultInputStockEstimatedMins_(act.type);
       appendRowSafely_(sheet, [act.type || '映画', act.title, act.memo || '', '未', '', estMins]);
       results.push(`🎬 インプット追加: ${act.title}${estMins ? ` (${estMins}分)` : ''}`);
     } else if (act.action === 'update' && (act.title || act.target_title)) {

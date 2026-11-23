@@ -2,15 +2,33 @@
  * home-view.js - Home deck rendering, triage cards, custom card slider, focus & reflection
  */
 
+function getActiveTaskIdSet() {
+  if (!state.lists || !Array.isArray(state.lists.tasks) || state.lists.tasks.length === 0) {
+    return null;
+  }
+  var set = {};
+  state.lists.tasks.forEach(function(t) {
+    if (t && t.id) set[t.id] = true;
+  });
+  return set;
+}
+
+function isDeckCardAvailable(c, completed, dismissed, activeTaskIds) {
+  if (!c || !c.id) return false;
+  if (completed[c.id] || (c.linkedId && completed[c.linkedId]) || dismissed[c.id]) return false;
+  if (activeTaskIds && c.linkedType === 'task' && c.linkedId && !activeTaskIds[c.linkedId]) return false;
+  return true;
+}
+
 function getVisibleDeckCards() {
   var completed = state.fastState.completedToday || {};
   var dismissed = state.fastState.dismissedToday || {};
+  var activeTaskIds = getActiveTaskIdSet();
   var pool = state.fastState.isLowMode
     ? (state.composedDeck.lowCards || [])
     : (state.composedDeck.cards || []);
   var valid = pool.filter(function(c) {
-    if (!c || !c.id) return false;
-    if (completed[c.id] || (c.linkedId && completed[c.linkedId]) || dismissed[c.id]) return false;
+    if (!isDeckCardAvailable(c, completed, dismissed, activeTaskIds)) return false;
     if (c.isTriage && state.fastState.triagedToday) return false;
     return true;
   });
@@ -290,8 +308,9 @@ function rotateDeck() {
   if (state.isRefreshingDeck) return;
   var completed = state.fastState.completedToday || {};
   var dismissed = state.fastState.dismissedToday || {};
+  var activeTaskIds = getActiveTaskIdSet();
   var pool = (state.composedDeck.cards || []).filter(function(c) {
-    return c && c.id && !completed[c.id] && !(c.linkedId && completed[c.linkedId]) && !dismissed[c.id];
+    return isDeckCardAvailable(c, completed, dismissed, activeTaskIds);
   });
   var nextOffset = state.deckOffset + 3;
   if (nextOffset < pool.length) {

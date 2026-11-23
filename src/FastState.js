@@ -22,6 +22,7 @@ function getLogicalDayKey(nowOpt) {
 function createEmptyFastState_(dayKey) {
   return {
     dayKey: dayKey || getLogicalDayKey(),
+    revision: 1,
     activeSession: null,
     completedToday: {},
     dismissedToday: {},
@@ -121,6 +122,7 @@ function loadFastState(nowOpt) {
  */
 function saveFastState(state, syncSheetMirror) {
   if (!state) return;
+  state.revision = (Number(state.revision) || 0) + 1;
   const serialized = JSON.stringify(state);
   // PropertiesService の 9KB/key 上限ガード（リストキャッシュが肥大化した場合は圧縮）
   let toStore = serialized;

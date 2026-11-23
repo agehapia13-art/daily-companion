@@ -95,12 +95,17 @@ function callServerApi(funcName) {
       reject(new Error('GAS ウェブアプリURLが設定されていません'));
       return;
     }
-    fetch(state.apiUrl, {
+    var bodyStr = JSON.stringify({ apiAction: funcName, args: args });
+    var fetchOpts = {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ apiAction: funcName, args: args }),
+      body: bodyStr,
       redirect: 'follow'
-    })
+    };
+    if (bodyStr.length < 60000) {
+      fetchOpts.keepalive = true;
+    }
+    fetch(state.apiUrl, fetchOpts)
       .then(function(r) {
         if (!r.ok) throw new Error('HTTPエラー: ' + r.status);
         return r.json();
@@ -488,7 +493,8 @@ function syncFromServer(manual) {
   var btn = document.getElementById('syncBtn');
   if (btn) btn.classList.add('spinning');
 
-  callServerApi('apiGetHomeBootstrap', state.authKey)
+  var clientRev = (!manual && state.fastState && state.fastState.revision) ? Number(state.fastState.revision) : 0;
+  callServerApi('apiGetHomeBootstrap', state.authKey, { clientRevision: clientRev, force: Boolean(manual) })
     .then(function(res) {
       state.isSyncing = false;
       if (btn) btn.classList.remove('spinning');
@@ -498,6 +504,15 @@ function syncFromServer(manual) {
       if (!res || !res.authorized) {
         state.authorized = false;
         openSettingsModal((res && res.error) ? res.error : '認証に失敗しました。');
+        return;
+      }
+      if (res.unchanged) {
+        state.authorized = true;
+        state.lastFetchedAt = Date.now();
+        if (typeof res.deltaText === 'string') {
+          state.deltaText = res.deltaText;
+        }
+        closeSettingsModal();
         return;
       }
       state.authorized = true;

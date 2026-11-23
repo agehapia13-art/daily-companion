@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>時間調整UI モック - Companion Cockpit</title>
+  <style>
+    :root {
+      --bg-grad: linear-gradient(160deg, #f3ecff 0%, #f8f6fc 45%, #eef2ff 100%);
+      --card-bg: rgba(255, 255, 255, 0.78);
+      --card-border: rgba(255, 255, 255, 0.9);
+      --text-main: #1f1b2e;
+      --text-sub: #6e6782;
+      --accent: #7c5cfc;
+      --accent-soft: #ede8ff;
+      --accent-text: #5b3cc4;
+      --shadow: 0 8px 28px rgba(88, 66, 156, 0.08);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif;
+      background: var(--bg-grad);
+      color: var(--text-main);
+      min-height: 100vh;
+      padding: 16px 16px 40px;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 14px;
+    }
+    .header h1 {
+      font-size: 15px;
+      font-weight: 700;
+      margin: 0 0 4px;
+      color: var(--text-main);
+    }
+    .header p {
+      font-size: 12px;
+      color: var(--text-sub);
+      margin: 0;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      background: rgba(255,255,255,0.6);
+      padding: 4px;
+      border-radius: 999px;
+      margin-bottom: 18px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+    }
+    .tab-btn {
+      flex: 1;
+      border: none;
+      background: transparent;
+      padding: 10px 8px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-sub);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      background: #fff;
+      color: var(--accent-text);
+      box-shadow: 0 2px 8px rgba(124, 92, 252, 0.15);
+    }
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    .hero-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 20px;
+      box-shadow: var(--shadow);
+      margin-bottom: 14px;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent-text);
+      background: var(--accent-soft);
+      padding: 4px 10px;
+      border-radius: 999px;
+      margin-bottom: 10px;
+    }
+    .action-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0 0 6px;
+    }
+    .timer-display {
+      font-size: 40px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -1px;
+      margin: 8px 0 4px;
+      color: var(--text-main);
+    }
+    .time-range {
+      font-size: 13px;
+      color: var(--text-sub);
+      margin-bottom: 16px;
+    }
+
+    .adjust-box {
+      background: rgba(247, 244, 255, 0.85);
+      border-radius: 18px;
+      padding: 14px;
+      border: 1px solid rgba(124, 92, 252, 0.12);
+    }
+    .adjust-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-sub);
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .chip {
+      border: 1px solid rgba(124, 92, 252, 0.2);
+      background: #fff;
+      color: var(--text-main);
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .chip.selected {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      box-shadow: 0 4px 12px rgba(124, 92, 252, 0.25);
+    }
+    .custom-time-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed rgba(124, 92, 252, 0.18);
+    }
+    .custom-time-row span {
+      font-size: 13px;
+      color: var(--text-sub);
+      font-weight: 500;
+    }
+    input[type="time"] {
+      border: 1px solid rgba(124, 92, 252, 0.25);
+      background: #fff;
+      border-radius: 12px;
+      padding: 6px 10px;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-main);
+      font-family: inherit;
+    }
+
+    .cta-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .btn-primary {
+      flex: 1;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      padding: 14px;
+      border-radius: 16px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 6px 16px rgba(124, 92, 252, 0.28);
+    }
+    .btn-secondary {
+      border: none;
+      background: rgba(255,255,255,0.85);
+      color: var(--text-sub);
+      padding: 14px 18px;
+      border-radius: 16px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: #1f1b2e;
+      color: #fff;
+      padding: 10px 18px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      opacity: 0;
+      transition: all 0.25s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>時間調整 UI モック</h1>
+    <p>かけ忘れ・止め忘れをワンタップで補正</p>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('start')">① 開始時（かけ忘れ）</button>
+    <button class="tab-btn" onclick="switchTab('end')">② 終了時（止め忘れ）</button>
+  </div>
+
+  <!-- パターンA: 行動開始時（かけ忘れ） -->
+  <div id="panel-start" class="panel active">
+    <div class="hero-card">
+      <div class="status-badge">● 実行中</div>
+      <div class="action-title">朝食</div>
+      <div class="timer-display" id="start-timer">00:00:12</div>
+      <div class="time-range" id="start-range">開始時刻: 10:30（見込み 20分 → 10:50頃）</div>
+
+      <div class="adjust-box">
+        <div class="adjust-label">
+          <span>さっき始めていた場合（開始を遡る）</span>
+        </div>
+        <div class="chips" id="start-chips">
+          <button class="chip selected" onclick="selectStartOffset(0, this)">今すぐ</button>
+          <button class="chip" onclick="selectStartOffset(5, this)">5分前</button>
+          <button class="chip" onclick="selectStartOffset(10, this)">10分前</button>
+          <button class="chip" onclick="selectStartOffset(15, this)">15分前</button>
+          <button class="chip" onclick="selectStartOffset(30, this)">30分前</button>
+        </div>
+        <div class="custom-time-row">
+          <span>開始時刻を直接指定</span>
+          <input type="time" id="start-time-input" value="10:30" onchange="onCustomStartTime(this.value)" />
+        </div>
+      </div>
+
+      <div class="cta-row">
+        <button class="btn-secondary" onclick="showToast('キャンセルしました')">やめる</button>
+        <button class="btn-primary" onclick="showToast('この開始時刻で記録しました')">完了する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- パターンB: 行動終了時（止め忘れ） -->
+  <div id="panel-end" class="panel">
+    <div class="hero-card">
+      <div class="status-badge" style="background:#fff0e6; color:#c25700;">⏱ 止め忘れ補正</div>
+      <div class="action-title">朝食 を完了</div>
+      <div class="timer-display" id="end-duration">20分</div>
+      <div class="time-range" id="end-range">開始 08:30 → 終了 08:50（タイマー経過: 02:00:47）</div>
+
+      <div class="adjust-box">
+        <div class="adjust-label">
+          <span>実際はいつ終わりましたか？</span>
+        </div>
+        <div class="chips" id="end-chips">
+          <button class="chip" onclick="selectEndOffset(0, this)">今（10:30）</button>
+          <button class="chip" onclick="selectEndOffset(15, this)">15分前</button>
+          <button class="chip" onclick="selectEndOffset(30, this)">30分前</button>
+          <button class="chip" onclick="selectEndOffset(60, this)">1時間前</button>
+          <button class="chip selected" onclick="selectEndOffset(100, this)">見込み通り(20分)</button>
+        </div>
+        <div class="custom-time-row">
+          <span>終了時刻を直接指定</span>
+          <input type="time" id="end-time-input" value="08:50" onchange="onCustomEndTime(this.value)" />
+        </div>
+      </div>
+
+      <div class="cta-row">
+        <button class="btn-secondary" onclick="showToast('戻りました')">戻る</button>
+        <button class="btn-primary" onclick="showToast('実績 20分で完了記録しました')">この時間で完了</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach((b, i) => {
+        b.classList.toggle('active', (tab === 'start' && i === 0) || (tab === 'end' && i === 1));
+      });
+      document.getElementById('panel-start').classList.toggle('active', tab === 'start');
+      document.getElementById('panel-end').classList.toggle('active', tab === 'end');
+    }
+
+    function pad(n) { return String(n).padStart(2, '0'); }
+
+    function selectStartOffset(mins, btn) {
+      document.querySelectorAll('#start-chips .chip').forEach(c => c.classList.remove('selected'));
+      btn.classList.add('selected');
+      const baseH = 10, baseM = 30;
+      const totalM = baseH * 60 + baseM - mins;
+      const h = Math.floor(totalM / 60), m = totalM % 60;
+      const endM = totalM + 20;
+      const eh = Math.floor(endM / 60), em = endM % 60;
+      document.getElementById('start-time-input').value = `${pad(h)}:${pad(m)}`;
+      document.getElementById('start-timer').textContent = `00:${pad(mins)}:12`;
+      document.getElementById('start-range').textContent = `開始時刻: ${pad(h)}:${pad(m)}（見込み 20分 → ${pad(eh)}:${pad(em)}頃）`;
+    }
+
+    function onCustomStartTime(val) {
+      if (!val) return;
+      document.querySelectorAll('#start-chips .chip').forEach(c => c.classList.remove('selected'));
+      const [h, m] = val.split(':').map(Number);
+      const diff = Math.max(0, (10 * 60 + 30) - (h * 60 + m));
+      document.getElementById('start-timer').textContent = `${pad(Math.floor(diff/60))}:${pad(diff%60)}:12`;
+      document.getElementById('start-range').textContent = `開始時刻: ${val}（経過 ${diff}分）`;
+    }
+
+    function selectEndOffset(minsAgo, btn) {
+      document.querySelectorAll('#end-chips .chip').forEach(c => c.classList.remove('selected'));
+      btn.classList.add('selected');
+      const nowTotal = 10 * 60 + 30;
+      const startTotal = 8 * 60 + 30;
+      const endTotal = Math.max(startTotal + 1, nowTotal - minsAgo);
+      const eh = Math.floor(endTotal / 60), em = endTotal % 60;
+      const dur = endTotal - startTotal;
+      document.getElementById('end-time-input').value = `${pad(eh)}:${pad(em)}`;
+      document.getElementById('end-duration').textContent = dur >= 60 ? `${Math.floor(dur/60)}時間${dur%60}分` : `${dur}分`;
+      document.getElementById('end-range').textContent = `開始 08:30 → 終了 ${pad(eh)}:${pad(em)}（タイマー経過: 02:00:47）`;
+    }
+
+    function onCustomEndTime(val) {
+      if (!val) return;
+      document.querySelectorAll('#end-chips .chip').forEach(c => c.classList.remove('selected'));
+      const [h, m] = val.split(':').map(Number);
+      const dur = Math.max(1, (h * 60 + m) - (8 * 60 + 30));
+      document.getElementById('end-duration').textContent = dur >= 60 ? `${Math.floor(dur/60)}時間${dur%60}分` : `${dur}分`;
+      document.getElementById('end-range').textContent = `開始 08:30 → 終了 ${val}（タイマー経過: 02:00:47）`;
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2000);
+    }
+  </script>
+</body>
+</html>

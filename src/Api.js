@@ -93,14 +93,38 @@ function handleDashboardApiRequest(payload) {
  * @param {string} authKey
  * @return {Object}
  */
-function apiGetHomeBootstrap(authKey) {
+function apiGetHomeBootstrap(authKey, options) {
   if (!verifyDashboardAccess(authKey)) {
     return unauthorizedResponse_();
   }
 
+  const opts = (options && typeof options === 'object') ? options : {};
+  const force = Boolean(opts.force);
+  const clientRevision = Number(opts.clientRevision) || 0;
+
   const now = new Date();
   const todayStr = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd');
   const fastState = loadFastState(now);
+
+  // リビジョン一致（かつ当日ブリーフィング・AIデッキ生成済み）ならスプレッドシート・カレンダーAPIをスキップ
+  if (
+    !force &&
+    clientRevision > 0 &&
+    Number(fastState.revision) === clientRevision &&
+    fastState.dailyBriefing &&
+    fastState.dailyBriefing.dateKey === fastState.dayKey &&
+    fastState.aiDeck &&
+    Array.isArray(fastState.aiDeck.cards) &&
+    fastState.aiDeck.cards.length > 0
+  ) {
+    return {
+      authorized: true,
+      unchanged: true,
+      revision: fastState.revision,
+      deltaText: buildDeltaText(fastState.lastAction, now)
+    };
+  }
+
   const memory = getMemory();
   const workBoundary = getWorkModeAndBoundary(now, memory.profile);
   let stateDirty = false;

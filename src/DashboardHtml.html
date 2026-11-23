@@ -1865,7 +1865,7 @@
           <button type="button" id="discardOutboxBtn" onclick="confirmDiscardOutbox()" class="settings-row-btn hidden" style="flex:1;justify-content:center;padding:8px 10px;font-size:12px;color:#ef4444;">未同期を破棄</button>
         </div>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v35</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v36</div>
     </div>
   </div>
 
@@ -1976,12 +1976,17 @@
           reject(new Error('GAS ウェブアプリURLが設定されていません'));
           return;
         }
-        fetch(state.apiUrl, {
+        var bodyStr = JSON.stringify({ apiAction: funcName, args: args });
+        var fetchOpts = {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ apiAction: funcName, args: args }),
+          body: bodyStr,
           redirect: 'follow'
-        })
+        };
+        if (bodyStr.length < 60000) {
+          fetchOpts.keepalive = true;
+        }
+        fetch(state.apiUrl, fetchOpts)
           .then(function(r) {
             if (!r.ok) throw new Error('HTTPエラー: ' + r.status);
             return r.json();
@@ -2369,7 +2374,8 @@
       var btn = document.getElementById('syncBtn');
       if (btn) btn.classList.add('spinning');
 
-      callServerApi('apiGetHomeBootstrap', state.authKey)
+      var clientRev = (!manual && state.fastState && state.fastState.revision) ? Number(state.fastState.revision) : 0;
+      callServerApi('apiGetHomeBootstrap', state.authKey, { clientRevision: clientRev, force: Boolean(manual) })
         .then(function(res) {
           state.isSyncing = false;
           if (btn) btn.classList.remove('spinning');
@@ -2379,6 +2385,15 @@
           if (!res || !res.authorized) {
             state.authorized = false;
             openSettingsModal((res && res.error) ? res.error : '認証に失敗しました。');
+            return;
+          }
+          if (res.unchanged) {
+            state.authorized = true;
+            state.lastFetchedAt = Date.now();
+            if (typeof res.deltaText === 'string') {
+              state.deltaText = res.deltaText;
+            }
+            closeSettingsModal();
             return;
           }
           state.authorized = true;

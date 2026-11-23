@@ -10,7 +10,7 @@ function getVisibleDeckCards() {
     : (state.composedDeck.cards || []);
   var valid = pool.filter(function(c) {
     if (!c || !c.id) return false;
-    if (completed[c.id] || dismissed[c.id]) return false;
+    if (completed[c.id] || (c.linkedId && completed[c.linkedId]) || dismissed[c.id]) return false;
     if (c.isTriage && state.fastState.triagedToday) return false;
     return true;
   });
@@ -291,7 +291,7 @@ function rotateDeck() {
   var completed = state.fastState.completedToday || {};
   var dismissed = state.fastState.dismissedToday || {};
   var pool = (state.composedDeck.cards || []).filter(function(c) {
-    return c && c.id && !completed[c.id] && !dismissed[c.id];
+    return c && c.id && !completed[c.id] && !(c.linkedId && completed[c.linkedId]) && !dismissed[c.id];
   });
   var nextOffset = state.deckOffset + 3;
   if (nextOffset < pool.length) {

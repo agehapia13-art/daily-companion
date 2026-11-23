@@ -523,6 +523,7 @@ function apiSendChat(authKey, messagePayload) {
   // DB / カレンダー / プロジェクト / 周期スタンプ適用
   const executedNotices = [];
   let deckNeedsRefresh = false;
+  const chatCompletedIds = [];
   try {
     let createdProjectUrlMap = {};
     if (aiResult.project_actions && aiResult.project_actions.length > 0 && typeof applyProjectActions === 'function') {
@@ -535,6 +536,11 @@ function apiSendChat(authKey, messagePayload) {
       executedNotices.push.apply(executedNotices, taskRes);
       if (taskRes.length > 0 && aiResult.task_actions.some(a => a.action === 'complete' || a.action === 'delete')) {
         deckNeedsRefresh = 'check_low_cards';
+        aiResult.task_actions.forEach(a => {
+          if ((a.action === 'complete' || a.action === 'delete') && a.id) {
+            chatCompletedIds.push(String(a.id));
+          }
+        });
       }
     }
     if (aiResult.calendar_actions && aiResult.calendar_actions.length > 0) {
@@ -551,6 +557,12 @@ function apiSendChat(authKey, messagePayload) {
       executedNotices.push.apply(executedNotices, inputRes);
       if (inputRes.length > 0 && aiResult.input_stock_actions.some(a => a.action === 'complete' || a.action === 'delete')) {
         deckNeedsRefresh = 'check_low_cards';
+        aiResult.input_stock_actions.forEach(a => {
+          if (a.action === 'complete' || a.action === 'delete') {
+            if (a.id) chatCompletedIds.push(String(a.id));
+            if (a.title) chatCompletedIds.push(String(a.title));
+          }
+        });
       }
     }
     if (aiResult.routine_actions && aiResult.routine_actions.length > 0) {
@@ -584,9 +596,17 @@ function apiSendChat(authKey, messagePayload) {
     Logger.log('メモリー更新エラー: ' + memErr.message);
   }
 
-  // FastState 反映（低負荷モード / アンカー完了）
+  // FastState 反映（低負荷モード / アンカー完了 / チャット完了タスク・インプット）
   const fastState = loadFastState(now);
   let stateChanged = false;
+  if (chatCompletedIds.length > 0) {
+    chatCompletedIds.forEach(cid => {
+      if (!fastState.completedToday[cid]) {
+        fastState.completedToday[cid] = true;
+        stateChanged = true;
+      }
+    });
+  }
   const sc = aiResult.state_changes;
   if (sc && typeof sc === 'object') {
     if (typeof sc.mark_low_mode === 'boolean' && fastState.isLowMode !== sc.mark_low_mode) {

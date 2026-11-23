@@ -380,7 +380,7 @@ function getFallbackLowCards_() {
 function composeHomeDeck(workMode, now, fastState) {
   const completed = (fastState && fastState.completedToday) || {};
   const dismissed = (fastState && fastState.dismissedToday) || {};
-  const isAvail = (c) => c && c.id && !completed[c.id] && !dismissed[c.id];
+  const isAvail = (c) => c && c.id && !completed[c.id] && !(c.linkedId && completed[c.linkedId]) && !dismissed[c.id];
 
   const anchors = buildRoutineAnchorCards(workMode, now, fastState);
   const aiCardsRaw = (fastState && fastState.aiDeck && Array.isArray(fastState.aiDeck.cards))

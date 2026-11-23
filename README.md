@@ -14,6 +14,7 @@
 - [.agent/rules/prompt-architecture.md](.agent/rules/prompt-architecture.md) — プロンプト設計・分離原則・Prefix Cache ルール
 - [.agent/skills/companion-prompt-optimizer/SKILL.md](.agent/skills/companion-prompt-optimizer/SKILL.md) — プロンプト監査・最適化スキル
 - [.agent/skills/mobile-ui-mock/SKILL.md](.agent/skills/mobile-ui-mock/SKILL.md) — スマホ実機確認用 UI モック生成スキル
+- [.agent/skills/companion-diagnostics/SKILL.md](.agent/skills/companion-diagnostics/SKILL.md) — 実状況把握・診断スキル（スプレッドシートのログ・プロンプト・高速ステート、Notion の日報・月報確認手順）
 
 ---
 

@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-23 12:40 JST
+> **最終更新**: 2026-11-23 13:09 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -382,3 +382,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 | **2026-11-23 10:35** | `2026-11-22` 日報 `summary`（概要）で主活動（作業・環境整備等）が抜け落ち「楽しいことだけ」に見える問題 | `src/ReportGenerator.js` の日報 `summary` 定義を `40〜60文字程度` に調整し、まとまった時間・労力を投じた主活動と心が動いた楽しみ・休息の双方があった日は片方に偏らず両方のバランスが1文で伝わるよう記述する原則を追記。 |
 | **2026-11-23 11:02** | 朝起床時に深夜向けカードが出現する問題・タイマーかけ忘れ/止め忘れ時の時間調整UI追加 | ① `DeckEngine.js` の基準時刻を統一（`midnight_init` は翌朝08:00頃想定、行動中は `startedCard` または `fastState.activeSession` の終了見込み時刻想定、非行動中は現在時刻想定）。② 実行中画面・完了画面にオンデマンドの時刻直接入力UI（キャンセル/適用ボタン付き）を追加（`dc-pwa-v30`）。③ `.agent/skills/mobile-ui-mock/SKILL.md` を新設。 |
 | **2026-11-23 12:40** | チャットでタスク完了した場合にそのタスクに関連するカードが出っ放しになるバグ | ① `src/Api.js` でチャット経由の `task_actions` / `input_stock_actions` 完了・削除時に `fastState.completedToday` へ対象IDを記録するよう修正。② `src/FastState.js`（`composeHomeDeck`）および `web/js/home-view.js`（`getVisibleDeckCards` / `showNextDeckCards`）の除外判定に `c.linkedId && completed[c.linkedId]` を追加（`dc-pwa-v31`）。 |
+| **2026-11-23 13:09** | 実状況把握・診断スキル（`companion-diagnostics`）の新設 | エラー・不具合・改善要望対応時にスプレッドシート（`scripts/sheet-cli.js` 経由のログ・プロンプト・`V2_FAST_STATE`）および Notion（MCP 経由の日報・月報）を正本として確認する手順を `.agent/skills/companion-diagnostics/SKILL.md` として定義。 |

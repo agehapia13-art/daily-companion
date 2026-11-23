@@ -13,6 +13,7 @@
 - [AGENTS.md](AGENTS.md) — AIエージェント行動憲章 ＆ 思考原則
 - [.agent/rules/prompt-architecture.md](.agent/rules/prompt-architecture.md) — プロンプト設計・分離原則・Prefix Cache ルール
 - [.agent/skills/companion-prompt-optimizer/SKILL.md](.agent/skills/companion-prompt-optimizer/SKILL.md) — プロンプト監査・最適化スキル
+- [.agent/skills/mobile-ui-mock/SKILL.md](.agent/skills/mobile-ui-mock/SKILL.md) — スマホ実機確認用 UI モック生成スキル
 
 ---
 
@@ -29,7 +30,7 @@
     - `自分で始める`: タイトル入力 ＋ **非線形スライダー（`5分 / 10分 / 15分 / 30分 / 45分 / 1時間 / 1時間30分 / 2時間 / 2時間30分 / 3時間 / 4時間 / 6時間`、初期値 `30分`）**。
     - `別の候補`: 事前キャッシュ済み候補のページ送り（枯渇時のみ `apiRefreshDeck` で補充）。
     - `少しだるい / 通常に戻す`: AI が時間帯・状況に合わせて事前生成済みの低負荷候補 `aiDeck.lowCards`（3〜5件）へ待ち時間 0ms で切替。
-  - **進行中 Focus ＆ Reflection**: クリスタルダイヤル（`startedAtMs` 実時刻ベース・`60分` 経過時ソフト通知）、完了後の任意気分チップ・JPEG圧縮写真添付・感想入力（オートフォーカスなし）。
+  - **進行中 Focus ＆ Reflection**: クリスタルダイヤル（`startedAtMs` 実時刻ベース・`60分` 経過時ソフト通知）、かけ忘れ・止め忘れ補正用のオンデマンド時刻直接入力（開始時刻調整／完了後の開始・終了時刻調整、キャンセル/適用付き）、完了後の任意気分チップ・JPEG圧縮写真添付・感想入力（オートフォーカスなし）。
   - **引き算カード（`isTriage`）**: 過密・低気圧・疲労サイン時に先頭配置し、1タップで重タスクを翌日へ一括リスケ。
 - **Chat（傾聴・整理・DB操作・Web検索相談）**:
   - 論理日当日（03:00〜翌02:59）のログを復元。写真送信（JPEG圧縮 → Drive保存）、インライン変数ピル挿入（Lists タブ連携）、Google Docs/Drive リンクカード、エラー時の再試行・入力復元を完備。

@@ -270,7 +270,7 @@ function encodeRgbPng(width, height, rawScanlines) {
 }
 
 function buildServiceWorkerJs() {
-  return `const CACHE_NAME = 'dc-pwa-v34';
+  return `const CACHE_NAME = 'dc-pwa-v35';
 const PRECACHE_URLS = [
   './',
   './index.html',

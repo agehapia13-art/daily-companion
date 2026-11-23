@@ -685,9 +685,10 @@ function apiFlushOutboxBatch(authKey, operations) {
  * 4. カードの右スワイプ（「今日はいい」で当日除外）
  * @param {string} authKey
  * @param {string} cardId
+ * @param {string=} cardTitle
  * @return {Object}
  */
-function apiDismissCardToday(authKey, cardId) {
+function apiDismissCardToday(authKey, cardId, cardTitle) {
   if (!verifyDashboardAccess(authKey)) {
     return unauthorizedResponse_();
   }
@@ -695,7 +696,8 @@ function apiDismissCardToday(authKey, cardId) {
   const now = new Date();
   const fastState = loadFastState(now);
   if (cardId) {
-    fastState.dismissedToday[String(cardId)] = true;
+    const cleanTitle = (cardTitle && String(cardTitle).trim()) ? String(cardTitle).trim() : '';
+    fastState.dismissedToday[String(cardId)] = cleanTitle || true;
     if (cardId === '__briefing__' && fastState.dailyBriefing) {
       fastState.dailyBriefing.dismissed = true;
     }

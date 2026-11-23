@@ -359,12 +359,15 @@ function toggleLowMode() {
 }
 
 function dismissCardToday(cardId) {
-  state.fastState.dismissedToday[cardId] = true;
+  var cards = (state.composedDeck && state.composedDeck.cards) || [];
+  var targetCard = cards.find(function(c) { return c && c.id === cardId; });
+  var cardTitle = (targetCard && targetCard.title) ? String(targetCard.title).trim() : '';
+  state.fastState.dismissedToday[cardId] = cardTitle || true;
   state.openSwipeId = null;
   saveLocalSnapshot();
   renderHome();
   showToast('今日は非表示にしました');
-  runMutationApi('apiDismissCardToday', state.authKey, cardId)
+  runMutationApi('apiDismissCardToday', state.authKey, cardId, cardTitle)
     .then(function(res) {
       if (res && res.authorized && !res._stale && res.deck) {
         applyServerStatePayload(res);

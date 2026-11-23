@@ -230,7 +230,9 @@ function generateAiDeck(opts) {
     : getDefaultPromptDeck();
 
   const completedKeys = Object.keys(fastState.completedToday || {});
-  const dismissedKeys = Object.keys(fastState.dismissedToday || {});
+  const dismissedKeys = Object.entries(fastState.dismissedToday || {})
+    .filter(([k, v]) => k !== '__briefing__' && v)
+    .map(([k, v]) => (typeof v === 'string' && v.trim()) ? v.trim() : k);
   const excludeList = (o.excludeTitles || []).concat(completedKeys, dismissedKeys);
 
   const todayLogs = getCondensedTodayLogs('', todayStr);

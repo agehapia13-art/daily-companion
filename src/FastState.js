@@ -344,8 +344,8 @@ function buildRoutineAnchorCards(workMode, now, fastState) {
     }
   }
 
-  // 3. 日跨ぎ「就寝」カード（21:30以降〜翌04:00前まで保証）
-  if ((minsOfDay >= 21 * 60 + 30 || minsOfDay < 4 * 60) && avail('anchor_sleep')) {
+  // 3. 日跨ぎ「就寝」カード（21:30以降〜翌04:00前まで保証。completedToday には依存しない）
+  if ((minsOfDay >= 21 * 60 + 30 || minsOfDay < 4 * 60) && !dismissed['anchor_sleep']) {
     cards.push({
       id: 'anchor_sleep',
       icon: 'bed',

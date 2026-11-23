@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-23 22:10 JST
+> **最終更新**: 2026-11-24 00:08 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -391,3 +391,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 | **2026-11-23 21:51** | 「今日は提案しない」に回したカードのタイトルがAIに渡らず時間帯違いの類似カードが提案される問題 | `web/js/home-view.js`（`dismissCardToday`）と `src/Api.js`（`apiDismissCardToday`）で `dismissedToday[cardId]` にカードタイトルを保持し、`src/DeckEngine.js` の `【除外・既出（本日完了/非表示/重複回避対象）】` へタイトルを渡すよう修正（`dc-pwa-v35`）。 |
 | **2026-11-23 22:05** | PWAバックグラウンド移行時の `Load failed` 防止とリビジョン差分同期による高速化 | ① `web/js/state-api.js` の `callServerApi` で60KB未満のリクエストに `keepalive: true` を付与し、画面を閉じた直後の通信途絶を防止。② `src/FastState.js` に `revision` 管理を追加し、`src/Api.js`（`apiGetHomeBootstrap`）および `syncFromServer` でリビジョン一致時はスプレッドシート・カレンダーAPI読込をスキップして即応するよう改善（`dc-pwa-v36`）。 |
 | **2026-11-23 22:10** | 「少しだるい」押下時に未実施の「無音で耳を休める」カードが毎回出る問題 | `src/Prompts.js`（`getDefaultPromptDeck`）およびスプレッドシート `prompt_deck` 第6項（`low_cards`）を、否定形の禁止ルールから「【時間軸】【直前完了】【本日のログ要約】の事実のみを根拠にし、【プロファイル】の属性から連想した未実施作業のケアを作らない」という肯定形・参照境界の原則へ改訂。 |
+| **2026-11-24 00:08** | 朝起床後に夜になっても就寝カード（`anchor_sleep`）が表示されない問題 | 就寝カードは「今日すでに寝たか」を `completedToday` で管理する必要がないため、① `src/FastState.js`（`buildRoutineAnchorCards`）で `anchor_sleep` の表示条件から `completedToday` 参照を外し時間帯（`21:30〜03:59`）と `dismissedToday` のみで判定するよう変更。② `web/js/home-view.js`（`completeReflection` / `isDeckCardAvailable`）で `isSleepCard` を `completedToday` の記録・除外対象から除外（`dc-pwa-v37`）。 |

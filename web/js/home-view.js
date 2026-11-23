@@ -15,7 +15,8 @@ function getActiveTaskIdSet() {
 
 function isDeckCardAvailable(c, completed, dismissed, activeTaskIds) {
   if (!c || !c.id) return false;
-  if (completed[c.id] || (c.linkedId && completed[c.linkedId]) || dismissed[c.id]) return false;
+  if (!c.isSleepCard && (completed[c.id] || (c.linkedId && completed[c.linkedId]))) return false;
+  if (dismissed[c.id]) return false;
   if (activeTaskIds && c.linkedType === 'task' && c.linkedId && !activeTaskIds[c.linkedId]) return false;
   return true;
 }
@@ -564,7 +565,7 @@ function completeReflection(keepOpen) {
   state.pendingSessionLockUntil = Date.now() + 15000;
   state.reflection = null;
   state.fastState.activeSession = null;
-  if (r.card && r.card.id && !r.card.isCustom) {
+  if (r.card && r.card.id && !r.card.isCustom && !r.card.isSleepCard) {
     state.fastState.completedToday[r.card.id] = true;
   }
   if (!keepOpen && r.card && r.card.linkedType === 'task' && r.card.linkedId) {

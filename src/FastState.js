@@ -396,7 +396,7 @@ function composeHomeDeck(workMode, now, fastState) {
     return true;
   });
 
-  // 引き算カードは最上位、その後は AI が編成した順序を例外なく尊重し、AI が未配置のアンカーのみ後方へ補完
+  // 引き算カードは最上位、次に時間帯が到来した未完了の生活・勤務アンカー、その後ろに AI が編成した通常カードを配置
   const triageCards = aiCards.filter(c => c.isTriage);
   const normalAiCards = aiCards.filter(c => !c.isTriage);
 
@@ -413,8 +413,8 @@ function composeHomeDeck(workMode, now, fastState) {
   };
 
   pushUnique(triageCards);
-  pushUnique(normalAiCards);
   pushUnique(anchors);
+  pushUnique(normalAiCards);
 
   const lowCards = aiLowRaw.filter(isAvail);
   return {

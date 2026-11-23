@@ -1854,7 +1854,7 @@
       <div class="custom-btns">
         <button type="button" onclick="saveSettings()" class="btn-solid" style="width:100%;padding:11px;">保存して同期</button>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v31</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v32</div>
     </div>
   </div>
 
@@ -3293,6 +3293,7 @@
             '<div class="bubble-wrap user fade-in">' +
               '<div class="bubble">' + imgHtml + (uTextHtml ? '<div>' + uTextHtml + '</div>' : '') + '</div>' +
               reactHtml +
+              (m.time ? '<div class="bubble-time">' + escapeHtml(m.time) + '</div>' : '') +
             '</div>'
           );
         }
@@ -3406,8 +3407,11 @@
       state.pendingChatPhoto = null;
       renderChatPhotoPreview();
 
+      var now = new Date();
+      var nowTime = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
       var msgObj = {
         id: 'MSG_' + Date.now(),
+        time: nowTime,
         userText: plainText,
         tokens: tokens,
         localPhotoUrl: photo ? photo.dataUrl : '',
@@ -3442,7 +3446,7 @@
           msgObj.aiText = res.replyText || '';
           msgObj.badges = Array.isArray(res.badges) ? res.badges : [];
           msgObj.docLinks = Array.isArray(res.docLinks) ? res.docLinks : [];
-          msgObj.time = res.time || '';
+          msgObj.time = res.time || msgObj.time || '';
           if (res.imageUrl) msgObj.imageUrls = [res.imageUrl];
           applyServerStatePayload(res);
           saveLocalSnapshot();

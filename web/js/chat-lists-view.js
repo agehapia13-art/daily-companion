@@ -110,6 +110,7 @@ function renderChat() {
         '<div class="bubble-wrap user fade-in">' +
           '<div class="bubble">' + imgHtml + (uTextHtml ? '<div>' + uTextHtml + '</div>' : '') + '</div>' +
           reactHtml +
+          (m.time ? '<div class="bubble-time">' + escapeHtml(m.time) + '</div>' : '') +
         '</div>'
       );
     }
@@ -223,8 +224,11 @@ function submitTalkEditor() {
   state.pendingChatPhoto = null;
   renderChatPhotoPreview();
 
+  var now = new Date();
+  var nowTime = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
   var msgObj = {
     id: 'MSG_' + Date.now(),
+    time: nowTime,
     userText: plainText,
     tokens: tokens,
     localPhotoUrl: photo ? photo.dataUrl : '',
@@ -259,7 +263,7 @@ function executeChatSend(msgObj, plainText, photo) {
       msgObj.aiText = res.replyText || '';
       msgObj.badges = Array.isArray(res.badges) ? res.badges : [];
       msgObj.docLinks = Array.isArray(res.docLinks) ? res.docLinks : [];
-      msgObj.time = res.time || '';
+      msgObj.time = res.time || msgObj.time || '';
       if (res.imageUrl) msgObj.imageUrls = [res.imageUrl];
       applyServerStatePayload(res);
       saveLocalSnapshot();

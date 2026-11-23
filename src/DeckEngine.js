@@ -196,18 +196,33 @@ function generateAiDeck(opts) {
   const pendingInput = getInputStockList('未');
   const listSnap = buildListsSnapshot(memory, now);
 
-  // 開始中行動がある場合は「その行動が終わる見込み時刻」を基準点としてAIへ伝える
+  // 基準時刻の決定: 行動中なら終了見込み時刻、midnight_initなら翌朝08:00頃、それ以外は現在時刻
   let targetTimeContext = `現在時刻: ${nowStr}`;
   let anchorTargetTime = now;
-  if (o.startedCard && !o.startedCard.isSleepCard) {
-    const estMins = parsePositiveEstimatedMins_(o.startedCard.mins) || 30;
-    const expectedEnd = new Date(now.getTime() + estMins * 60000);
+  const activeCard = (o.startedCard && !o.startedCard.isSleepCard)
+    ? o.startedCard
+    : (fastState && fastState.activeSession && !fastState.activeSession.isSleepCard ? fastState.activeSession : null);
+
+  if (o.reason === 'midnight_init') {
+    const morningTarget = new Date(now.getTime());
+    morningTarget.setHours(8, 0, 0, 0);
+    anchorTargetTime = morningTarget;
+    const morningStr = Utilities.formatDate(morningTarget, 'Asia/Tokyo', 'yyyy-MM-dd(E) HH:mm');
+    targetTimeContext =
+      `実行時刻: ${nowStr}（深夜バッチ）\n` +
+      `【想定基準時刻】: ${morningStr} 頃（翌朝・起床後〜午前の初期デッキ）\n` +
+      `※ユーザーが朝起きた直後（08:00頃〜午前中）に適した手札を編成してください。深夜・就寝前のカードは出さないでください。`;
+  } else if (activeCard) {
+    const estMins = parsePositiveEstimatedMins_(activeCard.mins) || 30;
+    const baseStartMs = activeCard.startedAtMs || (activeCard.startedAt ? new Date(activeCard.startedAt).getTime() : now.getTime());
+    const expectedEndMs = Math.max(now.getTime(), baseStartMs + estMins * 60000);
+    const expectedEnd = new Date(expectedEndMs);
     anchorTargetTime = expectedEnd;
     const endStr = Utilities.formatDate(expectedEnd, 'Asia/Tokyo', 'HH:mm');
     targetTimeContext =
       `現在時刻: ${nowStr}\n` +
-      `【今開始した行動】: 「${o.startedCard.title}」（見込み${estMins}分 → 終了見込み時刻 ${endStr} 頃）\n` +
-      `※ユーザーがこの行動を終えた「${endStr} 頃」のタイミング・残り時間に適した次の手札を編成してください。`;
+      `【行動中】: 「${activeCard.title}」（見込み${estMins}分 → 終了見込み時刻 ${endStr} 頃）\n` +
+      `※ユーザーがこの行動を終えた「${endStr} 頃」の状況・残り時間に適した次の手札を編成してください。`;
   }
 
   const promptDeck = (memory.prompt_deck && memory.prompt_deck.trim() !== '')

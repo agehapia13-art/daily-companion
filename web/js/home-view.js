@@ -107,10 +107,30 @@ function renderHome() {
     var photoHtml = r.photoDataUrl
       ? '<div class="attach-preview-bar"><div class="attach-thumb-wrap"><img src="' + r.photoDataUrl + '" class="attach-thumb" alt="添付写真" /><button type="button" onclick="clearReflectPhoto()" class="attach-remove-btn" aria-label="削除">×</button></div></div>'
       : '';
+    var startMs = r.startedMs || (r.card && r.card.startedAtMs) || (Date.now() - (r.usedMins || 1) * 60000);
+    var endMs = r.endedMs || Date.now();
+    r.startedMs = startMs;
+    r.endedMs = endMs;
+    var sVal = formatTimeInputHm_(startMs);
+    var eVal = formatTimeInputHm_(endMs);
+    var reflectAdjustHtml = !r.isAdjustOpen
+      ? '<div class="time-adjust-wrap"><button type="button" class="time-adjust-toggle" onclick="toggleReflectTimeAdjust(true)">✎ 時間を調整（' + sVal + ' 〜 ' + eVal + '）</button></div>'
+      : '<div class="time-adjust-wrap"><div class="glass-surface time-adjust-panel fade-in">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;">' +
+            '<label style="font-size:12px;color:var(--dc-text-sub);display:flex;align-items:center;gap:6px;">開始 <input id="reflectStartTimeInput" type="time" class="time-adjust-input" value="' + sVal + '" /></label>' +
+            '<span style="color:var(--dc-text-sub);">〜</span>' +
+            '<label style="font-size:12px;color:var(--dc-text-sub);display:flex;align-items:center;gap:6px;">終了 <input id="reflectEndTimeInput" type="time" class="time-adjust-input" value="' + eVal + '" /></label>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px;justify-content:center;">' +
+            '<button type="button" class="btn-soft" onclick="toggleReflectTimeAdjust(false)">キャンセル</button>' +
+            '<button type="button" class="btn-solid" onclick="applyReflectTimeAdjust()">適用</button>' +
+          '</div>' +
+        '</div></div>';
     center.innerHTML =
       '<div class="reflect-view fade-in">' +
         '<h2 class="reflect-heading">' + (r.card.isSleepCard ? 'おはようございます' : 'お疲れさまでした') + '</h2>' +
         '<div class="reflect-sub">' + escapeHtml(r.card.title) + (r.card.isSleepCard ? '' : ' · ' + r.usedMins + '分') + '</div>' +
+        reflectAdjustHtml +
         '<div class="feeling-row">' + chips + '</div>' +
         photoHtml +
         '<div class="reflect-input-row">' +
@@ -131,6 +151,19 @@ function renderHome() {
   if (sess) {
     var elSec = Math.max(0, Math.floor((Date.now() - (sess.startedAtMs || Date.now())) / 1000));
     var showBreak = Math.floor(elSec / 60) >= 60 && !sess.isWorkBlock && !sess.isSleepCard;
+    var sValActive = formatTimeInputHm_(sess.startedAtMs || Date.now());
+    var activeAdjustHtml = !state.isStartAdjustOpen
+      ? '<div class="time-adjust-wrap"><button type="button" class="time-adjust-toggle" onclick="toggleStartTimeAdjust(true)">✎ 開始時刻を調整（' + sValActive + '〜）</button></div>'
+      : '<div class="time-adjust-wrap"><div class="glass-surface time-adjust-panel fade-in">' +
+          '<div style="display:flex;align-items:center;justify-content:center;gap:8px;">' +
+            '<span style="font-size:12px;color:var(--dc-text-sub);">開始時刻</span>' +
+            '<input id="activeStartTimeInput" type="time" class="time-adjust-input" value="' + sValActive + '" />' +
+          '</div>' +
+          '<div style="display:flex;gap:8px;justify-content:center;">' +
+            '<button type="button" class="btn-soft" onclick="toggleStartTimeAdjust(false)">キャンセル</button>' +
+            '<button type="button" class="btn-solid" onclick="applyStartTimeAdjust()">適用</button>' +
+          '</div>' +
+        '</div></div>';
     center.innerHTML =
       '<div class="focus-view fade-in">' +
         '<h2 class="focus-title">' + escapeHtml(sess.title) + '</h2>' +
@@ -145,6 +178,7 @@ function renderHome() {
           '<button onclick="pauseFocus()" class="btn-pause-soft">キャンセル</button>' +
           '<button onclick="finishFocus()" class="btn-done-pill">' + (sess.isSleepCard ? '起きた' : '終わった') + '</button>' +
         '</div>' +
+        activeAdjustHtml +
       '</div>';
     return;
   }
@@ -405,13 +439,72 @@ function pauseFocus() {
   enqueueOutboxMutation('apiStartAction', null);
 }
 
+function formatTimeInputHm_(ms) {
+  var d = new Date(ms || Date.now());
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function applyTimeInputToMs_(baseMs, timeStr) {
+  var parts = String(timeStr || '').split(':');
+  if (parts.length !== 2) return baseMs || Date.now();
+  var d = new Date(baseMs || Date.now());
+  d.setHours(Number(parts[0]), Number(parts[1]), 0, 0);
+  if (d.getTime() > Date.now() + 60000) {
+    d.setDate(d.getDate() - 1);
+  }
+  return d.getTime();
+}
+
+function toggleStartTimeAdjust(open) {
+  state.isStartAdjustOpen = Boolean(open);
+  renderHome();
+}
+
+function applyStartTimeAdjust() {
+  var el = document.getElementById('activeStartTimeInput');
+  var sess = state.fastState && state.fastState.activeSession;
+  if (!el || !el.value || !sess) return;
+  var newMs = applyTimeInputToMs_(sess.startedAtMs || Date.now(), el.value);
+  sess.startedAtMs = newMs;
+  sess.startedAt = new Date(newMs).toISOString();
+  state.isStartAdjustOpen = false;
+  saveLocalSnapshot();
+  renderHome();
+  enqueueOutboxMutation('apiStartAction', sess);
+  showToast('開始時刻を ' + el.value + ' に更新しました');
+}
+
+function toggleReflectTimeAdjust(open) {
+  if (!state.reflection) return;
+  state.reflection.isAdjustOpen = Boolean(open);
+  renderHome();
+}
+
+function applyReflectTimeAdjust() {
+  var r = state.reflection;
+  if (!r) return;
+  var sEl = document.getElementById('reflectStartTimeInput');
+  var eEl = document.getElementById('reflectEndTimeInput');
+  if (sEl && sEl.value) r.startedMs = applyTimeInputToMs_(r.startedMs, sEl.value);
+  if (eEl && eEl.value) r.endedMs = applyTimeInputToMs_(r.endedMs, eEl.value);
+  r.usedMins = Math.max(1, Math.round((r.endedMs - r.startedMs) / 60000));
+  r.isAdjustOpen = false;
+  renderHome();
+  showToast('実績時間を ' + r.usedMins + '分 に更新しました');
+}
+
 function finishFocus() {
   var sess = state.fastState.activeSession;
   if (!sess) return;
-  var elMins = Math.max(1, Math.round((Date.now() - (sess.startedAtMs || Date.now())) / 60000));
+  var endMs = Date.now();
+  var startMs = sess.startedAtMs || endMs;
+  var elMins = Math.max(1, Math.round((endMs - startMs) / 60000));
+  state.isStartAdjustOpen = false;
   state.fastState.activeSession = null;
   state.reflection = {
     card: sess,
+    startedMs: startMs,
+    endedMs: endMs,
     usedMins: elMins,
     feeling: '',
     note: '',

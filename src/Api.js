@@ -71,7 +71,8 @@ function handleDashboardApiRequest(payload) {
       apiDismissCardToday: apiDismissCardToday,
       apiSendChat: apiSendChat,
       apiMutateListItem: apiMutateListItem,
-      apiRefreshDeck: apiRefreshDeck
+      apiRefreshDeck: apiRefreshDeck,
+      apiFlushOutboxBatch: apiFlushOutboxBatch
     };
     if (!handlers[action]) {
       return { ok: false, error: 'Unknown apiAction: ' + action };
@@ -440,6 +441,243 @@ function apiCompleteAction(authKey, completePayload) {
     deltaText: buildDeltaText(fastState.lastAction, now),
     notices: notices,
     addedChatMessage: addedChatMessage
+  };
+}
+
+/**
+ * 3b. オフラインアウトボックスの一括バッチ同期
+ * @param {string} authKey
+ * @param {Array<{id: string, funcName: string, payload: Object}>} operations
+ * @return {Object}
+ */
+function apiFlushOutboxBatch(authKey, operations) {
+  if (!verifyDashboardAccess(authKey)) {
+    return unauthorizedResponse_();
+  }
+
+  const ops = Array.isArray(operations) ? operations : [];
+  const now = new Date();
+  const nowStr = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM-dd HH:mm:ss');
+  const nowIso = Utilities.formatDate(now, 'Asia/Tokyo', "yyyy-MM-dd'T'HH:mm:ss+09:00");
+  const logicalDayStr = getLogicalDayKey(now);
+  const fastState = loadFastState(now);
+  const memory = getMemory();
+  const workBoundary = getWorkModeAndBoundary(now, memory.profile);
+  const cache = (() => {
+    try { return CacheService.getScriptCache(); } catch (e) { return null; }
+  })();
+
+  const results = [];
+  const addedChatMessages = [];
+  let needAiDeckForActive = false;
+
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i] || {};
+    const opId = String(op.id || (op.payload && op.payload.clientOpId) || '').trim();
+    const funcName = String(op.funcName || '').trim();
+    const p = op.payload;
+
+    try {
+      if (opId && cache && cache.get('op_' + opId)) {
+        results.push({ id: opId, ok: true, duplicateSkipped: true });
+        continue;
+      }
+
+      if (funcName === 'apiStartAction') {
+        if (!p || !p.title) {
+          fastState.activeSession = null;
+          needAiDeckForActive = false;
+        } else {
+          const session = {
+            id: String(p.id || ('custom_' + now.getTime())),
+            title: String(p.title || '行動').trim(),
+            sub: String(p.sub || '').trim(),
+            icon: String(p.icon || 'compass'),
+            mins: parsePositiveEstimatedMins_(p.mins) || 30,
+            isAnchor: Boolean(p.isAnchor),
+            isSleepCard: Boolean(p.isSleepCard),
+            isWorkBlock: Boolean(p.isWorkBlock),
+            isTriage: Boolean(p.isTriage),
+            isCustom: Boolean(p.isCustom),
+            linkedType: String(p.linkedType || 'none'),
+            linkedId: String(p.linkedId || ''),
+            cycleStampLabel: String(p.cycleStampLabel || ''),
+            triageTaskIds: Array.isArray(p.triageTaskIds) ? p.triageTaskIds.map(String) : [],
+            startedAtMs: Number(p.startedAtMs) > 0 ? Number(p.startedAtMs) : now.getTime(),
+            startedAtIso: nowIso
+          };
+          fastState.activeSession = session;
+          if (fastState.dailyBriefing) {
+            fastState.dailyBriefing.dismissed = true;
+          }
+          if (session.isSleepCard) {
+            try {
+              appendLog(nowStr, 'user', 'これから寝ます（おやすみ）', '', '[スタンプ: 🌙]\nおやすみなさい。良い睡眠を。');
+            } catch (logErr) {
+              Logger.log('就寝開始ログ追記エラー: ' + logErr.message);
+            }
+            needAiDeckForActive = false;
+          } else {
+            needAiDeckForActive = !session.isWorkBlock;
+          }
+        }
+        if (opId && cache) {
+          try { cache.put('op_' + opId, '1', 3600); } catch (e) {}
+        }
+        results.push({ id: opId, ok: true });
+      } else if (funcName === 'apiCompleteAction') {
+        const cp = p || {};
+        const session = cp.session || fastState.activeSession || {};
+        const mood = String(cp.mood || '').trim();
+        const note = String(cp.note || '').trim();
+        const keepOpen = Boolean(cp.keepOpen);
+        let photoUrl = '';
+        if (cp.photoBase64) {
+          const savedImg = saveBase64ImageToDrive(cp.photoBase64, cp.photoMimeType || 'image/jpeg', 'reflect');
+          photoUrl = savedImg.url;
+        }
+
+        const notices = [];
+        if (session.isTriage) {
+          const targetIds = Array.isArray(session.triageTaskIds) ? session.triageTaskIds.filter(Boolean) : [];
+          const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+          const tomorrowStr = Utilities.formatDate(tomorrow, 'Asia/Tokyo', 'yyyy-MM-dd');
+          let idsToMove = targetIds;
+          if (idsToMove.length === 0) {
+            const uncompleted = getTasks('未完了');
+            idsToMove = uncompleted
+              .filter(t => t.dueDate && t.dueDate <= logicalDayStr)
+              .slice(0, 5)
+              .map(t => t.id);
+          }
+          if (idsToMove.length > 0) {
+            const res = applyTaskActions(idsToMove.map(id => ({
+              action: 'update',
+              task_id: id,
+              due_date: tomorrowStr
+            })));
+            notices.push.apply(notices, res);
+          }
+          fastState.triagedToday = true;
+        }
+
+        if (!keepOpen) {
+          if (session.linkedType === 'task' && session.linkedId) {
+            const taskRes = applyTaskActions([{ action: 'complete', task_id: session.linkedId }]);
+            notices.push.apply(notices, taskRes);
+          } else if (session.linkedType === 'stock' && session.linkedId) {
+            const stockRes = applyInputStockActions([{ action: 'complete', title: session.linkedId }]);
+            notices.push.apply(notices, stockRes);
+          }
+        }
+
+        if (session.cycleStampLabel) {
+          const updated = updateCycleStampsSafely(`${session.cycleStampLabel}: ${logicalDayStr}`);
+          if (updated && updated.length > 0) {
+            updated.forEach(entry => notices.push(`📌 周期スタンプ更新: ${entry}`));
+          }
+        }
+
+        if (session.id && !session.isCustom && !session.isSleepCard) {
+          fastState.completedToday[session.id] = true;
+        }
+        if (!keepOpen && session.linkedType === 'task' && session.linkedId) {
+          fastState.completedToday[session.linkedId] = true;
+        }
+        fastState.activeSession = null;
+        needAiDeckForActive = false;
+        const sessionTitle = String(session.title || '行動').trim();
+        fastState.lastAction = {
+          title: session.isSleepCard ? '睡眠・起床' : sessionTitle,
+          completedAt: nowIso,
+          isSleep: Boolean(session.isSleepCard)
+        };
+
+        const startedMs = Number(session.startedAtMs) || 0;
+        const elapsedMins = startedMs > 0 ? Math.max(1, Math.round((now.getTime() - startedMs) / 60000)) : 0;
+        let userMsg = '';
+        if (session.isSleepCard) {
+          const sleepDur = elapsedMins > 0
+            ? (elapsedMins >= 60 ? `${Math.floor(elapsedMins / 60)}時間${elapsedMins % 60 > 0 ? (elapsedMins % 60) + '分' : ''}` : `${elapsedMins}分`)
+            : '';
+          userMsg = `起きました（おはよう${sleepDur ? ' · 睡眠 ' + sleepDur : ''}）`;
+        } else if (session.isTriage) {
+          userMsg = `【引き算】${sessionTitle}`;
+        } else if (keepOpen) {
+          userMsg = `【進行】${sessionTitle}${elapsedMins > 0 ? `（実測${elapsedMins}分）` : ''}`;
+        } else {
+          userMsg = `【完了】${sessionTitle}${elapsedMins > 0 ? `（実測${elapsedMins}分）` : ''}`;
+        }
+
+        const detailParts = [];
+        if (mood) detailParts.push(`気分: ${mood}`);
+        if (note) detailParts.push(note);
+        if (detailParts.length > 0) {
+          userMsg += `\n${detailParts.join(' / ')}`;
+        }
+
+        const emoji = session.isSleepCard ? '☀️' : (session.isTriage ? '🌿' : '✨');
+        const aiReplyLines = [`[スタンプ: ${emoji}]`];
+        if (notices.length > 0) {
+          aiReplyLines.push(notices.join('\n'));
+        }
+        const aiReplyStr = aiReplyLines.join('\n');
+
+        appendLog(nowStr, 'user', userMsg, photoUrl, aiReplyStr);
+        addedChatMessages.push(buildChatLogEntryObject_({
+          id: 'LOG_' + (now.getTime() + i),
+          timestampStr: nowStr,
+          message: userMsg,
+          imageUrl: photoUrl,
+          aiReply: aiReplyStr
+        }));
+
+        if (opId && cache) {
+          try { cache.put('op_' + opId, '1', 3600); } catch (e) {}
+        }
+        results.push({ id: opId, ok: true });
+      } else {
+        results.push({ id: opId, ok: false, error: 'Unsupported batch operation: ' + funcName });
+      }
+    } catch (opErr) {
+      Logger.log('apiFlushOutboxBatch op エラー (' + funcName + '): ' + opErr.message);
+      results.push({ id: opId, ok: false, error: (opErr && opErr.message) ? opErr.message : String(opErr) });
+    }
+  }
+
+  if (fastState.activeSession && needAiDeckForActive) {
+    try {
+      fastState.aiDeck = generateAiDeck({
+        reason: 'start_action',
+        now: now,
+        memory: memory,
+        fastState: fastState,
+        workMode: workBoundary.workMode,
+        todayEvents: workBoundary.todayEvents,
+        boundaryInfo: workBoundary.boundaryInfo,
+        startedCard: fastState.activeSession,
+        useFlashModel: false
+      });
+    } catch (deckErr) {
+      Logger.log('apiFlushOutboxBatch aiDeck エラー: ' + deckErr.message);
+    }
+  }
+
+  const lists = buildListsSnapshot(memory, now);
+  fastState.listCache = lists;
+  saveFastState(fastState, true);
+
+  const deck = composeHomeDeck(workBoundary.workMode, now, fastState);
+
+  return {
+    authorized: true,
+    results: results,
+    state: fastState,
+    deck: deck,
+    lists: lists,
+    boundary: workBoundary.heroBoundary,
+    deltaText: buildDeltaText(fastState.lastAction, now),
+    addedChatMessages: addedChatMessages
   };
 }
 

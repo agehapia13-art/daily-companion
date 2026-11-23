@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-23 13:24 JST
+> **最終更新**: 2026-11-23 21:44 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -387,3 +387,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 | **2026-11-23 18:28** | `2026-11-23 17:21` チャットでタスク完了しても `completedToday` に記録されないバグ | `src/Api.js` のチャット経由 `task_actions` 完了時に `a.id`（未定義）を参照していた箇所を `a.task_id \|\| a.id` へ修正。 |
 | **2026-11-23 18:37** | `generateAIDeck` を介さずに完了済みタスクカードを即時除外する仕組みの追加 | `web/js/home-view.js` に `getActiveTaskIdSet()` / `isDeckCardAvailable()` を追加し、未完了タスク一覧（`state.lists.tasks`）に存在しない `linkedType === 'task'` カードをフロントエンド側で即座に非表示化（`dc-pwa-v33`）。 |
 | **2026-11-23 13:24** | チャットUIでAIの返答にのみ時刻が表示され、ユーザー発言や過去ログのユーザー側に時刻が表示されない問題 | `web/js/chat-lists-view.js` の `renderChat()` で `.bubble-wrap.user` 内にも `.bubble-time` を描画するよう修正。また `sendTalk()` で送信直後に `HH:mm` を `msgObj.time` にセットし、API完了後は `res.time \|\| msgObj.time \|\| ''` を保持するよう改善（`dc-pwa-v32`）。 |
+| **2026-11-23 21:44** | 未同期アウトボックスが1件ずつしか進まず詰まる問題・エラー可視化と診断ログコピー機能の追加 | ① `web/js/state-api.js` に送信前イベント圧縮（`coalesceOutbox_`）と一括バッチ送信、および構造化エラーログ（最大30件永続化）・即時エラー通知を実装。② `src/Api.js` に `apiFlushOutboxBatch` を新設し、複数操作を1リクエストで一括適用（途中の不要な `generateAiDeck` をスキップ）。③ `web/index.html` / `web/js/chat-lists-view.js` / `web/js/home-view.js` に設定画面からの診断ログワンタップコピー・未同期破棄導線を追加（`dc-pwa-v34`）。 |

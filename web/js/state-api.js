@@ -72,6 +72,8 @@ var state = {
   inFlightMutations: 0,
   pendingOutbox: [],
   isFlushingOutbox: false,
+  outboxLastError: '',
+  errorLogs: [],
   toastTimer: null
 };
 
@@ -109,7 +111,10 @@ function callServerApi(funcName) {
         }
         resolve(json && json.ok === true ? json.data : json);
       })
-      .catch(reject);
+      .catch(function(err) {
+        recordClientError('api:' + funcName, err);
+        reject(err);
+      });
   });
 }
 
@@ -199,6 +204,107 @@ function saveOutbox() {
 
 loadOutbox();
 
+function loadErrorLogs() {
+  try {
+    var raw = localStorage.getItem('cc_v2_error_logs');
+    if (!raw) return;
+    var parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      state.errorLogs = parsed.slice(-30);
+    }
+  } catch (e) {}
+}
+
+function saveErrorLogs() {
+  try {
+    localStorage.setItem('cc_v2_error_logs', JSON.stringify((state.errorLogs || []).slice(-30)));
+  } catch (e) {}
+}
+
+function recordClientError(source, errOrMsg, extra) {
+  try {
+    var msg = (errOrMsg && errOrMsg.message) ? errOrMsg.message : String(errOrMsg || 'Unknown error');
+    var entry = {
+      ts: new Date().toISOString(),
+      source: String(source || 'app'),
+      message: msg.slice(0, 400)
+    };
+    if (extra && typeof extra === 'object') {
+      entry.detail = JSON.stringify(extra).slice(0, 300);
+    }
+    state.errorLogs = (state.errorLogs || []).concat([entry]).slice(-30);
+    saveErrorLogs();
+  } catch (e) {}
+}
+
+function clearErrorLogs() {
+  state.errorLogs = [];
+  saveErrorLogs();
+}
+
+function buildDiagnosticReportText() {
+  var verEl = typeof document !== 'undefined' ? document.getElementById('appBuildVersion') : null;
+  var ver = verEl ? verEl.textContent : 'unknown';
+  var outboxSummary = (state.pendingOutbox || []).map(function(it) {
+    var title = (it.payload && (it.payload.title || (it.payload.session && it.payload.session.title))) || '';
+    var hasPhoto = Boolean(it.payload && it.payload.photoBase64);
+    return { id: it.id, funcName: it.funcName, title: title, hasPhoto: hasPhoto, createdAt: it.createdAt };
+  });
+  var lines = [
+    '=== Companion Cockpit 診断ログ ===',
+    ver,
+    'Time: ' + new Date().toISOString(),
+    'Online: ' + (typeof navigator !== 'undefined' ? navigator.onLine : 'unknown'),
+    'PendingOutbox (' + outboxSummary.length + '): ' + JSON.stringify(outboxSummary),
+    'OutboxLastError: ' + (state.outboxLastError || 'none'),
+    '--- Error Logs (' + (state.errorLogs || []).length + ') ---'
+  ];
+  (state.errorLogs || []).slice().reverse().forEach(function(lg, idx) {
+    lines.push((idx + 1) + '. [' + lg.ts + '] (' + lg.source + ') ' + lg.message + (lg.detail ? ' | ' + lg.detail : ''));
+  });
+  return lines.join('\n');
+}
+
+loadErrorLogs();
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', function(ev) {
+    recordClientError('runtime', ev && ev.message ? ev.message : 'Script error');
+  });
+  window.addEventListener('unhandledrejection', function(ev) {
+    recordClientError('promise', ev && ev.reason ? ev.reason : 'Unhandled rejection');
+  });
+}
+
+function coalesceOutbox_() {
+  var list = Array.isArray(state.pendingOutbox) ? state.pendingOutbox.slice() : [];
+  if (list.length <= 1) return;
+  var compacted = [];
+  for (var i = 0; i < list.length; i++) {
+    var cur = list[i];
+    var isStart = cur && cur.funcName === 'apiStartAction';
+    var isSleepStart = isStart && cur.payload && cur.payload.isSleepCard;
+    if (isStart && !isSleepStart) {
+      var hasLaterSameOrComplete = false;
+      for (var j = i + 1; j < list.length; j++) {
+        var nxt = list[j];
+        if (nxt && (nxt.funcName === 'apiStartAction' || nxt.funcName === 'apiCompleteAction')) {
+          hasLaterSameOrComplete = true;
+          break;
+        }
+      }
+      if (hasLaterSameOrComplete) {
+        continue;
+      }
+    }
+    compacted.push(cur);
+  }
+  if (compacted.length !== list.length) {
+    state.pendingOutbox = compacted;
+    saveOutbox();
+  }
+}
+
 function enqueueOutboxMutation(funcName, payload) {
   var clientOpId = 'op_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
   var body = (payload && typeof payload === 'object')
@@ -215,46 +321,103 @@ function enqueueOutboxMutation(funcName, payload) {
 }
 
 function flushOutbox() {
+  coalesceOutbox_();
   if (state.isFlushingOutbox || !state.pendingOutbox || state.pendingOutbox.length === 0) {
     return Promise.resolve(true);
   }
   state.isFlushingOutbox = true;
 
-  function processNext() {
+  function buildNextChunk() {
+    var chunk = [];
+    var approxBytes = 0;
+    for (var i = 0; i < state.pendingOutbox.length; i++) {
+      var item = state.pendingOutbox[i];
+      var itemSize = JSON.stringify(item).length;
+      if (chunk.length > 0 && approxBytes + itemSize > 1500000) break;
+      chunk.push(item);
+      approxBytes += itemSize;
+    }
+    return chunk;
+  }
+
+  function processBatch() {
+    coalesceOutbox_();
     if (!state.pendingOutbox || state.pendingOutbox.length === 0) {
       state.isFlushingOutbox = false;
       return Promise.resolve(true);
     }
-    var item = state.pendingOutbox[0];
-    return runMutationApi(item.funcName, state.authKey, item.payload)
+    var chunk = buildNextChunk();
+    return runMutationApi('apiFlushOutboxBatch', state.authKey, chunk)
       .then(function(res) {
         if (!res || !res.authorized) {
           throw new Error((res && res.error) ? res.error : '同期に失敗しました');
         }
-        state.pendingOutbox.shift();
+        var results = Array.isArray(res.results) ? res.results : [];
+        var okIds = {};
+        var firstErr = '';
+        results.forEach(function(r) {
+          if (r && r.ok) {
+            okIds[r.id] = true;
+          } else if (r && r.error && !firstErr) {
+            firstErr = r.error;
+          }
+        });
+        if (results.length === 0) {
+          chunk.forEach(function(c) { okIds[c.id] = true; });
+        }
+        state.pendingOutbox = (state.pendingOutbox || []).filter(function(it) {
+          return !okIds[it.id];
+        });
         saveOutbox();
+
+        if (Array.isArray(res.addedChatMessages) && res.addedChatMessages.length > 0) {
+          res.addedChatMessages.forEach(function(msg) {
+            state.messages.push(msg);
+          });
+        }
+
+        if (firstErr) {
+          state.outboxLastError = firstErr;
+          recordClientError('outbox_batch', firstErr, { remaining: state.pendingOutbox.length });
+          showToast('同期エラー: ' + firstErr);
+          state.isFlushingOutbox = false;
+          if (typeof renderHome === 'function') renderHome();
+          return false;
+        }
+
         if (state.pendingOutbox.length === 0) {
+          state.outboxLastError = '';
           if (!res._stale) {
             applyServerStatePayload(res);
-          }
-          if (res.addedChatMessage) {
-            state.messages.push(res.addedChatMessage);
           }
           saveLocalSnapshot();
           renderAll();
           state.isFlushingOutbox = false;
           return true;
         }
-        return processNext();
+        if (typeof renderHome === 'function') renderHome();
+        return processBatch();
       })
       .catch(function(err) {
+        var msg = (err && err.message) ? err.message : String(err || '通信エラー');
+        state.outboxLastError = msg;
+        recordClientError('outbox_flush', msg, { pendingCount: (state.pendingOutbox || []).length });
+        showToast('同期エラー: ' + msg);
         state.isFlushingOutbox = false;
         if (typeof renderHome === 'function') renderHome();
         return false;
       });
   }
 
-  return processNext();
+  return processBatch();
+}
+
+function discardPendingOutbox() {
+  state.pendingOutbox = [];
+  state.outboxLastError = '';
+  saveOutbox();
+  if (typeof renderHome === 'function') renderHome();
+  syncFromServer(true);
 }
 
 if (typeof window !== 'undefined') {

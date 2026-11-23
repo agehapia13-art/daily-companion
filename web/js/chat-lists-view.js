@@ -610,7 +610,73 @@ function openSettingsModal(errMsg) {
   } else {
     errEl.classList.add('hidden');
   }
+  renderSettingsDiagnostics();
   modal.classList.remove('hidden');
+}
+
+function renderSettingsDiagnostics() {
+  var countEl = document.getElementById('errorLogCount');
+  var previewEl = document.getElementById('settingsErrorLogPreview');
+  var discardBtn = document.getElementById('discardOutboxBtn');
+  var logs = (state && Array.isArray(state.errorLogs)) ? state.errorLogs : [];
+  if (countEl) countEl.textContent = String(logs.length);
+  if (previewEl) {
+    if (logs.length === 0 && !state.outboxLastError) {
+      previewEl.textContent = 'エラーログはありません';
+    } else {
+      previewEl.textContent = buildDiagnosticReportText();
+    }
+  }
+  if (discardBtn) {
+    var pendingCount = (state && state.pendingOutbox) ? state.pendingOutbox.length : 0;
+    discardBtn.classList.toggle('hidden', pendingCount === 0);
+    if (pendingCount > 0) {
+      discardBtn.textContent = '未同期(' + pendingCount + '件)を破棄';
+    }
+  }
+}
+
+function copyDiagnosticLogs() {
+  var text = buildDiagnosticReportText();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(function() { showToast('診断ログをコピーしました'); })
+      .catch(function() { fallbackCopyText_(text); });
+  } else {
+    fallbackCopyText_(text);
+  }
+}
+
+function fallbackCopyText_(text) {
+  try {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('診断ログをコピーしました');
+  } catch (e) {
+    showToast('コピーに失敗しました');
+  }
+}
+
+function clearDiagnosticLogs() {
+  if (typeof clearErrorLogs === 'function') clearErrorLogs();
+  state.outboxLastError = '';
+  renderSettingsDiagnostics();
+  showToast('エラーログをクリアしました');
+}
+
+function confirmDiscardOutbox() {
+  var cnt = (state && state.pendingOutbox) ? state.pendingOutbox.length : 0;
+  if (cnt === 0) return;
+  if (confirm('未同期の記録 ' + cnt + '件 を破棄してサーバーと再同期しますか？')) {
+    closeSettingsModal();
+    if (typeof discardPendingOutbox === 'function') discardPendingOutbox();
+  }
 }
 
 function closeSettingsModal() {

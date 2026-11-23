@@ -88,12 +88,23 @@ function renderHome() {
   var sess = state.fastState.activeSession;
   var pendingCount = (state.pendingOutbox && state.pendingOutbox.length) || 0;
   if (pendingCount > 0 && !sess && !state.reflection) {
-    subEl.textContent = '未同期の記録が' + pendingCount + '件あります（再送待機中）';
+    if (state.outboxLastError) {
+      subEl.textContent = '未同期 ' + pendingCount + '件（エラー: ' + state.outboxLastError + ' / タップで再送・設定）';
+      subEl.onclick = function() { openSettingsModal('同期エラー: ' + state.outboxLastError); };
+    } else {
+      subEl.textContent = '未同期の記録が' + pendingCount + '件あります（タップで今すぐ同期）';
+      subEl.onclick = function() { syncFromServer(true); };
+    }
+    subEl.style.cursor = 'pointer';
     subEl.classList.remove('hidden');
   } else if (state.deltaText && !sess && !state.reflection) {
     subEl.textContent = state.deltaText;
+    subEl.onclick = null;
+    subEl.style.cursor = '';
     subEl.classList.remove('hidden');
   } else {
+    subEl.onclick = null;
+    subEl.style.cursor = '';
     subEl.classList.add('hidden');
   }
 

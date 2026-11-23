@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-23 22:05 JST
+> **最終更新**: 2026-11-23 22:10 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -390,3 +390,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 | **2026-11-23 21:44** | 未同期アウトボックスが1件ずつしか進まず詰まる問題・エラー可視化と診断ログコピー機能の追加 | ① `web/js/state-api.js` に送信前イベント圧縮（`coalesceOutbox_`）と一括バッチ送信、および構造化エラーログ（最大30件永続化）・即時エラー通知を実装。② `src/Api.js` に `apiFlushOutboxBatch` を新設し、複数操作を1リクエストで一括適用（途中の不要な `generateAiDeck` をスキップ）。③ `web/index.html` / `web/js/chat-lists-view.js` / `web/js/home-view.js` に設定画面からの診断ログワンタップコピー・未同期破棄導線を追加（`dc-pwa-v34`）。 |
 | **2026-11-23 21:51** | 「今日は提案しない」に回したカードのタイトルがAIに渡らず時間帯違いの類似カードが提案される問題 | `web/js/home-view.js`（`dismissCardToday`）と `src/Api.js`（`apiDismissCardToday`）で `dismissedToday[cardId]` にカードタイトルを保持し、`src/DeckEngine.js` の `【除外・既出（本日完了/非表示/重複回避対象）】` へタイトルを渡すよう修正（`dc-pwa-v35`）。 |
 | **2026-11-23 22:05** | PWAバックグラウンド移行時の `Load failed` 防止とリビジョン差分同期による高速化 | ① `web/js/state-api.js` の `callServerApi` で60KB未満のリクエストに `keepalive: true` を付与し、画面を閉じた直後の通信途絶を防止。② `src/FastState.js` に `revision` 管理を追加し、`src/Api.js`（`apiGetHomeBootstrap`）および `syncFromServer` でリビジョン一致時はスプレッドシート・カレンダーAPI読込をスキップして即応するよう改善（`dc-pwa-v36`）。 |
+| **2026-11-23 22:10** | 「少しだるい」押下時に未実施の「無音で耳を休める」カードが毎回出る問題 | `src/Prompts.js`（`getDefaultPromptDeck`）およびスプレッドシート `prompt_deck` 第6項（`low_cards`）を、否定形の禁止ルールから「【時間軸】【直前完了】【本日のログ要約】の事実のみを根拠にし、【プロファイル】の属性から連想した未実施作業のケアを作らない」という肯定形・参照境界の原則へ改訂。 |

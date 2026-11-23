@@ -537,8 +537,9 @@ function apiSendChat(authKey, messagePayload) {
       if (taskRes.length > 0 && aiResult.task_actions.some(a => a.action === 'complete' || a.action === 'delete')) {
         deckNeedsRefresh = 'check_low_cards';
         aiResult.task_actions.forEach(a => {
-          if ((a.action === 'complete' || a.action === 'delete') && a.id) {
-            chatCompletedIds.push(String(a.id));
+          const tid = a.task_id || a.id;
+          if ((a.action === 'complete' || a.action === 'delete') && tid) {
+            chatCompletedIds.push(String(tid));
           }
         });
       }

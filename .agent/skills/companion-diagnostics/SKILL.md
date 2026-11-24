@@ -31,6 +31,20 @@ node scripts/sheet-cli.js get-prompt prompt_deck
 node scripts/sheet-cli.js get-tasks
 ```
 
+### A-2. Cloudflare D1 データベース ＆ Workers ログ（v2 高速バックエンド）
+Cloudflare Workers + D1 を利用している場合、リアルタイムの正本データは D1 に保存されます（スプレッドシートは非同期ミラー）。
+
+```bash
+# 1. D1 の主要テーブル件数・状態を確認
+cd workers && npx wrangler d1 execute companion-db --remote --command="SELECT (SELECT COUNT(*) FROM tasks) as tasks, (SELECT COUNT(*) FROM shopping) as shopping, (SELECT COUNT(*) FROM logs) as logs, (SELECT COUNT(*) FROM mirror_queue) as mirror_err;"
+
+# 2. D1 の fast_state や直近ログを確認
+cd workers && npx wrangler d1 execute companion-db --remote --command="SELECT day_key, revision, updated_at FROM fast_state WHERE id=1;"
+
+# 3. Workers のリアルタイム実行ログ・エラーを監視
+cd workers && npx wrangler tail
+```
+
 ### B. 日報・月報・長期記憶（Notion）
 正本は Notion データベース（日報 DB / 月報 DB）。
 日報・月報の生成結果（`summary`、トーン、出来事の記録状況等）や長期記憶を確認する場合は、**Notion MCP ツール（`notion_notion` または `notion-mcp-server`）** を使用して検索・取得する。

@@ -39,7 +39,7 @@ try {
         if (name === "edit_file" || name === "write_file") {
           const args = tc.args || tc.arguments || {};
           const targetPath = String(args.Path || args.path || "").replace(/\\/g, "/");
-          if (/(^|\/)(src|web)\//.test(targetPath)) {
+          if (/(^|\/)(src|web|workers)\//.test(targetPath)) {
             editedCodeInThisChat = true;
             break;
           }
@@ -73,7 +73,7 @@ for (const line of status.split("\n")) {
   let filePath = line.slice(3).trim();
   if (filePath.includes(" -> ")) filePath = filePath.split(" -> ").pop().trim();
   filePath = filePath.replace(/^"|"$/g, "");
-  if (filePath.startsWith("src/") || filePath.startsWith("web/")) hasCode = true;
+  if (filePath.startsWith("src/") || filePath.startsWith("web/") || filePath.startsWith("workers/")) hasCode = true;
   if (filePath === "README.md") hasReadme = true;
   if (filePath === "SPEC.md") hasSpec = true;
 }

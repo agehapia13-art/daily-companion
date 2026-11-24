@@ -1865,7 +1865,7 @@
           <button type="button" id="discardOutboxBtn" onclick="confirmDiscardOutbox()" class="settings-row-btn hidden" style="flex:1;justify-content:center;padding:8px 10px;font-size:12px;color:#ef4444;">未同期を破棄</button>
         </div>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v37</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v38</div>
     </div>
   </div>
 
@@ -1983,9 +1983,6 @@
           body: bodyStr,
           redirect: 'follow'
         };
-        if (bodyStr.length < 60000) {
-          fetchOpts.keepalive = true;
-        }
         fetch(state.apiUrl, fetchOpts)
           .then(function(r) {
             if (!r.ok) throw new Error('HTTPエラー: ' + r.status);

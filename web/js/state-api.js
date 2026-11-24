@@ -102,9 +102,6 @@ function callServerApi(funcName) {
       body: bodyStr,
       redirect: 'follow'
     };
-    if (bodyStr.length < 60000) {
-      fetchOpts.keepalive = true;
-    }
     fetch(state.apiUrl, fetchOpts)
       .then(function(r) {
         if (!r.ok) throw new Error('HTTPエラー: ' + r.status);

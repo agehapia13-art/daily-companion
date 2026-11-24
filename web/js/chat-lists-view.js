@@ -647,6 +647,26 @@ function copyDiagnosticLogs() {
   }
 }
 
+function runImportFromSheets() {
+  if (!confirm('スプレッドシートの最新データを D1 データベースへ取り込みますか？')) return;
+  var btn = document.getElementById('importSheetsBtn');
+  if (btn) btn.disabled = true;
+  importFromSheets()
+    .then(function(res) {
+      if (btn) btn.disabled = false;
+      if (res && res.error) {
+        showToast('取り込みに失敗しました: ' + res.error);
+        return;
+      }
+      showToast('シートからデータを取り込みました');
+      syncFromServer(true);
+    })
+    .catch(function(err) {
+      if (btn) btn.disabled = false;
+      showToast('取り込みに失敗しました: ' + (err && err.message ? err.message : String(err || '不明なエラー')));
+    });
+}
+
 function fallbackCopyText_(text) {
   try {
     var ta = document.createElement('textarea');

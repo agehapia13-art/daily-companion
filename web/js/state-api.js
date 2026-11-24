@@ -539,6 +539,10 @@ function syncFromServer(manual) {
     });
 }
 
+function importFromSheets() {
+  return callServerApi('apiImportFromSheets', state.authKey);
+}
+
 /* Image compression (handles vertical tall screenshots safely) */
 
 function compressImageToJpeg(file) {

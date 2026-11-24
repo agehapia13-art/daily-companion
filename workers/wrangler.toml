@@ -1,0 +1,22 @@
+name = "companion-cockpit-api"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "companion-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[vars]
+JAPAN_HOLIDAY_CALENDAR_ID = "ja.japanese#holiday@group.v.calendar.google.com"
+DEFAULT_HOUSEHOLD_CALENDAR_ID = "8790a51c6413d18fecb9b205b369457de35817ae84d8e4860cefa6ff35488f4b@group.calendar.google.com"
+HOME_LATITUDE = "35.3970"
+HOME_LONGITUDE = "139.6179"
+HOME_NAME = "自宅(横浜市磯子区)"
+WORK_LATITUDE = "35.6580"
+WORK_LONGITUDE = "139.7016"
+WORK_NAME = "職場(渋谷)"

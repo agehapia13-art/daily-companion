@@ -1,0 +1,1200 @@
+import { getWorkModeAndBoundary } from './calendar';
+import {
+  appendLog,
+  applyInputStockActions,
+  applyTaskActions,
+  buildListsSnapshot,
+  getInputStockList,
+  getLogicalTodayLogs,
+  getMemory,
+  getRoutines,
+  getShoppingList,
+  getTasks,
+  isOpProcessed,
+  loadFastState,
+  markOpProcessed,
+  saveFastState,
+  setMemoryValue,
+  toggleShoppingItemById,
+  updateCycleStampsSafely
+} from './db';
+import {
+  buildDailyBriefingObj,
+  buildDeltaText,
+  composeHomeDeck,
+  generateAiDeck
+} from './deck-engine';
+import { uploadBase64ImageToDrive } from './media';
+import { importAllFromSheets } from './sheets-import';
+import { MirrorEvent, mirrorToSheets } from './sheets-mirror';
+import {
+  ActiveSession,
+  Env,
+  FastState,
+  LogEntry,
+  MemoryMap
+} from './types';
+import {
+  formatJstDateTime,
+  formatJstIso,
+  formatJstYmd,
+  getLogicalDayKey,
+  jsonResponse,
+  parsePositiveEstimatedMins
+} from './utils';
+import {
+  fetchWeatherAndPressure,
+  formatWeatherLineForHome,
+  isWeatherStale,
+  refreshBriefingWeatherLine
+} from './weather';
+
+// =============================================================================
+// 1. 認証 & 共通ヘルパー
+// =============================================================================
+
+function verifyDashboardAccess(env: Env, authKey: unknown): boolean {
+  const expected = String(env.DASHBOARD_ACCESS_KEY || '').trim();
+  const actual = String(authKey ?? '').trim();
+  return Boolean(expected && actual && expected === actual);
+}
+
+function unauthorizedPayload() {
+  return {
+    authorized: false,
+    error: '認証キーが正しくありません。設定画面からオーナー認証キーを確認してください。'
+  };
+}
+
+function getTomorrowYmd(now: Date): string {
+  return formatJstYmd(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+}
+
+function buildCondensedLogsFromArray(logsList: LogEntry[]): string {
+  if (!logsList || logsList.length === 0) return '';
+  const lines: string[] = [];
+  const valid = logsList.filter((l) => l && l.message && String(l.message).trim() !== '');
+  for (let i = 0; i < valid.length; i++) {
+    const l = valid[i];
+    const ts = String(l.timestampStr || '');
+    const hhmm = ts.length >= 16 ? ts.substring(11, 16) : '';
+    lines.push((hhmm ? `${hhmm} ` : '') + 'User: ' + String(l.message).trim());
+    if (l.aiReply && String(l.aiReply).trim()) {
+      const cleaned = String(l.aiReply)
+        .split('\n')
+        .filter((line) => {
+          const t = line.trim();
+          return (
+            t &&
+            !/^\[スタンプ:/.test(t) &&
+            !/^(📝|✅|🗑️|📅|🛒|🎬|🔄|📌)/.test(t)
+          );
+        })
+        .join(' ')
+        .trim();
+      if (cleaned) {
+        const isRecent = i >= valid.length - 4;
+        lines.push(
+          'AI: ' + (isRecent || cleaned.length <= 80 ? cleaned : cleaned.substring(0, 80) + '...')
+        );
+      }
+    }
+  }
+  return lines.join('\n');
+}
+
+function extractBadgesAndDocLinks(noticeLines: string[]): {
+  badges: string[];
+  docLinks: Array<{ label: string; url: string }>;
+} {
+  const badges: string[] = [];
+  const docLinks: Array<{ label: string; url: string }> = [];
+  const seenUrls: Record<string, boolean> = {};
+  const docUrlRegex = /(https:\/\/(?:docs\.google\.com\/document|drive\.google\.com\/drive\/folders)\/[^\s)\]]+)/g;
+
+  for (let i = 0; i < (noticeLines || []).length; i++) {
+    let line = String(noticeLines[i] || '').trim();
+    if (!line) continue;
+    const matches = line.match(docUrlRegex);
+    if (matches && matches.length > 0) {
+      for (const url of matches) {
+        if (!seenUrls[url]) {
+          seenUrls[url] = true;
+          let label = line
+            .replace(url, '')
+            .replace(/\(\s*\)|（\s*）/g, '')
+            .replace(/^((?:📁|📄|🔗)\s*(?:資料作成|フォルダ作成|資料|フォルダ|タスク紐付)?[:：]?\s*)/, '')
+            .replace(/[(（]\s*$/, '')
+            .trim();
+          if (!label) {
+            label = url.indexOf('/folders/') !== -1 ? 'Driveフォルダを開く' : '関連資料を開く';
+          }
+          docLinks.push({ label, url });
+        }
+        line = line.replace(url, '').replace(/\(\s*\)/g, '').replace(/\s{2,}/g, ' ').trim();
+      }
+    }
+    if (line) {
+      badges.push(line);
+    }
+  }
+  return { badges, docLinks };
+}
+
+function buildChatLogEntryObject(entry: {
+  id?: string | number;
+  timestampStr: string;
+  message: string;
+  imageUrl: string;
+  aiReply: string;
+}) {
+  const tsStr = String(entry.timestampStr || '');
+  const hhmm = tsStr.length >= 16 ? tsStr.substring(11, 16) : '';
+  const userText = String(entry.message || '')
+    .replace(/\n?\[画像内容:[\s\S]*$/g, '')
+    .trim();
+  const imageUrls = String(entry.imageUrl || '')
+    .split('\n')
+    .map((u) => u.trim())
+    .filter(Boolean);
+
+  const lines = String(entry.aiReply || '').split('\n');
+  let reactionEmoji = '';
+  const bodyLines: string[] = [];
+  const noticeLines: string[] = [];
+  const noticePattern = /^(📝|✅|🗑️|📅|🛒|🎬|💡|🔄|📁|📄|🔗|📌)\s+/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!t) {
+      if (bodyLines.length > 0) bodyLines.push('');
+      continue;
+    }
+    const stampMatch = t.match(/^\[スタンプ:\s*([^\]]+)\]$/);
+    if (stampMatch) {
+      reactionEmoji = stampMatch[1].trim();
+    } else if (noticePattern.test(t)) {
+      noticeLines.push(t);
+    } else {
+      bodyLines.push(lines[i]);
+    }
+  }
+
+  const aiText = bodyLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  const parsedNotices = extractBadgesAndDocLinks(noticeLines);
+
+  return {
+    id: entry.id || 'LOG_' + tsStr,
+    time: hhmm,
+    timestampStr: tsStr,
+    userText,
+    imageUrls,
+    reactionEmoji,
+    aiText,
+    badges: parsedNotices.badges,
+    docLinks: parsedNotices.docLinks
+  };
+}
+
+function buildChatMessagesFromLogs(logs: LogEntry[]) {
+  return logs
+    .filter((entry) => entry.sender !== 'system')
+    .map((entry, idx) => {
+      const item = buildChatLogEntryObject(entry);
+      item.id = `LOG_${idx}_${item.time}`;
+      return item;
+    });
+}
+
+function buildActiveSessionFromPayload(c: Record<string, any>, now: Date, nowIso: string): ActiveSession {
+  return {
+    id: String(c.id || `custom_${now.getTime()}`),
+    title: String(c.title || '行動').trim(),
+    sub: String(c.sub || '').trim(),
+    icon: String(c.icon || 'compass'),
+    mins: parsePositiveEstimatedMins(c.mins) || 30,
+    isAnchor: Boolean(c.isAnchor),
+    isSleepCard: Boolean(c.isSleepCard),
+    isWorkBlock: Boolean(c.isWorkBlock),
+    isTriage: Boolean(c.isTriage),
+    isCustom: Boolean(c.isCustom),
+    linkedType: String(c.linkedType || 'none'),
+    linkedId: String(c.linkedId || ''),
+    cycleStampLabel: String(c.cycleStampLabel || ''),
+    triageTaskIds: Array.isArray(c.triageTaskIds) ? c.triageTaskIds.map(String) : [],
+    startedAtMs: Number(c.startedAtMs) > 0 ? Number(c.startedAtMs) : now.getTime(),
+    startedAtIso: nowIso
+  };
+}
+
+async function executeCompleteSessionCore(
+  env: Env,
+  fastState: FastState,
+  p: Record<string, any>,
+  now: Date,
+  nowStr: string,
+  nowIso: string,
+  logicalDayStr: string,
+  logIdxOffset: number
+): Promise<{
+  notices: string[];
+  addedChatMessage: ReturnType<typeof buildChatLogEntryObject>;
+  mirrorEvents: MirrorEvent[];
+}> {
+  const session = (p.session || fastState.activeSession || {}) as Record<string, any>;
+  const mood = String(p.mood || '').trim();
+  const note = String(p.note || '').trim();
+  const keepOpen = Boolean(p.keepOpen);
+  let photoUrl = '';
+  if (p.photoBase64) {
+    const savedImg = await uploadBase64ImageToDrive(
+      env,
+      String(p.photoBase64),
+      String(p.photoMimeType || 'image/jpeg'),
+      'reflect'
+    );
+    photoUrl = savedImg.url;
+  }
+
+  const notices: string[] = [];
+  const mirrorEvents: MirrorEvent[] = [];
+  const sessionTitle = String(session.title || '行動').trim();
+
+  try {
+    if (session.isTriage) {
+      const targetIds = Array.isArray(session.triageTaskIds)
+        ? session.triageTaskIds.filter(Boolean).map(String)
+        : [];
+      const tomorrowStr = getTomorrowYmd(now);
+      let idsToMove = targetIds;
+      if (idsToMove.length === 0) {
+        const uncompleted = await getTasks(env, '未完了');
+        idsToMove = uncompleted
+          .filter((t) => t.dueDate && t.dueDate <= logicalDayStr)
+          .slice(0, 5)
+          .map((t) => t.id);
+      }
+      if (idsToMove.length > 0) {
+        const res = await applyTaskActions(
+          env,
+          idsToMove.map((id) => ({
+            action: 'update',
+            task_id: id,
+            due_date: tomorrowStr
+          }))
+        );
+        notices.push(...res.notices);
+      }
+      fastState.triagedToday = true;
+    }
+
+    if (!keepOpen) {
+      if (session.linkedType === 'task' && session.linkedId) {
+        const taskRes = await applyTaskActions(env, [
+          { action: 'complete', task_id: String(session.linkedId) }
+        ]);
+        notices.push(...taskRes.notices);
+      } else if (session.linkedType === 'stock' && session.linkedId) {
+        const stockRes = await applyInputStockActions(env, [
+          { action: 'complete', title: String(session.linkedId) }
+        ]);
+        notices.push(...stockRes.notices);
+      }
+    }
+
+    if (session.cycleStampLabel) {
+      const updated = await updateCycleStampsSafely(env, [
+        `${session.cycleStampLabel}: ${logicalDayStr}`
+      ]);
+      if (updated && updated.length > 0) {
+        updated.forEach((entry) => notices.push(`📌 周期スタンプ更新: ${entry}`));
+        const latestMem = await getMemory(env);
+        mirrorEvents.push({
+          type: 'set_memory',
+          key: 'cycle_stamps',
+          value: latestMem.cycle_stamps || ''
+        });
+      }
+    }
+  } catch (applyErr) {
+    console.error('完了反映エラー:', applyErr instanceof Error ? applyErr.message : String(applyErr));
+  }
+
+  if (session.id && !session.isCustom && !session.isSleepCard) {
+    fastState.completedToday[String(session.id)] = true;
+  }
+  if (!keepOpen && session.linkedType === 'task' && session.linkedId) {
+    fastState.completedToday[String(session.linkedId)] = true;
+  }
+  fastState.activeSession = null;
+  fastState.lastAction = {
+    title: session.isSleepCard ? '睡眠・起床' : sessionTitle,
+    completedAt: nowIso,
+    isSleep: Boolean(session.isSleepCard)
+  };
+
+  const startedMs = Number(session.startedAtMs) || 0;
+  const elapsedMins =
+    startedMs > 0 ? Math.max(1, Math.round((now.getTime() - startedMs) / 60000)) : 0;
+  let userMsg = '';
+  if (session.isSleepCard) {
+    const sleepDur =
+      elapsedMins > 0
+        ? elapsedMins >= 60
+          ? `${Math.floor(elapsedMins / 60)}時間${elapsedMins % 60 > 0 ? (elapsedMins % 60) + '分' : ''}`
+          : `${elapsedMins}分`
+        : '';
+    userMsg = `起きました（おはよう${sleepDur ? ' · 睡眠 ' + sleepDur : ''}）`;
+  } else if (session.isTriage) {
+    userMsg = `【引き算】${sessionTitle}`;
+  } else if (keepOpen) {
+    userMsg = `【進行】${sessionTitle}${elapsedMins > 0 ? `（実測${elapsedMins}分）` : ''}`;
+  } else {
+    userMsg = `【完了】${sessionTitle}${elapsedMins > 0 ? `（実測${elapsedMins}分）` : ''}`;
+  }
+
+  const detailParts: string[] = [];
+  if (mood) detailParts.push(`気分: ${mood}`);
+  if (note) detailParts.push(note);
+  if (detailParts.length > 0) {
+    userMsg += `\n${detailParts.join(' / ')}`;
+  }
+
+  const emoji = session.isSleepCard ? '☀️' : session.isTriage ? '🌿' : '✨';
+  const aiReplyLines = [`[スタンプ: ${emoji}]`];
+  if (notices.length > 0) {
+    aiReplyLines.push(notices.join('\n'));
+  }
+  const aiReplyStr = aiReplyLines.join('\n');
+
+  const logEntry: LogEntry = {
+    timestampStr: nowStr,
+    sender: 'user',
+    message: userMsg,
+    imageUrl: photoUrl,
+    aiReply: aiReplyStr
+  };
+
+  try {
+    await appendLog(env, logEntry);
+    mirrorEvents.push({ type: 'append_log', entry: logEntry });
+  } catch (logErr) {
+    console.error('完了ログ追記エラー:', logErr instanceof Error ? logErr.message : String(logErr));
+  }
+
+  const addedChatMessage = buildChatLogEntryObject({
+    id: `LOG_${now.getTime() + logIdxOffset}`,
+    timestampStr: nowStr,
+    message: userMsg,
+    imageUrl: photoUrl,
+    aiReply: aiReplyStr
+  });
+
+  return { notices, addedChatMessage, mirrorEvents };
+}
+
+// =============================================================================
+// 2. Public API Endpoints
+// =============================================================================
+
+export async function apiGetHomeBootstrap(
+  env: Env,
+  ctx: ExecutionContext,
+  authKey: string,
+  options?: { force?: boolean; clientRevision?: number }
+) {
+  if (!verifyDashboardAccess(env, authKey)) {
+    return unauthorizedPayload();
+  }
+
+  const opts = options && typeof options === 'object' ? options : {};
+  const force = Boolean(opts.force);
+  const clientRevision = Number(opts.clientRevision) || 0;
+
+  const now = new Date();
+  const todayStr = formatJstYmd(now);
+
+  const [fastState, memory, workBoundary] = await Promise.all([
+    loadFastState(env, now),
+    getMemory(env),
+    getWorkModeAndBoundary(env, now)
+  ]);
+
+  if (
+    !force &&
+    clientRevision > 0 &&
+    Number(fastState.revision) === clientRevision &&
+    fastState.dailyBriefing &&
+    fastState.dailyBriefing.dateKey === fastState.dayKey &&
+    fastState.aiDeck &&
+    Array.isArray(fastState.aiDeck.cards) &&
+    fastState.aiDeck.cards.length > 0
+  ) {
+    return {
+      authorized: true,
+      unchanged: true,
+      revision: fastState.revision,
+      deltaText: buildDeltaText(fastState.lastAction, now)
+    };
+  }
+
+  let stateDirty = false;
+  const mirrorEvents: MirrorEvent[] = [];
+
+  if (isWeatherStale(fastState, workBoundary.workMode, memory.weather_info, now)) {
+    try {
+      const freshW = await fetchWeatherAndPressure(env, workBoundary.workMode === 'commute');
+      if (freshW && freshW.weatherInfo) {
+        memory.weather_info = freshW.weatherInfo;
+        memory.pressure_alert = freshW.pressureAlert;
+        await Promise.all([
+          setMemoryValue(env, 'weather_info', freshW.weatherInfo),
+          setMemoryValue(env, 'pressure_alert', freshW.pressureAlert)
+        ]);
+        mirrorEvents.push(
+          { type: 'set_memory', key: 'weather_info', value: freshW.weatherInfo },
+          { type: 'set_memory', key: 'pressure_alert', value: freshW.pressureAlert }
+        );
+        fastState.weatherFetchedAt = formatJstIso(now);
+        refreshBriefingWeatherLine(
+          fastState,
+          memory.weather_info,
+          memory.pressure_alert,
+          workBoundary.workMode
+        );
+        stateDirty = true;
+      }
+    } catch (wErr) {
+      console.warn('Bootstrap 天気更新警告:', wErr instanceof Error ? wErr.message : String(wErr));
+    }
+  }
+
+  const [lists, todayLogs] = await Promise.all([
+    buildListsSnapshot(env, memory, now),
+    getLogicalTodayLogs(env, now)
+  ]);
+
+  if (!fastState.dailyBriefing || fastState.dailyBriefing.dateKey !== fastState.dayKey) {
+    const uncompletedTasks = lists.tasks.filter((t) => !t.done && t.status !== '完了');
+    fastState.dailyBriefing = buildDailyBriefingObj(
+      memory.weather_info,
+      memory.pressure_alert,
+      workBoundary.workMode,
+      workBoundary.todayEvents,
+      uncompletedTasks,
+      todayStr,
+      now
+    );
+    stateDirty = true;
+  }
+
+  if (
+    !fastState.aiDeck ||
+    !Array.isArray(fastState.aiDeck.cards) ||
+    fastState.aiDeck.cards.length === 0
+  ) {
+    fastState.aiDeck = await generateAiDeck(env, {
+      reason: 'bootstrap_fallback',
+      now,
+      memory,
+      fastState,
+      workMode: workBoundary.workMode,
+      todayEvents: workBoundary.todayEvents,
+      boundaryInfo: workBoundary.boundaryInfo,
+      tasks: lists.tasks,
+      stock: lists.stock,
+      todayLogsText: buildCondensedLogsFromArray(todayLogs),
+      useFlashModel: false
+    });
+    stateDirty = true;
+  }
+
+  fastState.listCache = lists;
+  if (stateDirty) {
+    await saveFastState(env, fastState);
+    mirrorEvents.push({ type: 'sync_snapshot' });
+  }
+  if (mirrorEvents.length > 0) {
+    ctx.waitUntil(mirrorToSheets(env, mirrorEvents));
+  }
+
+  const deck = composeHomeDeck(workBoundary.workMode, now, fastState);
+  const weatherLine = formatWeatherLineForHome(
+    memory.weather_info,
+    memory.pressure_alert,
+    workBoundary.workMode
+  );
+  const chatMessages = buildChatMessagesFromLogs(todayLogs);
+
+  return {
+    authorized: true,
+    validKey: env.DASHBOARD_ACCESS_KEY,
+    state: fastState,
+    deck,
+    boundary: workBoundary.heroBoundary,
+    workMode: workBoundary.workMode,
+    isHoliday: workBoundary.isHoliday,
+    weatherLine,
+    weatherInfo: memory.weather_info || '',
+    pressureAlert: memory.pressure_alert || 'FALSE',
+    deltaText: buildDeltaText(fastState.lastAction, now),
+    lists,
+    chatMessages
+  };
+}
+
+export async function apiStartAction(
+  env: Env,
+  ctx: ExecutionContext,
+  authKey: string,
+  cardPayload?: Record<string, any>
+) {
+  if (!verifyDashboardAccess(env, authKey)) {
+    return unauthorizedPayload();
+  }
+
+  const now = new Date();
+  const nowStr = formatJstDateTime(now);
+  const nowIso = formatJstIso(now);
+  const fastState = await loadFastState(env, now);
+
+  if (!cardPayload || !cardPayload.title) {
+    fastState.activeSession = null;
+    await saveFastState(env, fastState);
+    ctx.waitUntil(mirrorToSheets(env, [{ type: 'sync_snapshot' }]));
+    return { authorized: true, state: fastState };
+  }
+
+  const session = buildActiveSessionFromPayload(cardPayload, now, nowIso);
+  fastState.activeSession = session;
+  if (fastState.dailyBriefing) {
+    fastState.dailyBriefing.dismissed = true;
+  }
+
+  const [memory, workBoundary] = await Promise.all([
+    getMemory(env),
+    getWorkModeAndBoundary(env, now)
+  ]);
+
+  const mirrorEvents: MirrorEvent[] = [];
+
+  if (session.isSleepCard) {
+    const logEntry: LogEntry = {
+      timestampStr: nowStr,
+      sender: 'user',
+      message: 'これから寝ます（おやすみ）',
+      imageUrl: '',
+      aiReply: '[スタンプ: 🌙]\nおやすみなさい。良い睡眠を。'
+    };
+    try {
+      await appendLog(env, logEntry);
+      mirrorEvents.push({ type: 'append_log', entry: logEntry });
+    } catch (logErr) {
+      console.error('就寝開始ログ追記エラー:', logErr instanceof Error ? logErr.message : String(logErr));
+    }
+  } else if (!session.isWorkBlock) {
+    const [tasks, stock, todayLogs] = await Promise.all([
+      getTasks(env, '未完了'),
+      getInputStockList(env, '未'),
+      getLogicalTodayLogs(env, now)
+    ]);
+    fastState.aiDeck = await generateAiDeck(env, {
+      reason: 'start_action',
+      now,
+      memory,
+      fastState,
+      workMode: workBoundary.workMode,
+      todayEvents: workBoundary.todayEvents,
+      boundaryInfo: workBoundary.boundaryInfo,
+      tasks,
+      stock,
+      todayLogsText: buildCondensedLogsFromArray(todayLogs),
+      startedCard: session,
+      useFlashModel: false
+    });
+  }
+
+  await saveFastState(env, fastState);
+  mirrorEvents.push({ type: 'sync_snapshot' });
+  ctx.waitUntil(mirrorToSheets(env, mirrorEvents));
+
+  const deck = composeHomeDeck(workBoundary.workMode, now, fastState);
+
+  return {
+    authorized: true,
+    state: fastState,
+    activeSession: fastState.activeSession,
+    aiDeck: fastState.aiDeck,
+    deck,
+    boundary: workBoundary.heroBoundary
+  };
+}
+
+export async function apiCompleteAction(
+  env: Env,
+  ctx: ExecutionContext,
+  authKey: string,
+  completePayload?: Record<string, any>
+) {
+  if (!verifyDashboardAccess(env, authKey)) {
+    return unauthorizedPayload();
+  }
+
+  const p = completePayload || {};
+  const clientOpId = String(p.clientOpId || '').trim();
+  const now = new Date();
+  const nowStr = formatJstDateTime(now);
+  const nowIso = formatJstIso(now);
+  const logicalDayStr = getLogicalDayKey(now);
+  const fastState = await loadFastState(env, now);
+
+  if (clientOpId && (await isOpProcessed(env, clientOpId))) {
+    const [memoryDup, workBoundaryDup] = await Promise.all([
+      getMemory(env),
+      getWorkModeAndBoundary(env, now)
+    ]);
+    const listsDup =
+      fastState.listCache || (await buildListsSnapshot(env, memoryDup, now));
+    return {
+      authorized: true,
+      duplicateSkipped: true,
+      state: fastState,
+      deck: composeHomeDeck(workBoundaryDup.workMode, now, fastState),
+      lists: listsDup,
+      boundary: workBoundaryDup.heroBoundary
+    };
+  }
+
+  const { notices, addedChatMessage, mirrorEvents } = await executeCompleteSessionCore(
+    env,
+    fastState,
+    p,
+    now,
+    nowStr,
+    nowIso,
+    logicalDayStr,
+    0
+  );
+
+  const memory = await getMemory(env);
+  const [lists, workBoundary] = await Promise.all([
+    buildListsSnapshot(env, memory, now),
+    getWorkModeAndBoundary(env, now)
+  ]);
+
+  fastState.listCache = lists;
+  await saveFastState(env, fastState);
+
+  if (clientOpId) {
+    await markOpProcessed(env, clientOpId);
+  }
+
+  mirrorEvents.push({ type: 'sync_snapshot' });
+  ctx.waitUntil(mirrorToSheets(env, mirrorEvents));
+
+  const deck = composeHomeDeck(workBoundary.workMode, now, fastState);
+
+  return {
+    authorized: true,
+    state: fastState,
+    deck,
+    lists,
+    boundary: workBoundary.heroBoundary,
+    deltaText: buildDeltaText(fastState.lastAction, now),
+    notices,
+    addedChatMessage
+  };
+}
+
+export async function apiDismissCardToday(
+  env: Env,
+  ctx: ExecutionContext,
+  authKey: string,
+  cardId?: string,
+  cardTitle?: string
+) {
+  if (!verifyDashboardAccess(env, authKey)) {
+    return unauthorizedPayload();
+  }
+
+  const now = new Date();
+  const fastState = await loadFastState(env, now);
+
+  if (cardId) {
+    const cleanTitle = cardTitle && String(cardTitle).trim() ? String(cardTitle).trim() : '';
+    fastState.dismissedToday[String(cardId)] = cleanTitle || true;
+    if (cardId === '__briefing__' && fastState.dailyBriefing) {
+      fastState.dailyBriefing.dismissed = true;
+    }
+    await saveFastState(env, fastState);
+    ctx.waitUntil(mirrorToSheets(env, [{ type: 'sync_snapshot' }]));
+  }
+
+  const workBoundary = await getWorkModeAndBoundary(env, now);
+  const deck = composeHomeDeck(workBoundary.workMode, now, fastState);
+
+  return {
+    authorized: true,
+    state: fastState,
+    deck
+  };
+}
+
+export async function apiMutateListItem(
+  env: Env,
+  ctx: ExecutionContext,
+  authKey: string,
+  mutation?: Record<string, any>
+) {
+  if (!verifyDashboardAccess(env, authKey)) {
+    return unauthorizedPayload();
+  }
+
+  const m = mutation || {};
+  const listType = String(m.listType || 'shopping');
+  if (listType === 'shopping' && m.action === 'toggle' && m.rowIndex) {
+    await toggleShoppingItemById(env, Number(m.rowIndex), Boolean(m.done));
+  } else {
+    throw new Error('未対応のリスト操作です。');
+  }
+
+  const now = new Date();
+  const [fastState, memory] = await Promise.all([loadFastState(env, now), getMemory(env)]);
+  const lists = await buildListsSnapshot(env, memory, now);
+  fastState.listCache = lists;
+  await saveFastState(env, fastState);
+  ctx.waitUntil(mirrorToSheets(env, [{ type: 'sync_snapshot' }]));
+
+  return {
+    authorized: true,
+    lists
+  };
+}
+
+export async function apiFlushOutboxBatch(
+  env: Env,
+  ctx: ExecutionContext,
+  authKey: string,
+  ops?: Array<{ id?: string; funcName?: string; payload?: any }>
+) {
+  if (!verifyDashboardAccess(env, authKey)) {
+    return unauthorizedPayload();
+  }
+
+  const operations = Array.isArray(ops) ? ops : [];
+  const now = new Date();
+  const nowStr = formatJstDateTime(now);
+  const nowIso = formatJstIso(now);
+  const logicalDayStr = getLogicalDayKey(now);
+
+  const [fastState, memory, workBoundary] = await Promise.all([
+    loadFastState(env, now),
+    getMemory(env),
+    getWorkModeAndBoundary(env, now)
+  ]);
+
+  const results: Array<{ id: string; ok: boolean; duplicateSkipped?: boolean; error?: string }> = [];
+  const addedChatMessages: Array<ReturnType<typeof buildChatLogEntryObject>> = [];
+  const mirrorEvents: MirrorEvent[] = [];
+  let needAiDeckForActive = false;
+
+  for (let i = 0; i < operations.length; i++) {
+    const op = operations[i] || {};
+    const opId = String(op.id || (op.payload && op.payload.clientOpId) || '').trim();
+    const funcName = String(op.funcName || '').trim();
+    const p = op.payload;
+
+    try {
+      if (opId && (await isOpProcessed(env, opId))) {
+        results.push({ id: opId, ok: true, duplicateSkipped: true });
+        continue;
+      }
+
+      if (funcName === 'apiStartAction' || funcName === 'start_action') {
+        if (!p || !p.title) {
+          fastState.activeSession = null;
+          needAiDeckForActive = false;
+        } else {
+          const session = buildActiveSessionFromPayload(p, now, nowIso);
+          fastState.activeSession = session;
+          if (fastState.dailyBriefing) {
+            fastState.dailyBriefing.dismissed = true;
+          }
+          if (session.isSleepCard) {
+            const logEntry: LogEntry = {
+              timestampStr: nowStr,
+              sender: 'user',
+              message: 'これから寝ます（おやすみ）',
+              imageUrl: '',
+              aiReply: '[スタンプ: 🌙]\nおやすみなさい。良い睡眠を。'
+            };
+            await appendLog(env, logEntry);
+            mirrorEvents.push({ type: 'append_log', entry: logEntry });
+            needAiDeckForActive = false;
+          } else {
+            needAiDeckForActive = !session.isWorkBlock;
+          }
+        }
+        if (opId) await markOpProcessed(env, opId);
+        results.push({ id: opId, ok: true });
+      } else if (funcName === 'apiCompleteAction' || funcName === 'complete_action') {
+        const cp = (p && typeof p === 'object' ? p : {}) as Record<string, any>;
+        const completed = await executeCompleteSessionCore(
+          env,
+          fastState,
+          cp,
+          now,
+          nowStr,
+          nowIso,
+          logicalDayStr,
+          i
+        );
+        needAiDeckForActive = false;
+        addedChatMessages.push(completed.addedChatMessage);
+        mirrorEvents.push(...completed.mirrorEvents);
+        if (opId) await markOpProcessed(env, opId);
+        results.push({ id: opId, ok: true });
+      } else if (funcName === 'apiDismissCardToday' || funcName === 'dismiss_card') {
+        const dp = (p && typeof p === 'object' ? p : {}) as Record<string, any>;
+        const cid = String(dp.cardId || '').trim();
+        if (cid) {
+          const cleanTitle = dp.cardTitle && String(dp.cardTitle).trim() ? String(dp.cardTitle).trim() : '';
+          fastState.dismissedToday[cid] = cleanTitle || true;
+          if (cid === '__briefing__' && fastState.dailyBriefing) {
+            fastState.dailyBriefing.dismissed = true;
+          }
+        }
+        if (opId) await markOpProcessed(env, opId);
+        results.push({ id: opId, ok: true });
+      } else if (funcName === 'apiMutateListItem' || funcName === 'mutate_list') {
+        const mp = (p && typeof p === 'object' ? p : {}) as Record<string, any>;
+        const listType = String(mp.listType || 'shopping');
+        if (listType === 'shopping' && mp.action === 'toggle' && mp.rowIndex) {
+          await toggleShoppingItemById(env, Number(mp.rowIndex), Boolean(mp.done));
+        } else {
+          throw new Error('未対応のリスト操作です。');
+        }
+        if (opId) await markOpProcessed(env, opId);
+        results.push({ id: opId, ok: true });
+      } else {
+        results.push({
+          id: opId,
+          ok: false,
+          error: 'Unsupported batch operation: ' + funcName
+        });
+      }
+    } catch (opErr) {
+      console.error(
+        `apiFlushOutboxBatch op エラー (${funcName}):`,
+        opErr instanceof Error ? opErr.message : String(opErr)
+      );
+      results.push({
+        id: opId,
+        ok: false,
+        error: opErr instanceof Error ? opErr.message : String(opErr)
+      });
+    }
+  }
+
+  const latestMemory = await getMemory(env);
+  const [lists, todayLogs] = await Promise.all([
+    buildListsSnapshot(env, latestMemory, now),
+    needAiDeckForActive ? getLogicalTodayLogs(env, now) : Promise.resolve([])
+  ]);
+
+  if (fastState.activeSession && needAiDeckForActive) {
+    try {
+      fastState.aiDeck = await generateAiDeck(env, {
+        reason: 'start_action',
+        now,
+        memory: latestMemory,
+        fastState,
+        workMode: workBoundary.workMode,
+        todayEvents: workBoundary.todayEvents,
+        boundaryInfo: workBoundary.boundaryInfo,
+        tasks: lists.tasks,
+        stock: lists.stock,
+        todayLogsText: buildCondensedLogsFromArray(todayLogs),
+        startedCard: fastState.activeSession,
+        useFlashModel: false
+      });
+    } catch (deckErr) {
+      console.error(
+        'apiFlushOutboxBatch aiDeck エラー:',
+        deckErr instanceof Error ? deckErr.message : String(deckErr)
+      );
+    }
+  }
+
+  fastState.listCache = lists;
+  await saveFastState(env, fastState);
+
+  mirrorEvents.push({ type: 'sync_snapshot' });
+  ctx.waitUntil(mirrorToSheets(env, mirrorEvents));
+
+  const deck = composeHomeDeck(workBoundary.workMode, now, fastState);
+
+  return {
+    authorized: true,
+    results,
+    state: fastState,
+    deck,
+    lists,
+    boundary: workBoundary.heroBoundary,
+    deltaText: buildDeltaText(fastState.lastAction, now),
+    addedChatMessages
+  };
+}
+
+export async function apiRefreshDeck(
+  env: Env,
+  ctx: ExecutionContext,
+  authKey: string,
+  excludeIds?: string[]
+) {
+  if (!verifyDashboardAccess(env, authKey)) {
+    return unauthorizedPayload();
+  }
+
+  const now = new Date();
+  const [fastState, memory, workBoundary, todayLogs] = await Promise.all([
+    loadFastState(env, now),
+    getMemory(env),
+    getWorkModeAndBoundary(env, now),
+    getLogicalTodayLogs(env, now)
+  ]);
+
+  const lists = await buildListsSnapshot(env, memory, now);
+
+  const existingTitles =
+    fastState.aiDeck && Array.isArray(fastState.aiDeck.cards)
+      ? fastState.aiDeck.cards.map((c) => c.title)
+      : [];
+  const excludes = (Array.isArray(excludeIds) ? excludeIds : []).concat(existingTitles);
+
+  const freshDeck = await generateAiDeck(env, {
+    reason: 'refresh',
+    now,
+    memory,
+    fastState,
+    workMode: workBoundary.workMode,
+    todayEvents: workBoundary.todayEvents,
+    boundaryInfo: workBoundary.boundaryInfo,
+    tasks: lists.tasks,
+    stock: lists.stock,
+    todayLogsText: buildCondensedLogsFromArray(todayLogs),
+    excludeTitles: excludes,
+    useFlashModel: false
+  });
+
+  const excludeSet: Record<string, boolean> = {};
+  (Array.isArray(excludeIds) ? excludeIds : []).forEach((id) => {
+    excludeSet[String(id)] = true;
+  });
+
+  const oldKept = ((fastState.aiDeck && fastState.aiDeck.cards) || []).filter(
+    (c) => c && !excludeSet[c.id]
+  );
+  const seen: Record<string, boolean> = {};
+  const mergedCards = [];
+  for (const c of freshDeck.cards.concat(oldKept)) {
+    if (c && c.id && !seen[c.id]) {
+      seen[c.id] = true;
+      mergedCards.push(c);
+    }
+  }
+
+  fastState.aiDeck = {
+    generatedAt: freshDeck.generatedAt,
+    cards: mergedCards,
+    lowCards:
+      freshDeck.lowCards && freshDeck.lowCards.length > 0
+        ? freshDeck.lowCards
+        : (fastState.aiDeck && fastState.aiDeck.lowCards) || []
+  };
+
+  await saveFastState(env, fastState);
+  ctx.waitUntil(mirrorToSheets(env, [{ type: 'sync_snapshot' }]));
+
+  const deck = composeHomeDeck(workBoundary.workMode, now, fastState);
+
+  return {
+    authorized: true,
+    aiDeck: fastState.aiDeck,
+    deck
+  };
+}
+
+export async function apiImportFromSheets(
+  env: Env,
+  _ctx: ExecutionContext,
+  authKey: string
+) {
+  if (!verifyDashboardAccess(env, authKey)) {
+    return unauthorizedPayload();
+  }
+
+  const { imported } = await importAllFromSheets(env);
+  return {
+    authorized: true,
+    imported
+  };
+}
+
+// =============================================================================
+// 3. Internal Batch Endpoints (深夜バッチ連携)
+// =============================================================================
+
+function verifyInternalSecret(env: Env, request: Request): boolean {
+  const expected = String(env.INTERNAL_API_SECRET || '').trim();
+  const actual = String(request.headers.get('X-Internal-Secret') || '').trim();
+  return Boolean(expected && actual && expected === actual);
+}
+
+export async function handleInternalExportDay(
+  env: Env,
+  request: Request
+): Promise<Response> {
+  if (!verifyInternalSecret(env, request)) {
+    return jsonResponse({ ok: false, error: 'Unauthorized internal request' }, 401);
+  }
+
+  try {
+    const now = new Date();
+    const dayKey = getLogicalDayKey(now);
+
+    const [fastState, memory, logs, tasks, routines, shopping, inputStock] = await Promise.all([
+      loadFastState(env, now),
+      getMemory(env),
+      getLogicalTodayLogs(env, now),
+      getTasks(env),
+      getRoutines(env),
+      getShoppingList(env),
+      getInputStockList(env)
+    ]);
+
+    return jsonResponse({
+      ok: true,
+      data: {
+        dayKey,
+        exportedAt: formatJstIso(now),
+        fastState,
+        memory,
+        logs,
+        tasks,
+        routines,
+        shopping,
+        inputStock
+      }
+    });
+  } catch (err) {
+    return jsonResponse(
+      { ok: false, error: err instanceof Error ? err.message : String(err) },
+      500
+    );
+  }
+}
+
+export async function handleInternalSyncMemory(
+  env: Env,
+  request: Request
+): Promise<Response> {
+  if (!verifyInternalSecret(env, request)) {
+    return jsonResponse({ ok: false, error: 'Unauthorized internal request' }, 401);
+  }
+
+  try {
+    const body = (await request.json().catch(() => ({}))) as {
+      memoryUpdates?: Record<string, string>;
+      routineUpdates?: Array<{
+        id?: number;
+        title?: string;
+        last_generated_at?: string;
+        status?: string;
+        completed_at?: string;
+        memo?: string;
+      }>;
+      fastStateUpdates?: Partial<FastState>;
+    };
+
+    const updatedMemoryKeys: string[] = [];
+    const mirrorEvents: MirrorEvent[] = [];
+
+    if (body.memoryUpdates && typeof body.memoryUpdates === 'object') {
+      for (const [k, v] of Object.entries(body.memoryUpdates)) {
+        const key = String(k || '').trim();
+        if (!key) continue;
+        const val = String(v ?? '');
+        await setMemoryValue(env, key, val);
+        updatedMemoryKeys.push(key);
+        mirrorEvents.push({ type: 'set_memory', key, value: val });
+      }
+    }
+
+    let updatedRoutines = 0;
+    if (Array.isArray(body.routineUpdates)) {
+      for (const r of body.routineUpdates) {
+        if (!r || (!r.id && !r.title)) continue;
+        const fields: string[] = [];
+        const binds: unknown[] = [];
+
+        if (r.last_generated_at !== undefined) {
+          fields.push('last_generated_at = ?');
+          binds.push(String(r.last_generated_at));
+        }
+        if (r.status !== undefined) {
+          fields.push('status = ?');
+          binds.push(String(r.status));
+        }
+        if (r.completed_at !== undefined) {
+          fields.push('completed_at = ?');
+          binds.push(String(r.completed_at));
+        }
+        if (r.memo !== undefined) {
+          fields.push('memo = ?');
+          binds.push(String(r.memo));
+        }
+
+        if (fields.length === 0) continue;
+
+        if (r.id) {
+          binds.push(Number(r.id));
+          await env.DB.prepare(`UPDATE routines SET ${fields.join(', ')} WHERE id = ?`)
+            .bind(...binds)
+            .run();
+        } else if (r.title) {
+          binds.push(String(r.title).trim());
+          await env.DB.prepare(`UPDATE routines SET ${fields.join(', ')} WHERE title = ?`)
+            .bind(...binds)
+            .run();
+        }
+        updatedRoutines++;
+      }
+    }
+
+    if (body.fastStateUpdates && typeof body.fastStateUpdates === 'object') {
+      const fastState = await loadFastState(env);
+      Object.assign(fastState, body.fastStateUpdates);
+      await saveFastState(env, fastState);
+      mirrorEvents.push({ type: 'sync_snapshot' });
+    }
+
+    if (mirrorEvents.length > 0) {
+      await mirrorToSheets(env, mirrorEvents);
+    }
+
+    return jsonResponse({
+      ok: true,
+      data: {
+        updatedMemoryKeys,
+        updatedRoutines,
+        syncedAt: formatJstIso()
+      }
+    });
+  } catch (err) {
+    return jsonResponse(
+      { ok: false, error: err instanceof Error ? err.message : String(err) },
+      500
+    );
+  }
+}

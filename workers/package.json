@@ -1,0 +1,17 @@
+{
+  "name": "companion-cockpit-workers",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "db:init-local": "wrangler d1 execute companion-db --local --file=./schema.sql",
+    "db:init-remote": "wrangler d1 execute companion-db --remote --file=./schema.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260101.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^3.99.0"
+  }
+}

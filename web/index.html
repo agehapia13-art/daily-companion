@@ -134,6 +134,9 @@
           <button type="button" onclick="copyDiagnosticLogs()" class="settings-row-btn" style="flex:1;justify-content:center;padding:8px 10px;font-size:12px;">診断ログをコピー</button>
           <button type="button" id="discardOutboxBtn" onclick="confirmDiscardOutbox()" class="settings-row-btn hidden" style="flex:1;justify-content:center;padding:8px 10px;font-size:12px;color:#ef4444;">未同期を破棄</button>
         </div>
+        <div style="margin-top:8px;">
+          <button type="button" id="importSheetsBtn" onclick="runImportFromSheets()" class="settings-row-btn" style="width:100%;justify-content:center;padding:8px 10px;font-size:12px;">シートからD1へ取り込む</button>
+        </div>
       </div>
       <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: __PWA_CACHE_VERSION__</div>
     </div>

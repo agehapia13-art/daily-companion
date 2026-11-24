@@ -1864,8 +1864,11 @@
           <button type="button" onclick="copyDiagnosticLogs()" class="settings-row-btn" style="flex:1;justify-content:center;padding:8px 10px;font-size:12px;">診断ログをコピー</button>
           <button type="button" id="discardOutboxBtn" onclick="confirmDiscardOutbox()" class="settings-row-btn hidden" style="flex:1;justify-content:center;padding:8px 10px;font-size:12px;color:#ef4444;">未同期を破棄</button>
         </div>
+        <div style="margin-top:8px;">
+          <button type="button" id="importSheetsBtn" onclick="runImportFromSheets()" class="settings-row-btn" style="width:100%;justify-content:center;padding:8px 10px;font-size:12px;">シートからD1へ取り込む</button>
+        </div>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v38</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v39</div>
     </div>
   </div>
 
@@ -2418,6 +2421,10 @@
             showToast('同期に失敗しました');
           }
         });
+    }
+
+    function importFromSheets() {
+      return callServerApi('apiImportFromSheets', state.authKey);
     }
 
     /* Image compression (handles vertical tall screenshots safely) */
@@ -4048,6 +4055,26 @@
       } else {
         fallbackCopyText_(text);
       }
+    }
+
+    function runImportFromSheets() {
+      if (!confirm('スプレッドシートの最新データを D1 データベースへ取り込みますか？')) return;
+      var btn = document.getElementById('importSheetsBtn');
+      if (btn) btn.disabled = true;
+      importFromSheets()
+        .then(function(res) {
+          if (btn) btn.disabled = false;
+          if (res && res.error) {
+            showToast('取り込みに失敗しました: ' + res.error);
+            return;
+          }
+          showToast('シートからデータを取り込みました');
+          syncFromServer(true);
+        })
+        .catch(function(err) {
+          if (btn) btn.disabled = false;
+          showToast('取り込みに失敗しました: ' + (err && err.message ? err.message : String(err || '不明なエラー')));
+        });
     }
 
     function fallbackCopyText_(text) {

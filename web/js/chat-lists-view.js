@@ -255,7 +255,7 @@ function finalizeChatResponse(msgObj, res, fallbackAiText) {
   } else if (res.imageUrl) {
     msgObj.imageUrls = [res.imageUrl];
   }
-  applyServerStatePayload(res);
+  applyServerStatePayload(res, { preferServerLowMode: true });
   saveLocalSnapshot();
   renderAll();
   scrollToChatBottom();
@@ -264,7 +264,7 @@ function finalizeChatResponse(msgObj, res, fallbackAiText) {
       .then(function(deckRes) {
         if (deckRes && deckRes.authorized && deckRes.deck) {
           state.composedDeck = deckRes.deck;
-          if (deckRes.state) state.fastState = deckRes.state;
+          if (deckRes.aiDeck && state.fastState) state.fastState.aiDeck = deckRes.aiDeck;
           saveLocalSnapshot();
           if (state.tab === 'home') renderHome();
         }
@@ -324,6 +324,11 @@ function executeChatSend(msgObj, plainText, photo) {
 
     sendChatStream(chatPayload, {
       onStatus: function(data) {
+        if (data && typeof data === 'object' && data.resetDraft) {
+          accumulatedText = '';
+          removeStreamDraft();
+          state.isSending = true;
+        }
         var statusText = '';
         if (typeof data === 'string') {
           statusText = data;
@@ -703,7 +708,7 @@ function toggleShoppingDone(itemId) {
     rowIndex: s.rowIndex,
     done: s.done
   }).then(function(res) {
-    if (res && res.authorized && res.lists) {
+    if (res && res.authorized && !res._stale && res.lists) {
       state.lists = res.lists;
       saveLocalSnapshot();
     }
@@ -716,6 +721,12 @@ function openSettingsModal(errMsg) {
   document.getElementById('apiUrlFieldGroup').classList.toggle('hidden', isGasEnvironment());
   document.getElementById('inputApiUrl').value = state.apiUrl || '';
   document.getElementById('inputAuthKey').value = state.authKey || '';
+  var importBtn = document.getElementById('importSheetsBtn');
+  if (importBtn) {
+    var showImport = typeof isWorkersApiUrl === 'function' && isWorkersApiUrl();
+    var importWrap = importBtn.parentElement || importBtn;
+    importWrap.classList.toggle('hidden', !showImport);
+  }
   if (errMsg) {
     errEl.textContent = errMsg;
     errEl.classList.remove('hidden');

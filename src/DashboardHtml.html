@@ -1868,7 +1868,7 @@
           <button type="button" id="importSheetsBtn" onclick="runImportFromSheets()" class="settings-row-btn" style="width:100%;justify-content:center;padding:8px 10px;font-size:12px;">シートからD1へ取り込む</button>
         </div>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v41</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v42</div>
     </div>
   </div>
 
@@ -2437,9 +2437,10 @@
       });
     }
 
-    function applyServerStatePayload(res) {
+    function applyServerStatePayload(res, opts) {
       if (!res || res._stale) return;
       if (res.state) {
+        var preferServerLow = Boolean(opts && opts.preferServerLowMode);
         var prev = state.fastState || {};
         var sameDay = Boolean(prev.dayKey && res.state.dayKey && prev.dayKey === res.state.dayKey);
         var mergedCompleted = sameDay
@@ -2455,7 +2456,7 @@
         var keepClearedSession = Boolean(!localSession && res.state.activeSession && lockActive);
         var briefingDismissed = sameDay && Boolean((prev.dailyBriefing && prev.dailyBriefing.dismissed) || mergedDismissed['__briefing__']);
         state.fastState = res.state;
-        if (sameDay && typeof prev.isLowMode === 'boolean') {
+        if (!preferServerLow && sameDay && typeof prev.isLowMode === 'boolean') {
           state.fastState.isLowMode = prev.isLowMode;
         }
         state.fastState.completedToday = mergedCompleted;
@@ -2640,6 +2641,9 @@
         train: '<rect width="16" height="16" x="4" y="3" rx="2"/><path d="M4 11h16"/><path d="M12 3v8"/><path d="m8 19-2 3"/><path d="m18 22-2-3"/><path d="M8 15h.01"/><path d="M16 15h.01"/>',
         laptop: '<path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"/>',
         droplet: '<path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>',
+        droplets: '<path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>',
+        walk: '<circle cx="13" cy="4.5" r="1.8"/><path d="m9 21 2.2-6.5L13 12l-1.5-3.5L15 7l2 3h2.5"/><path d="m13 12 2.5 3.5L15 21"/><path d="m7.5 14 2-3.5 2-1.5"/>',
+        cart: '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>',
         bed: '<path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/>',
         music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
         book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
@@ -2840,6 +2844,15 @@
         if (t && t.id) set[t.id] = true;
       });
       return set;
+    }
+
+    function findDeckCardById(cardId) {
+      if (!cardId || !state.composedDeck) return null;
+      var cards = state.composedDeck.cards || [];
+      var found = cards.find(function(c) { return c && c.id === cardId; });
+      if (found) return found;
+      var lowCards = state.composedDeck.lowCards || [];
+      return lowCards.find(function(c) { return c && c.id === cardId; }) || null;
     }
 
     function isDeckCardAvailable(c, completed, dismissed, activeTaskIds) {
@@ -3103,7 +3116,7 @@
       );
 
       if (state.adjustingCardId) {
-        var adjCard = (state.composedDeck.cards || []).find(function(c) { return c && c.id === state.adjustingCardId; });
+        var adjCard = findDeckCardById(state.adjustingCardId);
         if (adjCard) {
           parts.push(
             '<div class="custom-create-card glass-surface fade-in">' +
@@ -3189,8 +3202,7 @@
     }
 
     function dismissCardToday(cardId) {
-      var cards = (state.composedDeck && state.composedDeck.cards) || [];
-      var targetCard = cards.find(function(c) { return c && c.id === cardId; });
+      var targetCard = findDeckCardById(cardId);
       var cardTitle = (targetCard && targetCard.title) ? String(targetCard.title).trim() : '';
       state.fastState.dismissedToday[cardId] = cardTitle || true;
       state.openSwipeId = null;
@@ -3233,7 +3245,7 @@
     }
 
     function openCardDurAdjust(cardId) {
-      var card = (state.composedDeck.cards || []).find(function(c) { return c && c.id === cardId; });
+      var card = findDeckCardById(cardId);
       if (!card) return;
       state.showCustomForm = false;
       state.adjustingCardId = cardId;
@@ -3254,7 +3266,7 @@
     }
 
     function confirmCardDurStart() {
-      var card = (state.composedDeck.cards || []).find(function(c) { return c && c.id === state.adjustingCardId; });
+      var card = findDeckCardById(state.adjustingCardId);
       state.adjustingCardId = null;
       if (!card) { renderHome(); return; }
       var updated = Object.assign({}, card, { mins: state.adjustingCardMins || card.mins || 30 });
@@ -3329,7 +3341,7 @@
       if (!el || !el.value || !sess) return;
       var newMs = applyTimeInputToMs_(sess.startedAtMs || Date.now(), el.value);
       sess.startedAtMs = newMs;
-      sess.startedAt = new Date(newMs).toISOString();
+      sess.startedAtIso = new Date(newMs).toISOString();
       state.isStartAdjustOpen = false;
       saveLocalSnapshot();
       renderHome();
@@ -3348,7 +3360,10 @@
       if (!r) return;
       var sEl = document.getElementById('reflectStartTimeInput');
       var eEl = document.getElementById('reflectEndTimeInput');
-      if (sEl && sEl.value) r.startedMs = applyTimeInputToMs_(r.startedMs, sEl.value);
+      if (sEl && sEl.value) {
+        r.startedMs = applyTimeInputToMs_(r.startedMs, sEl.value);
+        if (r.card) r.card.startedAtMs = r.startedMs;
+      }
       if (eEl && eEl.value) r.endedMs = applyTimeInputToMs_(r.endedMs, eEl.value);
       r.usedMins = Math.max(1, Math.round((r.endedMs - r.startedMs) / 60000));
       r.isAdjustOpen = false;
@@ -3409,6 +3424,9 @@
         mood: r.feeling,
         note: note,
         keepOpen: Boolean(keepOpen),
+        startedAtMs: r.startedMs,
+        endedAtMs: r.endedMs,
+        usedMins: r.usedMins,
         photoBase64: r.photoBase64 || '',
         photoMimeType: r.photoMimeType || 'image/jpeg'
       });
@@ -3783,7 +3801,7 @@
       } else if (res.imageUrl) {
         msgObj.imageUrls = [res.imageUrl];
       }
-      applyServerStatePayload(res);
+      applyServerStatePayload(res, { preferServerLowMode: true });
       saveLocalSnapshot();
       renderAll();
       scrollToChatBottom();
@@ -3792,7 +3810,7 @@
           .then(function(deckRes) {
             if (deckRes && deckRes.authorized && deckRes.deck) {
               state.composedDeck = deckRes.deck;
-              if (deckRes.state) state.fastState = deckRes.state;
+              if (deckRes.aiDeck && state.fastState) state.fastState.aiDeck = deckRes.aiDeck;
               saveLocalSnapshot();
               if (state.tab === 'home') renderHome();
             }
@@ -3852,6 +3870,11 @@
 
         sendChatStream(chatPayload, {
           onStatus: function(data) {
+            if (data && typeof data === 'object' && data.resetDraft) {
+              accumulatedText = '';
+              removeStreamDraft();
+              state.isSending = true;
+            }
             var statusText = '';
             if (typeof data === 'string') {
               statusText = data;
@@ -4231,7 +4254,7 @@
         rowIndex: s.rowIndex,
         done: s.done
       }).then(function(res) {
-        if (res && res.authorized && res.lists) {
+        if (res && res.authorized && !res._stale && res.lists) {
           state.lists = res.lists;
           saveLocalSnapshot();
         }
@@ -4244,6 +4267,12 @@
       document.getElementById('apiUrlFieldGroup').classList.toggle('hidden', isGasEnvironment());
       document.getElementById('inputApiUrl').value = state.apiUrl || '';
       document.getElementById('inputAuthKey').value = state.authKey || '';
+      var importBtn = document.getElementById('importSheetsBtn');
+      if (importBtn) {
+        var showImport = typeof isWorkersApiUrl === 'function' && isWorkersApiUrl();
+        var importWrap = importBtn.parentElement || importBtn;
+        importWrap.classList.toggle('hidden', !showImport);
+      }
       if (errMsg) {
         errEl.textContent = errMsg;
         errEl.classList.remove('hidden');

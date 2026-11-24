@@ -397,8 +397,7 @@ function apiCompleteAction(authKey, completePayload) {
 
   // logs シートへの記録（行動完了・進行・起床・引き算をすべて記録）
   {
-    const startedMs = Number(session.startedAtMs) || 0;
-    const elapsedMins = startedMs > 0 ? Math.max(1, Math.round((now.getTime() - startedMs) / 60000)) : 0;
+    const elapsedMins = resolveCompletedElapsedMins_(p, session, now.getTime());
     let userMsg = '';
     if (session.isSleepCard) {
       const sleepDur = elapsedMins > 0
@@ -617,8 +616,7 @@ function apiFlushOutboxBatch(authKey, operations) {
           isSleep: Boolean(session.isSleepCard)
         };
 
-        const startedMs = Number(session.startedAtMs) || 0;
-        const elapsedMins = startedMs > 0 ? Math.max(1, Math.round((now.getTime() - startedMs) / 60000)) : 0;
+        const elapsedMins = resolveCompletedElapsedMins_(cp, session, now.getTime());
         let userMsg = '';
         if (session.isSleepCard) {
           const sleepDur = elapsedMins > 0
@@ -1229,6 +1227,27 @@ function buildChatLogEntryObject_(entry) {
     badges: parsedNotices.badges,
     docLinks: parsedNotices.docLinks
   };
+}
+
+/**
+ * 行動完了時の実測時間（分）をペイロード・セッション情報から算出
+ * @param {Object} payload
+ * @param {Object} session
+ * @param {number} nowMs
+ * @return {number}
+ * @private
+ */
+function resolveCompletedElapsedMins_(payload, session, nowMs) {
+  const p = payload || {};
+  const s = session || {};
+  const explicitUsedMins = Number(p.usedMins);
+  if (isFinite(explicitUsedMins) && explicitUsedMins > 0) {
+    return Math.max(1, Math.round(explicitUsedMins));
+  }
+  const startedMs = Number(p.startedAtMs) > 0 ? Number(p.startedAtMs) : (Number(s.startedAtMs) || 0);
+  if (startedMs <= 0) return 0;
+  const endedMs = Number(p.endedAtMs) > 0 ? Number(p.endedAtMs) : nowMs;
+  return Math.max(1, Math.round((endedMs - startedMs) / 60000));
 }
 
 /**

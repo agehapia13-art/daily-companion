@@ -15,9 +15,18 @@ function normalizeSheetDateStr(val: unknown): string {
   if (m) {
     const [y, mo, d] = m[1].split('-');
     const ymd = `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
-    return m[2] ? `${ymd} ${m[2]}` : ymd;
+    if (m[2]) {
+      const [hh, mm, ss = '00'] = m[2].split(':');
+      return `${ymd} ${hh.padStart(2, '0')}:${mm.padStart(2, '0')}:${ss.padStart(2, '0')}`;
+    }
+    return ymd;
   }
   return s;
+}
+
+function extractStrictYmd(val: unknown): string {
+  const normalized = normalizeSheetDateStr(val);
+  return /^\d{4}-\d{2}-\d{2}/.test(normalized) ? normalized.slice(0, 10) : '';
 }
 
 function clampMins(val: unknown, fallback: number): number {
@@ -77,17 +86,6 @@ export async function importAllFromSheets(
   const stockRows = valueRanges[4]?.values || [];
   const memoryRows = valueRanges[5]?.values || [];
 
-  // 既存データをクリーンに削除
-  await env.DB.batch([
-    env.DB.prepare('DELETE FROM logs'),
-    env.DB.prepare('DELETE FROM tasks'),
-    env.DB.prepare('DELETE FROM routines'),
-    env.DB.prepare('DELETE FROM shopping'),
-    env.DB.prepare('DELETE FROM input_stock'),
-    env.DB.prepare('DELETE FROM memory'),
-    env.DB.prepare('DELETE FROM fast_state')
-  ]);
-
   const statements: D1PreparedStatement[] = [];
   const nowIso = formatJstIso();
   const imported: Record<string, number> = {
@@ -140,10 +138,10 @@ export async function importAllFromSheets(
     const title = String(row[1] ?? '').trim();
     if (!id || !title) return;
 
-    const dueDate = normalizeSheetDateStr(row[2]).slice(0, 10);
+    const dueDate = extractStrictYmd(row[2]);
     const status = String(row[3] ?? '未完了').trim() || '未完了';
-    const createdAt = normalizeSheetDateStr(row[4]).slice(0, 10);
-    const completedAt = normalizeSheetDateStr(row[5]);
+    const createdAt = extractStrictYmd(row[4]);
+    const completedAt = extractStrictYmd(row[5]);
     const memo = String(row[6] ?? '');
     const remindContext = String(row[7] ?? '').trim();
     const docUrl = String(row[8] ?? '').trim();
@@ -166,13 +164,13 @@ export async function importAllFromSheets(
 
     const type = String(row[1] ?? '').trim();
     const value = String(row[2] ?? '').trim();
-    const lastGeneratedAt = normalizeSheetDateStr(row[3]).slice(0, 10);
+    const lastGeneratedAt = extractStrictYmd(row[3]);
     const memo = String(row[4] ?? '');
     let status = String(row[5] ?? '').trim();
     if (!status) {
       status = type === 'expired' || memo.includes('[期間満了') ? '期間満了' : '有効';
     }
-    let completedAt = normalizeSheetDateStr(row[6]).slice(0, 10);
+    let completedAt = extractStrictYmd(row[6]);
     if (!completedAt && memo) {
       const m = memo.match(/\[期間満了[:：]\s*(\d{4}-\d{2}-\d{2})\]/);
       if (m) completedAt = m[1];
@@ -195,7 +193,7 @@ export async function importAllFromSheets(
 
     const category = String(row[1] ?? '日用品').trim() || '日用品';
     const status = String(row[2] ?? '未買').trim() || '未買';
-    const createdAt = normalizeSheetDateStr(row[3]).slice(0, 10);
+    const createdAt = extractStrictYmd(row[3]);
 
     statements.push(
       env.DB.prepare(
@@ -213,7 +211,7 @@ export async function importAllFromSheets(
 
     const memo = String(row[2] ?? '');
     const status = String(row[3] ?? '未').trim() || '未';
-    const consumedAt = normalizeSheetDateStr(row[4]);
+    const consumedAt = extractStrictYmd(row[4]);
     const defaultMins =
       type === '本' || type === '漫画' ? 20 : type === '映画' || type === 'アニメ' ? 120 : 30;
     const estMins = clampMins(row[5], defaultMins);
@@ -270,6 +268,20 @@ export async function importAllFromSheets(
     )
   );
 
-  await runBatchChunked(env.DB, statements);
+  const deleteStmts: D1PreparedStatement[] = [
+    env.DB.prepare('DELETE FROM logs'),
+    env.DB.prepare('DELETE FROM tasks'),
+    env.DB.prepare('DELETE FROM routines'),
+    env.DB.prepare('DELETE FROM shopping'),
+    env.DB.prepare('DELETE FROM input_stock'),
+    env.DB.prepare('DELETE FROM memory'),
+    env.DB.prepare('DELETE FROM fast_state')
+  ];
+  const allStmts = [...deleteStmts, ...statements];
+  if (allStmts.length <= 100) {
+    await env.DB.batch(allStmts);
+  } else {
+    await runBatchChunked(env.DB, allStmts);
+  }
   return { imported };
 }

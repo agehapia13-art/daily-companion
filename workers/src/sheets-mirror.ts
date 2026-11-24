@@ -246,7 +246,7 @@ async function syncSnapshotToSheets(
   await sheetsFetch(accessToken, batchUpdateUrl, {
     method: 'POST',
     body: JSON.stringify({
-      valueInputOption: 'USER_ENTERED',
+      valueInputOption: 'RAW',
       data: [
         { range: 'tasks!A1', values: taskValues },
         { range: 'shopping!A1', values: shoppingValues },

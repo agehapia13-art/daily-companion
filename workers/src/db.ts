@@ -15,8 +15,8 @@ import {
   formatJstIso,
   formatJstYmd,
   getLogicalDayKey,
-  JST_OFFSET_MS,
   pad2,
+  parseCycleStampItems,
   parsePositiveEstimatedMins
 } from './utils';
 
@@ -188,6 +188,23 @@ export function ensureLogicalDayBoundary(
   }
 
   const normalized: FastState = Object.assign(createEmptyFastState(currentDayKey), state);
+  if (
+    !normalized.completedToday ||
+    typeof normalized.completedToday !== 'object' ||
+    Array.isArray(normalized.completedToday)
+  ) {
+    normalized.completedToday = {};
+  }
+  if (
+    !normalized.dismissedToday ||
+    typeof normalized.dismissedToday !== 'object' ||
+    Array.isArray(normalized.dismissedToday)
+  ) {
+    normalized.dismissedToday = {};
+  }
+  normalized.isLowMode = Boolean(normalized.isLowMode);
+  normalized.triagedToday = Boolean(normalized.triagedToday);
+
   if (normalized.dayKey === currentDayKey) {
     return { state: normalized, rolledOver: false };
   }
@@ -534,9 +551,7 @@ export async function buildListsSnapshot(
   memory?: MemoryMap,
   now: Date = new Date()
 ): Promise<ListsSnapshot> {
-  const todayStr = formatJstYmd(now);
-  const jst = new Date(now.getTime() + JST_OFFSET_MS);
-  const todayMidnightMs = Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate());
+  const todayStr = getLogicalDayKey(now);
   const mem = memory || (await getMemory(env));
 
   // 1. Tasks（未完了 ＋ 本日完了分、緊急度順ソート）
@@ -564,49 +579,22 @@ export async function buildListsSnapshot(
   );
 
   // 4. Habits（cycle_stamps ベース）
-  const habits: HabitSnapshotItem[] = [];
   const rawStamps = (mem && mem.cycle_stamps ? String(mem.cycle_stamps) : '').trim();
-  if (rawStamps) {
-    const lines = rawStamps
-      .split(/[,\n、]+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+  const habits: HabitSnapshotItem[] = parseCycleStampItems(rawStamps, todayStr).map((item) => ({
+    id: 'HABIT_' + item.label,
+    label: item.label,
+    date: item.date,
+    elapsedDays: item.elapsedDays,
+    elapsed: item.elapsed,
+    stampedToday: item.elapsedDays === 0,
+    estimatedMins: getDefaultHabitEstimatedMins(item.label)
+  }));
 
-    for (const line of lines) {
-      const m = line.match(/^([^:：]+)[：:]\s*(.+)$/);
-      const label = m ? m[1].replace(/^[・\-\s]+/, '').trim() : line;
-      const val = m ? m[2].trim() : '';
-      let dateStr = '';
-      let elapsedDays: number | null = null;
-      const dm = val.match(/(\d{4}[-\/]\d{1,2}[-\/]\d{1,2})/);
-      if (dm) {
-        dateStr = dm[1].replace(/\//g, '-');
-        const p = dateStr.split('-').map((n) => parseInt(n, 10));
-        if (p.length === 3 && !p.some(isNaN)) {
-          const dtMs = Date.UTC(p[0], p[1] - 1, p[2]);
-          elapsedDays = Math.max(0, Math.floor((todayMidnightMs - dtMs) / (1000 * 60 * 60 * 24)));
-        }
-      }
-      const elapsedText =
-        elapsedDays === null ? '未着手' : elapsedDays === 0 ? '今日' : `${elapsedDays}日前`;
-
-      habits.push({
-        id: 'HABIT_' + label,
-        label,
-        date: dateStr,
-        elapsedDays,
-        elapsed: elapsedText,
-        stampedToday: elapsedDays === 0,
-        estimatedMins: getDefaultHabitEstimatedMins(label)
-      });
-    }
-
-    habits.sort((a, b) => {
-      const ae = a.elapsedDays === null ? 9999 : a.elapsedDays;
-      const be = b.elapsedDays === null ? 9999 : b.elapsedDays;
-      return be - ae;
-    });
-  }
+  habits.sort((a, b) => {
+    const ae = a.elapsedDays === null ? 9999 : a.elapsedDays;
+    const be = b.elapsedDays === null ? 9999 : b.elapsedDays;
+    return be - ae;
+  });
 
   return {
     updatedAt: formatJstIso(now),

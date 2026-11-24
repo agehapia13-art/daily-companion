@@ -13,6 +13,15 @@ function getActiveTaskIdSet() {
   return set;
 }
 
+function findDeckCardById(cardId) {
+  if (!cardId || !state.composedDeck) return null;
+  var cards = state.composedDeck.cards || [];
+  var found = cards.find(function(c) { return c && c.id === cardId; });
+  if (found) return found;
+  var lowCards = state.composedDeck.lowCards || [];
+  return lowCards.find(function(c) { return c && c.id === cardId; }) || null;
+}
+
 function isDeckCardAvailable(c, completed, dismissed, activeTaskIds) {
   if (!c || !c.id) return false;
   if (!c.isSleepCard && (completed[c.id] || (c.linkedId && completed[c.linkedId]))) return false;
@@ -274,7 +283,7 @@ function renderHome() {
   );
 
   if (state.adjustingCardId) {
-    var adjCard = (state.composedDeck.cards || []).find(function(c) { return c && c.id === state.adjustingCardId; });
+    var adjCard = findDeckCardById(state.adjustingCardId);
     if (adjCard) {
       parts.push(
         '<div class="custom-create-card glass-surface fade-in">' +
@@ -360,8 +369,7 @@ function toggleLowMode() {
 }
 
 function dismissCardToday(cardId) {
-  var cards = (state.composedDeck && state.composedDeck.cards) || [];
-  var targetCard = cards.find(function(c) { return c && c.id === cardId; });
+  var targetCard = findDeckCardById(cardId);
   var cardTitle = (targetCard && targetCard.title) ? String(targetCard.title).trim() : '';
   state.fastState.dismissedToday[cardId] = cardTitle || true;
   state.openSwipeId = null;
@@ -404,7 +412,7 @@ function startCustomCard(ev) {
 }
 
 function openCardDurAdjust(cardId) {
-  var card = (state.composedDeck.cards || []).find(function(c) { return c && c.id === cardId; });
+  var card = findDeckCardById(cardId);
   if (!card) return;
   state.showCustomForm = false;
   state.adjustingCardId = cardId;
@@ -425,7 +433,7 @@ function cancelCardDurAdjust() {
 }
 
 function confirmCardDurStart() {
-  var card = (state.composedDeck.cards || []).find(function(c) { return c && c.id === state.adjustingCardId; });
+  var card = findDeckCardById(state.adjustingCardId);
   state.adjustingCardId = null;
   if (!card) { renderHome(); return; }
   var updated = Object.assign({}, card, { mins: state.adjustingCardMins || card.mins || 30 });
@@ -500,7 +508,7 @@ function applyStartTimeAdjust() {
   if (!el || !el.value || !sess) return;
   var newMs = applyTimeInputToMs_(sess.startedAtMs || Date.now(), el.value);
   sess.startedAtMs = newMs;
-  sess.startedAt = new Date(newMs).toISOString();
+  sess.startedAtIso = new Date(newMs).toISOString();
   state.isStartAdjustOpen = false;
   saveLocalSnapshot();
   renderHome();
@@ -519,7 +527,10 @@ function applyReflectTimeAdjust() {
   if (!r) return;
   var sEl = document.getElementById('reflectStartTimeInput');
   var eEl = document.getElementById('reflectEndTimeInput');
-  if (sEl && sEl.value) r.startedMs = applyTimeInputToMs_(r.startedMs, sEl.value);
+  if (sEl && sEl.value) {
+    r.startedMs = applyTimeInputToMs_(r.startedMs, sEl.value);
+    if (r.card) r.card.startedAtMs = r.startedMs;
+  }
   if (eEl && eEl.value) r.endedMs = applyTimeInputToMs_(r.endedMs, eEl.value);
   r.usedMins = Math.max(1, Math.round((r.endedMs - r.startedMs) / 60000));
   r.isAdjustOpen = false;
@@ -580,6 +591,9 @@ function completeReflection(keepOpen) {
     mood: r.feeling,
     note: note,
     keepOpen: Boolean(keepOpen),
+    startedAtMs: r.startedMs,
+    endedAtMs: r.endedMs,
+    usedMins: r.usedMins,
     photoBase64: r.photoBase64 || '',
     photoMimeType: r.photoMimeType || 'image/jpeg'
   });

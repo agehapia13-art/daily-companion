@@ -33,6 +33,7 @@ import {
   formatJstYmd,
   getJstClock,
   jsonResponse,
+  parseCycleStampItems,
   toJstDate
 } from './utils';
 import { fetchWeatherAndPressure, isWeatherStale } from './weather';
@@ -40,6 +41,7 @@ import { fetchWeatherAndPressure, isWeatherStale } from './weather';
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const DEFAULT_CHAT_MODEL = 'gemini-3.8-flash';
 const WEB_SEARCH_MODEL = 'gemini-3.5-flash-lite';
+const ALLOWED_THINKING_LEVELS = new Set(['minimal', 'low', 'medium', 'high']);
 
 interface WebSearchContext {
   summaryText: string;
@@ -159,29 +161,46 @@ function formatElapsedTime(lastTimeStr: string | null, nowDate: Date): string {
 }
 
 function formatCycleStampsWithElapsed(rawStamps: string, todayYmd: string): string {
-  if (!rawStamps || !rawStamps.trim()) return '';
-  const todayMs = Date.parse(`${todayYmd}T00:00:00+09:00`);
-  return rawStamps
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const m = line.match(/^([^:：]+)[：:]\s*(.+)$/);
-      if (!m) return line;
-      const label = m[1].replace(/^[・\-\s]+/, '').trim();
-      const val = m[2].trim();
-      const dm = val.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
-      if (!dm) return `${label}: 未着手 (未着手)`;
-      const normalized = `${dm[1]}-${dm[2].padStart(2, '0')}-${dm[3].padStart(2, '0')}`;
-      const dMs = Date.parse(`${normalized}T00:00:00+09:00`);
-      const elapsedDays = Number.isFinite(dMs)
-        ? Math.max(0, Math.round((todayMs - dMs) / 86400000))
-        : null;
-      const elapsedText =
-        elapsedDays === null ? '未着手' : elapsedDays === 0 ? '今日' : `${elapsedDays}日前`;
-      return `${label}: ${normalized} (${elapsedText})`;
+  const items = parseCycleStampItems(rawStamps, todayYmd);
+  if (items.length === 0) return '';
+  return items
+    .map((item) => {
+      const dateText = item.date || '未着手';
+      return `${item.label}: ${dateText} (${item.elapsed || '未着手'})`;
     })
     .join('\n');
+}
+
+function safeParseGeminiJson(rawText: string): any {
+  const trimmed = String(rawText || '').trim();
+  if (!trimmed) {
+    throw new Error('Gemini からの応答テキストが空のため JSON を解析できませんでした。');
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch (firstErr) {
+    const cleaned = trimmed
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+    try {
+      return JSON.parse(cleaned);
+    } catch {
+      const firstBrace = cleaned.indexOf('{');
+      const lastBrace = cleaned.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        const extracted = cleaned.slice(firstBrace, lastBrace + 1);
+        try {
+          return JSON.parse(extracted);
+        } catch (extractErr) {
+          const detail = extractErr instanceof Error ? extractErr.message : String(extractErr);
+          throw new Error(`Gemini 応答 JSON の解析に失敗しました: ${detail}`);
+        }
+      }
+      const detail = firstErr instanceof Error ? firstErr.message : String(firstErr);
+      throw new Error(`Gemini 応答 JSON の解析に失敗しました: ${detail}`);
+    }
+  }
 }
 
 function filterRelevantDictionaryEntries(dictionaryText: string, queryText: string): string {
@@ -718,10 +737,8 @@ function buildChatPayload(params: {
   }
   currentTurnParts.push({ text: promptBody });
 
-  const thinkingLevel =
-    memory.thinking_level && String(memory.thinking_level).trim() !== ''
-      ? String(memory.thinking_level).trim().toLowerCase()
-      : 'low';
+  const rawThinkingLevel = String(memory.thinking_level ?? '').trim().toLowerCase();
+  const thinkingLevel = ALLOWED_THINKING_LEVELS.has(rawThinkingLevel) ? rawThinkingLevel : 'low';
 
   return {
     systemInstruction: {
@@ -968,12 +985,23 @@ async function applyMemoryUpdatesSafely(
     const existingProfile = (memory.profile || '').trim();
     let nextProfile = candidate;
     if (existingProfile) {
-      const hasKeyContext =
-        candidate.includes('サウンドディレクター') ||
-        candidate.includes('ぽこあポケモン') ||
-        candidate.length >= existingProfile.length * 0.7;
-      if (!hasKeyContext) {
-        nextProfile = `${existingProfile}\n・${candidate.replace(/^[・\-\s]+/, '')}`;
+      if (candidate.length >= existingProfile.length * 0.85) {
+        nextProfile = candidate;
+      } else {
+        const existingLines = new Set(
+          existingProfile
+            .split('\n')
+            .map((l) => l.replace(/^[・\-\s]+/, '').trim())
+            .filter(Boolean)
+        );
+        const newLines = candidate
+          .split('\n')
+          .map((l) => l.replace(/^[・\-\s]+/, '').trim())
+          .filter((l) => l.length > 0 && !existingLines.has(l));
+        nextProfile =
+          newLines.length > 0
+            ? `${existingProfile}\n${newLines.map((l) => `・${l}`).join('\n')}`
+            : existingProfile;
       }
     }
     if (nextProfile !== existingProfile) {
@@ -1166,7 +1194,7 @@ export async function handleChatStream(
         }
       });
       const pass1LatencyMs = Date.now() - tPass1;
-      const pass1Parsed = sanitizeChatActionResult(JSON.parse(pass1Res.rawText));
+      const pass1Parsed = sanitizeChatActionResult(safeParseGeminiJson(pass1Res.rawText));
 
       const searchQuery = String(pass1Parsed?.need_web_search_query || '').trim();
       const calRange = pass1Parsed?.need_calendar_range || null;
@@ -1182,9 +1210,9 @@ export async function handleChatStream(
 
       if (needSearch || needCalRange) {
         if (needSearch) {
-          await sendSse('status', { text: '調べものをしています...' });
+          await sendSse('status', { text: '調べものをしています...', resetDraft: true });
         } else if (needCalRange) {
-          await sendSse('status', { text: 'カレンダーを確認しています...' });
+          await sendSse('status', { text: 'カレンダーを確認しています...', resetDraft: true });
         }
 
         const tWs0 = Date.now();
@@ -1229,7 +1257,7 @@ export async function handleChatStream(
         });
         pass2LatencyMs = Date.now() - tPass2;
         pass2Usage = pass2Res.usage;
-        finalParsed = sanitizeChatActionResult(JSON.parse(pass2Res.rawText));
+        finalParsed = sanitizeChatActionResult(safeParseGeminiJson(pass2Res.rawText));
       }
 
       const aiResult = finalParsed || {};
@@ -1337,24 +1365,7 @@ export async function handleChatStream(
         console.error('メモリー更新エラー:', memErr);
       }
 
-      if (chatCompletedIds.length > 0) {
-        for (const cid of chatCompletedIds) {
-          if (!fastState.completedToday[cid]) {
-            fastState.completedToday[cid] = true;
-          }
-        }
-      }
       const sc = aiResult.state_changes;
-      if (sc && typeof sc === 'object') {
-        if (typeof sc.mark_low_mode === 'boolean' && fastState.isLowMode !== sc.mark_low_mode) {
-          fastState.isLowMode = sc.mark_low_mode;
-          deckNeedsRefresh = true;
-        }
-        if (sc.completed_anchor_id) {
-          fastState.completedToday[String(sc.completed_anchor_id)] = true;
-        }
-      }
-
       const reactionEmoji = String(aiResult.reaction_emoji || '').trim() || '👍';
       let pureReplyText = stripManualNoticeLines(aiResult.reply_text || '');
       let mode: 'reaction' | 'reply' =
@@ -1398,11 +1409,29 @@ export async function handleChatStream(
           ? await getWorkModeAndBoundary(env, now)
           : workBoundary;
       const lists = await buildListsSnapshot(env, undefined, now);
-      fastState.listCache = lists;
-      fastState.revision = (Number(fastState.revision) || 0) + 1;
-      await saveFastState(env, fastState);
+      const latestFastState = await loadFastState(env, now);
+      if (chatCompletedIds.length > 0) {
+        for (const cid of chatCompletedIds) {
+          if (!latestFastState.completedToday[cid]) {
+            latestFastState.completedToday[cid] = true;
+          }
+        }
+      }
+      if (sc && typeof sc === 'object') {
+        if (typeof sc.mark_low_mode === 'boolean') {
+          if (latestFastState.isLowMode !== sc.mark_low_mode) {
+            deckNeedsRefresh = true;
+          }
+          latestFastState.isLowMode = sc.mark_low_mode;
+        }
+        if (sc.completed_anchor_id) {
+          latestFastState.completedToday[String(sc.completed_anchor_id)] = true;
+        }
+      }
+      latestFastState.listCache = lists;
+      await saveFastState(env, latestFastState);
 
-      const deck = composeHomeDeck(latestWorkBoundary.workMode, now, fastState);
+      const deck = composeHomeDeck(latestWorkBoundary.workMode, now, latestFastState);
       const shouldRefreshDeck =
         deckNeedsRefresh === true ||
         (deckNeedsRefresh === 'check_low_cards' && deck.cards.length < 3);
@@ -1449,7 +1478,7 @@ export async function handleChatStream(
         time: hhmm,
         nowStr,
         lists,
-        state: fastState,
+        state: latestFastState,
         deck,
         needsDeckRefresh: Boolean(shouldRefreshDeck)
       });

@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-24 19:24 JST
+> **最終更新**: 2026-11-24 19:44 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -405,3 +405,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 | **2026-11-24 18:26** | Cloudflare Workers Phase 2 フロントエンド（SSE チャットストリーミング受信・リアルタイム描画）実装 | ① `web/js/state-api.js` に `isWorkersApiUrl()` および `sendChatStream(payload, handlers)`（`POST /chat/stream` の SSE パーサ：`status` / `delta` / `done` / `error`）を追加。② `web/js/chat-lists-view.js` の `executeChatSend()` / `renderChat()` で Workers API URL 時はステータス一時表示・`STREAM_` 仮バブルのリアルタイム追記・`done` 確定反映・`error` フォールバックへ分岐するよう実装（GAS URL 時は従来の `apiSendChat` を維持）。 |
 | **2026-11-24 18:57** | Lists タブ（Tasks / Shopping / Stock / Habits）の期限・所要時間・Habits タイトル表示不具合の修正 | Workers 正本 API（`workers/src/types.ts`）とフロントエンド／GAS フォールバック間の `ListsSnapshot` スキーマ乖離（`dueDate`/`due`, `estimatedMins`/`mins`, `label`/`title`, `category`/`cat`）を解消するため、`web/js/chat-lists-view.js`（旧キャッシュ互換フォールバック付き）・`src/FastState.js`・`src/DeckEngine.js` を公式契約（`dueDate`, `estimatedMins`, `label`, `category`）へ統一（`dc-pwa-v41`）。 |
 | **2026-11-24 19:24** | `POST /chat/stream` 送信時に「メッセージまたは画像を入力してください。」エラーが即返却されるバグ修正 | フロントエンド（`web/js/state-api.js`）が `{ authKey, payload }` 形式で送信する一方、Workers（`workers/src/index.ts`）が `messagePayload` / `args` / フラットボディのみを参照し `payload` キーを解釈していなかったため、`payload` キーも解決するよう修正。 |
+| **2026-11-24 19:44** | フロントエンド × Cloudflare Workers 総チェック修正（重要度高・中 19項目の一括堅牢化） | ① `chat.ts`: `thinking_level` ホワイトリスト検証、SSE 後 `safeParseGeminiJson`、`FastState` Lost Update / `revision` 二重加算解消、2パス目 `resetDraft: true`、`profile` 汎用追記化。② `utils.ts`/`db.ts`/`deck-engine.ts`: `parseCycleStampItems`・`addDaysToYmd` 共通化、論理日（03:00境界）統一、`fastState` `null` 汚染防止。③ `calendar.ts`/`sheets-import.ts`/`sheets-mirror.ts`: 日付のみ文字列の JST `00:00` 解釈・不正日付ガード、時刻ゼロ埋め＆厳格 `YYYY-MM-DD` 抽出、インポート一括バッチ化、`RAW` 書き戻し。④ `api-core.ts`/`Api.js`/`web/`: ふりかえり時刻調整（`usedMins`）送信・反映、`isLowMode` AI 切替反映＆`lowCards` カード検索統一、`apiRefreshDeck` 反映修正、`getIconSvg` 補完（`droplets`/`walk`/`cart`）、GAS接続時の D1 取り込みボタン非表示（`dc-pwa-v42`）。 |

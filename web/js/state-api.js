@@ -553,9 +553,10 @@ if (typeof document !== 'undefined') {
   });
 }
 
-function applyServerStatePayload(res) {
+function applyServerStatePayload(res, opts) {
   if (!res || res._stale) return;
   if (res.state) {
+    var preferServerLow = Boolean(opts && opts.preferServerLowMode);
     var prev = state.fastState || {};
     var sameDay = Boolean(prev.dayKey && res.state.dayKey && prev.dayKey === res.state.dayKey);
     var mergedCompleted = sameDay
@@ -571,7 +572,7 @@ function applyServerStatePayload(res) {
     var keepClearedSession = Boolean(!localSession && res.state.activeSession && lockActive);
     var briefingDismissed = sameDay && Boolean((prev.dailyBriefing && prev.dailyBriefing.dismissed) || mergedDismissed['__briefing__']);
     state.fastState = res.state;
-    if (sameDay && typeof prev.isLowMode === 'boolean') {
+    if (!preferServerLow && sameDay && typeof prev.isLowMode === 'boolean') {
       state.fastState.isLowMode = prev.isLowMode;
     }
     state.fastState.completedToday = mergedCompleted;

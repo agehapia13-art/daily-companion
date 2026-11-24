@@ -580,7 +580,9 @@ export async function getWorkModeAndBoundary(
  */
 function parseEventDateTime(timeStr: string | Date | undefined, baseDate: Date): Date {
   if (!timeStr) return new Date(baseDate.getTime());
-  if (timeStr instanceof Date) return timeStr;
+  if (timeStr instanceof Date) {
+    return Number.isNaN(timeStr.getTime()) ? new Date(baseDate.getTime()) : timeStr;
+  }
 
   const str = String(timeStr).trim();
   const timeOnlyMatch = str.match(/^(\d{1,2}):(\d{2})$/);
@@ -598,13 +600,28 @@ function parseEventDateTime(timeStr: string | Date | undefined, baseDate: Date):
     );
   }
 
+  const dateOnlyMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (dateOnlyMatch) {
+    return new Date(
+      makeJstEpochMs(
+        parseInt(dateOnlyMatch[1], 10),
+        parseInt(dateOnlyMatch[2], 10) - 1,
+        parseInt(dateOnlyMatch[3], 10),
+        0,
+        0,
+        0
+      )
+    );
+  }
+
   const normalizedStr = str.includes(' ') && !str.includes('T') ? str.replace(' ', 'T') : str;
   const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalizedStr);
   const parsed = new Date(hasTimezone ? normalizedStr : `${normalizedStr}+09:00`);
   if (!Number.isNaN(parsed.getTime())) {
     return parsed;
   }
-  return new Date(str);
+  const fallback = new Date(str);
+  return Number.isNaN(fallback.getTime()) ? new Date(baseDate.getTime()) : fallback;
 }
 
 async function createPrimaryEvent(

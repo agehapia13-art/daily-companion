@@ -4,6 +4,7 @@ import {
   applyInputStockActions,
   applyTaskActions,
   buildListsSnapshot,
+  ensureLogicalDayBoundary,
   getInputStockList,
   getLogicalTodayLogs,
   getMemory,
@@ -35,6 +36,7 @@ import {
   MemoryMap
 } from './types';
 import {
+  addDaysToYmd,
   formatJstDateTime,
   formatJstIso,
   formatJstYmd,
@@ -64,10 +66,6 @@ function unauthorizedPayload() {
     authorized: false,
     error: '認証キーが正しくありません。設定画面からオーナー認証キーを確認してください。'
   };
-}
-
-function getTomorrowYmd(now: Date): string {
-  return formatJstYmd(new Date(now.getTime() + 24 * 60 * 60 * 1000));
 }
 
 function buildCondensedLogsFromArray(logsList: LogEntry[]): string {
@@ -207,6 +205,17 @@ function buildChatMessagesFromLogs(logs: LogEntry[]) {
 }
 
 function buildActiveSessionFromPayload(c: Record<string, any>, now: Date, nowIso: string): ActiveSession {
+  const startedAtCandidate =
+    typeof c.startedAtIso === 'string' && c.startedAtIso.trim()
+      ? c.startedAtIso.trim()
+      : typeof c.startedAt === 'string' && c.startedAt.trim()
+        ? c.startedAt.trim()
+        : '';
+  const startedAtIso =
+    startedAtCandidate && Number.isFinite(Date.parse(startedAtCandidate))
+      ? startedAtCandidate
+      : nowIso;
+
   return {
     id: String(c.id || `custom_${now.getTime()}`),
     title: String(c.title || '行動').trim(),
@@ -223,7 +232,7 @@ function buildActiveSessionFromPayload(c: Record<string, any>, now: Date, nowIso
     cycleStampLabel: String(c.cycleStampLabel || ''),
     triageTaskIds: Array.isArray(c.triageTaskIds) ? c.triageTaskIds.map(String) : [],
     startedAtMs: Number(c.startedAtMs) > 0 ? Number(c.startedAtMs) : now.getTime(),
-    startedAtIso: nowIso
+    startedAtIso
   };
 }
 
@@ -245,19 +254,27 @@ async function executeCompleteSessionCore(
   const mood = String(p.mood || '').trim();
   const note = String(p.note || '').trim();
   const keepOpen = Boolean(p.keepOpen);
-  let photoUrl = '';
-  if (p.photoBase64) {
-    const savedImg = await uploadBase64ImageToDrive(
-      env,
-      String(p.photoBase64),
-      String(p.photoMimeType || 'image/jpeg'),
-      'reflect'
-    );
-    photoUrl = savedImg.url;
-  }
-
   const notices: string[] = [];
   const mirrorEvents: MirrorEvent[] = [];
+  let photoUrl = '';
+  if (p.photoBase64) {
+    try {
+      const savedImg = await uploadBase64ImageToDrive(
+        env,
+        String(p.photoBase64),
+        String(p.photoMimeType || 'image/jpeg'),
+        'reflect'
+      );
+      photoUrl = savedImg.url;
+    } catch (imgErr) {
+      console.warn(
+        'ふりかえり画像Drive保存エラー:',
+        imgErr instanceof Error ? imgErr.message : String(imgErr)
+      );
+      notices.push('⚠️ 画像保存に失敗しました（記録自体は完了）');
+    }
+  }
+
   const sessionTitle = String(session.title || '行動').trim();
 
   try {
@@ -265,7 +282,7 @@ async function executeCompleteSessionCore(
       const targetIds = Array.isArray(session.triageTaskIds)
         ? session.triageTaskIds.filter(Boolean).map(String)
         : [];
-      const tomorrowStr = getTomorrowYmd(now);
+      const tomorrowStr = addDaysToYmd(logicalDayStr, 1);
       let idsToMove = targetIds;
       if (idsToMove.length === 0) {
         const uncompleted = await getTasks(env, '未完了');
@@ -318,6 +335,7 @@ async function executeCompleteSessionCore(
     }
   } catch (applyErr) {
     console.error('完了反映エラー:', applyErr instanceof Error ? applyErr.message : String(applyErr));
+    notices.push('⚠️ 一部の状態反映に失敗しました');
   }
 
   if (session.id && !session.isCustom && !session.isSleepCard) {
@@ -333,9 +351,15 @@ async function executeCompleteSessionCore(
     isSleep: Boolean(session.isSleepCard)
   };
 
-  const startedMs = Number(session.startedAtMs) || 0;
+  const rawUsedMins = Number(p.usedMins);
+  const startedMs = Number(p.startedAtMs) > 0 ? Number(p.startedAtMs) : Number(session.startedAtMs) || 0;
+  const endedMs = Number(p.endedAtMs) > 0 ? Number(p.endedAtMs) : now.getTime();
   const elapsedMins =
-    startedMs > 0 ? Math.max(1, Math.round((now.getTime() - startedMs) / 60000)) : 0;
+    Number.isFinite(rawUsedMins) && rawUsedMins > 0
+      ? Math.max(1, Math.round(rawUsedMins))
+      : startedMs > 0
+        ? Math.max(1, Math.round((endedMs - startedMs) / 60000))
+        : 0;
   let userMsg = '';
   if (session.isSleepCard) {
     const sleepDur =
@@ -1175,7 +1199,8 @@ export async function handleInternalSyncMemory(
     if (body.fastStateUpdates && typeof body.fastStateUpdates === 'object') {
       const fastState = await loadFastState(env);
       Object.assign(fastState, body.fastStateUpdates);
-      await saveFastState(env, fastState);
+      const { state: normalized } = ensureLogicalDayBoundary(fastState);
+      await saveFastState(env, normalized);
       mirrorEvents.push({ type: 'sync_snapshot' });
     }
 

@@ -145,15 +145,16 @@ function buildFallbackAiDeck_(uncompletedTasks, pendingInput, habits, todayStr) 
   for (let k = 0; k < Math.min(2, (habits || []).length); k++) {
     const h = habits[k];
     if (h.stampedToday) continue;
+    const hLabel = h.label || h.title || '';
     cards.push({
       id: h.id,
-      title: h.title,
+      title: hLabel,
       sub: h.elapsed + ' · リズムを整える',
-      mins: h.mins || 20,
-      icon: /運動|散歩/.test(h.title) ? 'wind' : (/ピアノ|ギター|音楽|DTM/.test(h.title) ? 'music' : 'sparkles'),
+      mins: h.estimatedMins || h.mins || 20,
+      icon: /運動|散歩/.test(hLabel) ? 'wind' : (/ピアノ|ギター|音楽|DTM/.test(hLabel) ? 'music' : 'sparkles'),
       linkedType: 'habit',
-      linkedId: h.title,
-      cycleStampLabel: h.title,
+      linkedId: hLabel,
+      cycleStampLabel: hLabel,
       isTriage: false,
       triageTaskIds: []
     });

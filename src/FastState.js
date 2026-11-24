@@ -177,8 +177,8 @@ function buildListsSnapshot(memoryOpt, nowOpt) {
         cat: cat,
         title: t.title,
         cleanTitle: cleanTitle,
-        due: t.dueDate || '',
-        mins: t.estimatedMins || 30,
+        dueDate: t.dueDate || '',
+        estimatedMins: t.estimatedMins || 30,
         memo: t.memo || '',
         remindContext: t.remindContext || '',
         docUrl: t.docUrl || '',
@@ -191,7 +191,7 @@ function buildListsSnapshot(memoryOpt, nowOpt) {
     id: 'SHOP_' + s.rowIndex,
     rowIndex: s.rowIndex,
     item: s.item,
-    cat: s.category || '日用品',
+    category: s.category || '日用品',
     createdDate: s.createdDate || '',
     done: false
   }));
@@ -205,7 +205,7 @@ function buildListsSnapshot(memoryOpt, nowOpt) {
       type: i.type || 'その他',
       title: i.title,
       memo: i.memo || '',
-      mins: i.estimatedMins || 30,
+      estimatedMins: i.estimatedMins || 30,
       done: i.status === '完'
     }));
 
@@ -234,11 +234,11 @@ function buildListsSnapshot(memoryOpt, nowOpt) {
         : (elapsedDays === 0 ? '今日' : `${elapsedDays}日前`);
       habits.push({
         id: 'HABIT_' + label,
-        title: label,
+        label: label,
         date: dateStr,
         elapsedDays: elapsedDays,
         elapsed: elapsedText,
-        mins: getDefaultHabitEstimatedMins_(label),
+        estimatedMins: getDefaultHabitEstimatedMins_(label),
         stampedToday: elapsedDays === 0
       });
     }

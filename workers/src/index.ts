@@ -10,6 +10,7 @@ import {
   handleInternalExportDay,
   handleInternalSyncMemory
 } from './api-core';
+import { handleChatStream } from './chat';
 import { Env } from './types';
 import { corsHeaders, jsonResponse } from './utils';
 
@@ -53,6 +54,37 @@ export default {
 
     if (request.method === 'POST' && url.pathname === '/internal/sync-memory') {
       return handleInternalSyncMemory(env, request);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/chat/stream') {
+      try {
+        const rawText = await request.text();
+        if (!rawText) {
+          return jsonResponse({ ok: false, error: 'Empty request body' }, 400);
+        }
+        const payload = JSON.parse(rawText) as {
+          authKey?: string;
+          messagePayload?: unknown;
+          args?: unknown[];
+          text?: string;
+          imageBase64?: string;
+          imageMimeType?: string;
+        };
+        const authKey = String(
+          payload?.authKey ?? (Array.isArray(payload?.args) ? payload.args[0] : '') ?? ''
+        );
+        const messagePayload =
+          payload?.messagePayload !== undefined
+            ? payload.messagePayload
+            : Array.isArray(payload?.args) && payload.args.length > 1
+              ? payload.args[1]
+              : payload;
+
+        return handleChatStream(env, ctx, authKey, messagePayload);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return jsonResponse({ ok: false, error: msg }, 400);
+      }
     }
 
     if (request.method === 'POST' && url.pathname === '/') {

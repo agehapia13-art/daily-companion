@@ -141,7 +141,10 @@ function renderChat() {
   }).join('');
 
   if (state.isSending) {
-    html += '<div class="bubble-wrap ai fade-in"><div class="thinking-bubble"><span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span></div></div>';
+    var statusHtml = state.sendingStatusText
+      ? '<span class="thinking-status" style="margin-left:8px;font-size:12px;color:var(--text-sub,#64748b);">' + escapeHtml(state.sendingStatusText) + '</span>'
+      : '';
+    html += '<div class="bubble-wrap ai fade-in"><div class="thinking-row" style="display:inline-flex;align-items:center;"><div class="thinking-bubble"><span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span></div>' + statusHtml + '</div></div>';
   }
   list.innerHTML = html;
 }
@@ -241,46 +244,155 @@ function submitTalkEditor() {
   executeChatSend(msgObj, plainText, photo);
 }
 
+function finalizeChatResponse(msgObj, res, fallbackAiText) {
+  msgObj.reactionEmoji = res.reactionEmoji || '';
+  msgObj.aiText = res.replyText || res.aiText || fallbackAiText || '';
+  msgObj.badges = Array.isArray(res.badges) ? res.badges : [];
+  msgObj.docLinks = Array.isArray(res.docLinks) ? res.docLinks : [];
+  msgObj.time = res.time || msgObj.time || '';
+  if (Array.isArray(res.imageUrls) && res.imageUrls.length > 0) {
+    msgObj.imageUrls = res.imageUrls;
+  } else if (res.imageUrl) {
+    msgObj.imageUrls = [res.imageUrl];
+  }
+  applyServerStatePayload(res);
+  saveLocalSnapshot();
+  renderAll();
+  scrollToChatBottom();
+  if (res.needsDeckRefresh) {
+    runMutationApi('apiRefreshDeck', state.authKey, [])
+      .then(function(deckRes) {
+        if (deckRes && deckRes.authorized && deckRes.deck) {
+          state.composedDeck = deckRes.deck;
+          if (deckRes.state) state.fastState = deckRes.state;
+          saveLocalSnapshot();
+          if (state.tab === 'home') renderHome();
+        }
+      })
+      .catch(function() {});
+  }
+}
+
+function appendChatErrorCard(msgObj, plainText, photo, err) {
+  var errId = 'ERR_' + Date.now();
+  state.failedPayloads[errId] = { msgObj: msgObj, plainText: plainText, photo: photo };
+  state.messages.push({
+    id: errId,
+    isError: true,
+    errorText: (err && err.message) ? err.message : String(err || '通信エラー')
+  });
+  renderChat();
+  scrollToChatBottom();
+}
+
 function executeChatSend(msgObj, plainText, photo) {
   if (state.messages.indexOf(msgObj) === -1) state.messages.push(msgObj);
   state.isSending = true;
+  state.sendingStatusText = '';
   if (state.tab === 'lists') state.tab = 'talk';
   renderNav();
   renderChat();
   scrollToChatBottom();
 
-  runMutationApi('apiSendChat', state.authKey, {
+  var chatPayload = {
     text: plainText,
     imageBase64: photo ? photo.base64 : '',
     imageMimeType: photo ? photo.mimeType : ''
-  })
+  };
+
+  if (typeof isWorkersApiUrl === 'function' && isWorkersApiUrl()) {
+    var tempId = Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+    var streamMsgId = 'STREAM_' + tempId;
+    var streamMsgObj = null;
+    var accumulatedText = '';
+    var settled = false;
+
+    state.syncEpoch = (state.syncEpoch || 0) + 1;
+    state.inFlightMutations = (state.inFlightMutations || 0) + 1;
+
+    function finishInFlight() {
+      if (settled) return;
+      settled = true;
+      state.inFlightMutations = Math.max(0, (state.inFlightMutations || 1) - 1);
+    }
+
+    function removeStreamDraft() {
+      if (!streamMsgObj) return;
+      state.messages = state.messages.filter(function(m) { return m.id !== streamMsgId; });
+      streamMsgObj = null;
+    }
+
+    sendChatStream(chatPayload, {
+      onStatus: function(data) {
+        var statusText = '';
+        if (typeof data === 'string') {
+          statusText = data;
+        } else if (data && typeof data === 'object') {
+          statusText = String(data.text || data.status || data.message || '');
+        }
+        state.sendingStatusText = statusText;
+        if (state.isSending) {
+          renderChat();
+          scrollToChatBottom();
+        }
+      },
+      onDelta: function(data) {
+        var chunk = '';
+        if (typeof data === 'string') {
+          chunk = data;
+        } else if (data && typeof data === 'object') {
+          chunk = String(data.text || data.delta || data.chunk || '');
+        }
+        if (!chunk) return;
+        accumulatedText += chunk;
+        if (!streamMsgObj) {
+          streamMsgObj = {
+            id: streamMsgId,
+            time: '',
+            userText: '',
+            aiText: accumulatedText,
+            badges: [],
+            docLinks: []
+          };
+          state.messages.push(streamMsgObj);
+        } else {
+          streamMsgObj.aiText = accumulatedText;
+        }
+        state.isSending = false;
+        state.sendingStatusText = '';
+        renderChat();
+        scrollToChatBottom();
+      },
+      onDone: function(data) {
+        finishInFlight();
+        state.isSending = false;
+        state.sendingStatusText = '';
+        removeStreamDraft();
+        if (!data || data.authorized === false) {
+          appendChatErrorCard(msgObj, plainText, photo, new Error((data && data.error) ? data.error : '認証エラー'));
+          return;
+        }
+        finalizeChatResponse(msgObj, data, accumulatedText);
+      },
+      onError: function(err) {
+        finishInFlight();
+        state.isSending = false;
+        state.sendingStatusText = '';
+        removeStreamDraft();
+        appendChatErrorCard(msgObj, plainText, photo, err);
+      }
+    });
+    return;
+  }
+
+  runMutationApi('apiSendChat', state.authKey, chatPayload)
     .then(function(res) {
       state.isSending = false;
+      state.sendingStatusText = '';
       if (!res || !res.authorized) {
         throw new Error((res && res.error) ? res.error : '認証エラー');
       }
-      msgObj.reactionEmoji = res.reactionEmoji || '';
-      msgObj.aiText = res.replyText || '';
-      msgObj.badges = Array.isArray(res.badges) ? res.badges : [];
-      msgObj.docLinks = Array.isArray(res.docLinks) ? res.docLinks : [];
-      msgObj.time = res.time || msgObj.time || '';
-      if (res.imageUrl) msgObj.imageUrls = [res.imageUrl];
-      applyServerStatePayload(res);
-      saveLocalSnapshot();
-      renderAll();
-      scrollToChatBottom();
-      if (res.needsDeckRefresh) {
-        runMutationApi('apiRefreshDeck', state.authKey, [])
-          .then(function(deckRes) {
-            if (deckRes && deckRes.authorized && deckRes.deck) {
-              state.composedDeck = deckRes.deck;
-              if (deckRes.state) state.fastState = deckRes.state;
-              saveLocalSnapshot();
-              if (state.tab === 'home') renderHome();
-            }
-          })
-          .catch(function() {});
-      }
+      finalizeChatResponse(msgObj, res, '');
     })
     .catch(function(err) {
       setTimeout(function() {
@@ -297,6 +409,7 @@ function executeChatSend(msgObj, plainText, photo) {
               }
               if (matched) {
                 state.isSending = false;
+                state.sendingStatusText = '';
                 applyServerStatePayload(boot);
                 var localErrors = state.messages.filter(function(m) { return m.isError; });
                 state.messages = boot.chatMessages.concat(localErrors);
@@ -310,15 +423,8 @@ function executeChatSend(msgObj, plainText, photo) {
           })
           .catch(function() {
             state.isSending = false;
-            var errId = 'ERR_' + Date.now();
-            state.failedPayloads[errId] = { msgObj: msgObj, plainText: plainText, photo: photo };
-            state.messages.push({
-              id: errId,
-              isError: true,
-              errorText: (err && err.message) ? err.message : String(err)
-            });
-            renderChat();
-            scrollToChatBottom();
+            state.sendingStatusText = '';
+            appendChatErrorCard(msgObj, plainText, photo, err);
           });
       }, 1500);
     });

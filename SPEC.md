@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-24 17:02 JST
+> **最終更新**: 2026-11-24 18:26 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -394,3 +394,5 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 | **2026-11-24 00:08** | 朝起床後に夜になっても就寝カード（`anchor_sleep`）が表示されない問題 | 就寝カードは「今日すでに寝たか」を `completedToday` で管理する必要がないため、① `src/FastState.js`（`buildRoutineAnchorCards`）で `anchor_sleep` の表示条件から `completedToday` 参照を外し時間帯（`21:30〜03:59`）と `dismissedToday` のみで判定するよう変更。② `web/js/home-view.js`（`completeReflection` / `isDeckCardAvailable`）で `isSleepCard` を `completedToday` の記録・除外対象から除外（`dc-pwa-v37`）。 |
 | **2026-11-24 15:58** | `dc-pwa-v36` 以降で `apiGetHomeBootstrap` 等に `Load failed` が多発する問題 | `web/js/state-api.js` の `callServerApi` で通常通信すべてに `keepalive: true` を付与していたことで、GAS Web App の 302 リダイレクトやブラウザ全体の 64KiB 制限に抵触しネットワークエラーが発生していたため、`keepalive: true` の無条件付与を削除して通常の `fetch` に戻し、未送信データの保護は既存の `pendingOutbox` 再送機構に一本化（`dc-pwa-v38`）。 |
 | **2026-11-24 17:08** | Cloudflare Workers + D1 Phase 1 基盤構築 ＆ PWA「シートからD1へ取り込む」導線追加 | ① `workers/` 配下に Cloudflare Workers + D1 バックエンド（`index.ts`, `api-core.ts`, `db.ts`, `calendar.ts`, `weather.ts`, `media.ts`, `deck-engine.ts`, `sheets-mirror.ts`, `sheets-import.ts`, `google-auth.ts`, `schema.sql`）を実装。② `web/index.html` / `web/js/state-api.js` / `web/js/chat-lists-view.js` に「シートからD1へ取り込む」導線を追加（`dc-pwa-v39`）。 |
+| **2026-11-24 18:27** | Cloudflare Workers Phase 2: SSE チャットストリーミング ＆ バックグラウンド反映実装 | ① `workers/src/prompts.ts`・`workers/src/chat.ts`・`workers/src/calendar.ts`（`getEventsInDateRange`）を実装し、`POST /chat/stream` で Gemini `streamGenerateContent?alt=sse` から `reply_text` 増分をリアルタイム配信（Web検索・広域カレンダー2段目対応、画像Drive並列保存、DB・カレンダー更新後の `ctx.waitUntil` シートミラー含む）。② `web/js/state-api.js`（`isWorkersApiUrl`, `sendChatStream`）および `web/js/chat-lists-view.js`（`executeChatSend`）で SSE 受信・リアルタイムバブル描画に対応（`dc-pwa-v40`）。 |
+| **2026-11-24 18:26** | Cloudflare Workers Phase 2 フロントエンド（SSE チャットストリーミング受信・リアルタイム描画）実装 | ① `web/js/state-api.js` に `isWorkersApiUrl()` および `sendChatStream(payload, handlers)`（`POST /chat/stream` の SSE パーサ：`status` / `delta` / `done` / `error`）を追加。② `web/js/chat-lists-view.js` の `executeChatSend()` / `renderChat()` で Workers API URL 時はステータス一時表示・`STREAM_` 仮バブルのリアルタイム追記・`done` 確定反映・`error` フォールバックへ分岐するよう実装（GAS URL 時は従来の `apiSendChat` を維持）。 |

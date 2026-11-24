@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dc-pwa-v39';
+const CACHE_NAME = 'dc-pwa-v40';
 const PRECACHE_URLS = [
   './',
   './index.html',

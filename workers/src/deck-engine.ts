@@ -245,7 +245,7 @@ function formatCycleStampsWithElapsed(habits: HabitSnapshotItem[], rawFallback: 
   return habits.map(h => `${h.label}: ${h.date || '未着手'} (${h.elapsed})`).join('\n');
 }
 
-function formatUncompletedTasksForContext(uncompletedTasks: TaskSnapshotItem[], todayStr: string): string {
+export function formatUncompletedTasksForContext(uncompletedTasks: TaskSnapshotItem[], todayStr: string): string {
   if (!uncompletedTasks || uncompletedTasks.length === 0) return 'なし';
   return uncompletedTasks.map(t => {
     let duePart = '';

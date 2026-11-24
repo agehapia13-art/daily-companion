@@ -252,6 +252,149 @@ export async function getTodayEventsList(env: Env, now: Date = new Date()): Prom
   return data.todayEvents;
 }
 
+function parseYmdParts(ymd: string): { year: number; month: number; day: number } | null {
+  const m = String(ymd || '').trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!m) return null;
+  const year = parseInt(m[1], 10);
+  const month = parseInt(m[2], 10) - 1;
+  const day = parseInt(m[3], 10);
+  if (month < 0 || month > 11 || day < 1 || day > 31) return null;
+  return { year, month, day };
+}
+
+function formatJstYmdWithDowFromMs(ms: number): string {
+  const d = toJstDate(new Date(ms));
+  const days = ['日', '月', '火', '水', '木', '金', '土'];
+  const dow = days[d.getUTCDay()] || '';
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}(${dow})`;
+}
+
+/**
+ * 指定期間（startYmd〜endYmd, 最大62日）の4カレンダー予定を並列取得し、日付付きの予定文字列配列を返す
+ */
+export async function getEventsInDateRange(
+  env: Env,
+  startYmd: string,
+  endYmd: string
+): Promise<string[]> {
+  const now = new Date();
+  const startParts = parseYmdParts(startYmd) || getJstYmdParts(now);
+  const endParts = parseYmdParts(endYmd) || startParts;
+
+  const startMs = makeJstEpochMs(startParts.year, startParts.month, startParts.day, 0, 0, 0);
+  let endMs = makeJstEpochMs(endParts.year, endParts.month, endParts.day, 23, 59, 59);
+  if (endMs < startMs) {
+    endMs = makeJstEpochMs(startParts.year, startParts.month, startParts.day, 23, 59, 59);
+  }
+  const maxEndMs = makeJstEpochMs(startParts.year, startParts.month, startParts.day + 62, 23, 59, 59);
+  if (endMs > maxEndMs) {
+    endMs = maxEndMs;
+  }
+
+  const listParams: Record<string, string> = {
+    timeMin: formatJstIso(new Date(startMs)),
+    timeMax: formatJstIso(new Date(endMs)),
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    maxResults: '250',
+  };
+
+  const token = await getGoogleAccessToken(env);
+  const familyId = env.FAMILY_CALENDAR_ID || '';
+  const rawHouseholdId = env.HOUSEHOLD_CALENDAR_ID || env.DEFAULT_HOUSEHOLD_CALENDAR_ID || '';
+  const householdId = rawHouseholdId && rawHouseholdId !== familyId ? rawHouseholdId : '';
+  const holidayId = env.JAPAN_HOLIDAY_CALENDAR_ID || '';
+
+  const safeFetch = async (calId: string, label: string): Promise<GoogleCalendarEvent[]> => {
+    if (!calId) return [];
+    try {
+      return await fetchCalendarEvents(token, calId, listParams);
+    } catch (err) {
+      console.warn(`${label}範囲取得エラー:`, err);
+      return [];
+    }
+  };
+
+  const [primaryEvents, familyEvents, householdEvents, holidayEvents] = await Promise.all([
+    safeFetch('primary', 'メインカレンダー'),
+    safeFetch(familyId, '第1家族共用カレンダー'),
+    safeFetch(householdId, '第2家族共用カレンダー'),
+    safeFetch(holidayId, '祝日カレンダー'),
+  ]);
+
+  const items: Array<{ sortMs: number; line: string }> = [];
+
+  const formatAllDayDate = (dateStr?: string): { ms: number; label: string } | null => {
+    if (!dateStr) return null;
+    const p = parseYmdParts(dateStr);
+    if (!p) return null;
+    const ms = makeJstEpochMs(p.year, p.month, p.day, 0, 0, 0);
+    return { ms, label: formatJstYmdWithDowFromMs(ms) };
+  };
+
+  for (const ev of primaryEvents) {
+    const title = String(ev.summary || '');
+    if (isAllDayEvent(ev)) {
+      const d = formatAllDayDate(ev.start?.date);
+      if (d) items.push({ sortMs: d.ms, line: `[メイン終日] ${d.label}: ${title}` });
+    } else if (ev.start?.dateTime && ev.end?.dateTime) {
+      const sMs = new Date(ev.start.dateTime).getTime();
+      const eMs = new Date(ev.end.dateTime).getTime();
+      items.push({
+        sortMs: sMs,
+        line: `[メイン予定] ${formatJstYmdWithDowFromMs(sMs)} ${formatJstHmFromMs(sMs)}〜${formatJstHmFromMs(eMs)}: ${title}`,
+      });
+    }
+  }
+
+  for (const ev of familyEvents) {
+    const title = String(ev.summary || '');
+    if (!title.includes(USER_PREFIX)) continue;
+    if (isAllDayEvent(ev)) {
+      const d = formatAllDayDate(ev.start?.date);
+      if (d) items.push({ sortMs: d.ms, line: `[共用終日] ${d.label}: ${title}` });
+    } else if (ev.start?.dateTime && ev.end?.dateTime) {
+      const sMs = new Date(ev.start.dateTime).getTime();
+      const eMs = new Date(ev.end.dateTime).getTime();
+      items.push({
+        sortMs: sMs,
+        line: `[共用予定] ${formatJstYmdWithDowFromMs(sMs)} ${formatJstHmFromMs(sMs)}〜${formatJstHmFromMs(eMs)}: ${title}`,
+      });
+    }
+  }
+
+  for (const ev of householdEvents) {
+    const title = String(ev.summary || '');
+    const evalRes = evaluateHouseholdEvent(title);
+    if (!evalRes.include) continue;
+    if (isAllDayEvent(ev)) {
+      const d = formatAllDayDate(ev.start?.date);
+      if (d) items.push({ sortMs: d.ms, line: `[${evalRes.category}・終日] ${d.label}: ${title}` });
+    } else if (ev.start?.dateTime && ev.end?.dateTime) {
+      const sMs = new Date(ev.start.dateTime).getTime();
+      const eMs = new Date(ev.end.dateTime).getTime();
+      items.push({
+        sortMs: sMs,
+        line: `[${evalRes.category}] ${formatJstYmdWithDowFromMs(sMs)} ${formatJstHmFromMs(sMs)}〜${formatJstHmFromMs(eMs)}: ${title}`,
+      });
+    }
+  }
+
+  for (const ev of holidayEvents) {
+    const title = String(ev.summary || '');
+    if (isAllDayEvent(ev)) {
+      const d = formatAllDayDate(ev.start?.date);
+      if (d) items.push({ sortMs: d.ms, line: `[祝日] ${d.label}: ${title}` });
+    } else if (ev.start?.dateTime) {
+      const sMs = new Date(ev.start.dateTime).getTime();
+      items.push({ sortMs: sMs, line: `[祝日] ${formatJstYmdWithDowFromMs(sMs)}: ${title}` });
+    }
+  }
+
+  items.sort((a, b) => a.sortMs - b.sortMs);
+  return items.map((item) => item.line);
+}
+
 function buildBoundaryInfo(timedEvents: TimedEventItem[], now: Date): BoundaryInfo {
   const nowMs = now.getTime();
   const activeEvents: TimedEventItem[] = [];

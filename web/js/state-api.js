@@ -38,6 +38,7 @@ var state = {
   authorized: false,
   isSyncing: false,
   isSending: false,
+  sendingStatusText: '',
   isSubmittingReflect: false,
   tab: normalizeTabName(urlParams.tab || INITIAL_TAB),
   listSubTab: 'tasks',
@@ -79,6 +80,123 @@ var state = {
 
 function isGasEnvironment() {
   return typeof google !== 'undefined' && google.script && google.script.run;
+}
+
+function isWorkersApiUrl() {
+  var u = String(state.apiUrl || '').trim();
+  return Boolean(u) && u.indexOf('script.google.com') === -1;
+}
+
+function sendChatStream(payload, handlers) {
+  var h = handlers || {};
+  if (!isWorkersApiUrl()) {
+    var urlErr = new Error('Workers API URLが設定されていません');
+    if (typeof h.onError === 'function') h.onError(urlErr);
+    return Promise.reject(urlErr);
+  }
+
+  var baseUrl = String(state.apiUrl || '').trim().replace(/\/+$/, '');
+  var doneCalled = false;
+  var errorCalled = false;
+
+  function emitError(err) {
+    if (errorCalled) return;
+    errorCalled = true;
+    recordClientError('api:chat/stream', err);
+    if (typeof h.onError === 'function') h.onError(err);
+  }
+
+  function processSseBlock(block) {
+    if (!block) return;
+    var lines = block.split('\n');
+    var eventName = '';
+    var dataLines = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (!line || line.charAt(0) === ':') continue;
+      if (line.indexOf('event:') === 0) {
+        eventName = line.slice(6).trim();
+      } else if (line.indexOf('data:') === 0) {
+        dataLines.push(line.slice(5).replace(/^ /, ''));
+      }
+    }
+    var dataStr = dataLines.join('\n').trim();
+    if (!dataStr) return;
+
+    var parsed = dataStr;
+    try {
+      parsed = JSON.parse(dataStr);
+    } catch (e) {}
+
+    if (eventName === 'status') {
+      if (typeof h.onStatus === 'function') h.onStatus(parsed);
+    } else if (eventName === 'delta') {
+      if (typeof h.onDelta === 'function') h.onDelta(parsed);
+    } else if (eventName === 'done') {
+      doneCalled = true;
+      if (typeof h.onDone === 'function') h.onDone(parsed);
+    } else if (eventName === 'error') {
+      var msg = (parsed && typeof parsed === 'object' && parsed.error)
+        ? String(parsed.error)
+        : (typeof parsed === 'string' ? parsed : 'ストリーミングエラー');
+      emitError(new Error(msg));
+    }
+  }
+
+  return fetch(baseUrl + '/chat/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ authKey: state.authKey, payload: payload })
+  })
+    .then(function(r) {
+      if (!r.ok) {
+        return r.text().then(function(txt) {
+          var errMsg = 'HTTPエラー: ' + r.status;
+          try {
+            var j = JSON.parse(txt);
+            if (j && j.error) errMsg = j.error;
+          } catch (e) {}
+          throw new Error(errMsg);
+        });
+      }
+      if (!r.body || typeof r.body.getReader !== 'function') {
+        throw new Error('ReadableStream がサポートされていません');
+      }
+      var reader = r.body.getReader();
+      var decoder = new TextDecoder('utf-8');
+      var buffer = '';
+
+      function pump() {
+        return reader.read().then(function(result) {
+          if (result.done) {
+            buffer += decoder.decode();
+            buffer = buffer.replace(/\r\n/g, '\n');
+            if (buffer.trim()) {
+              processSseBlock(buffer);
+            }
+            if (!doneCalled && !errorCalled) {
+              emitError(new Error('ストリームが途中で終了しました'));
+            }
+            return;
+          }
+          buffer += decoder.decode(result.value, { stream: true });
+          buffer = buffer.replace(/\r\n/g, '\n');
+          var parts = buffer.split('\n\n');
+          buffer = parts.pop();
+          for (var i = 0; i < parts.length; i++) {
+            if (parts[i].trim()) {
+              processSseBlock(parts[i]);
+            }
+          }
+          return pump();
+        });
+      }
+
+      return pump();
+    })
+    .catch(function(err) {
+      emitError(err);
+    });
 }
 
 function callServerApi(funcName) {

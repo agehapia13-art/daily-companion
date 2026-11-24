@@ -35,7 +35,7 @@
   - **引き算カード（`isTriage`）**: 過密・低気圧・疲労サイン時に先頭配置し、1タップで重タスクを翌日へ一括リスケ。
   - **設定・診断モーダル**: 接続先 URL・認証キー・外観テーマ設定に加え、診断ログコピー・未同期アウトボックス破棄・スプレッドシートから D1 への手動取り込み（`apiImportFromSheets`）に対応。
 - **Chat（傾聴・整理・DB操作・Web検索相談）**:
-  - 論理日当日（03:00〜翌02:59）のログを復元。写真送信（JPEG圧縮 → Drive保存）、インライン変数ピル挿入（Lists タブ連携）、Google Docs/Drive リンクカード、エラー時の再試行・入力復元を完備。
+  - 論理日当日（03:00〜翌02:59）のログを復元。写真送信（JPEG圧縮 → Drive保存）、インライン変数ピル挿入（Lists タブ連携）、Google Docs/Drive リンクカード、エラー時の再試行・入力復元を完備。Workers API URL 設定時は `POST /chat/stream` による SSE ストリーミング受信（ステータス表示・リアルタイム描画）に対応。
   - **スタンプ反応 vs テキスト返信（役割分離）**: DB操作・所要時間変更・相談・調べ物時は `reply_mode: "reply"`＋実行バッジ（`.quiet-badge`）、日常のつぶやき・振り返りはユーザー吹き出し下へ絵文字スタンプ反応（`.reaction-chip`）を中心に控えめに応答。
 - **Lists（一覧・即実行・変数挿入）**:
   - `Tasks`（7大生活プリフィックス絞込・`docUrl` 資料ボタン・`memo` 吹き出し確認）・`Shopping`・`Stock`（`memo` 吹き出し確認）・`Habits`（`cycle_stamps` 経過日数順）。
@@ -108,6 +108,10 @@
 │   ├── DashboardHtml.html    # build-dashboard.js が web/ から生成する GAS 配信用バンドルHTML
 │   ├── Setup.js              # 初期設定・3トリガー登録・プロンプト同期・月報再作成
 │   └── Tests.js              # 手動実行テスト・ドライランシナリオ・モデル疎通確認スイート
+├── workers/                  # Cloudflare Workers + D1 高速バックエンド (TypeScript)
+│   ├── schema.sql            # D1 (SQLite) スキーマ定義
+│   ├── wrangler.toml         # Workers / D1 / KV バインディング設定
+│   └── src/                  # index / api-core / chat (SSE) / db / calendar / weather / media / deck-engine / sheets-mirror / sheets-import
 ├── scripts/
 │   ├── build-dashboard.js       # web/ → src/DashboardHtml.html & docs/ ビルド ＆ 構文検証
 │   ├── migrate-task-prefixes.js # 未完了タスク7大プリフィックス移行ツール
@@ -128,7 +132,7 @@
 2. `apiStartAction(authKey, cardPayload)` — 行動開始・`activeSession` 保存・終了見込み時刻に基づく次手先読み
 3. `apiCompleteAction(authKey, completePayload)` — 完了/進行記録（`keepOpen: true` でタスク・ストックを未完のまま `【進行】` 記録可）・写真Drive保存・周期スタンプ・一括引き算リスケ・睡眠ログ反映
 4. `apiDismissCardToday(authKey, cardId)` — 左スワイプでの当日提案除外
-5. `apiSendChat(authKey, messagePayload)` — マルチモーダルChat送信（Gemini 3.5 Flash-Lite 1段＋必要時オンデマンド2段目、各種DB/Docs/Calendar更新、`state_changes`、スタンプ/返信永続化）
+5. `apiSendChat(authKey, messagePayload)` — マルチモーダルChat送信（Cloudflare Workers 接続時は `POST /chat/stream` による SSE リアルタイムストリーミング＋2段目Web検索/広域カレンダー＋裏側シートミラー、GAS 接続時は一括 JSON 応答）
 6. `apiMutateListItem(authKey, mutation)` — Lists タブの Shopping 購入済トグル
 7. `apiRefreshDeck(authKey, excludeIds)` — `別の候補` キャッシュ枯渇時の新規手札補充
 

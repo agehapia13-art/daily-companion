@@ -8,7 +8,8 @@ import {
   apiRefreshDeck,
   apiStartAction,
   handleInternalExportDay,
-  handleInternalSyncMemory
+  handleInternalSyncMemory,
+  handleScheduledCron
 } from './api-core';
 import { handleChatStream } from './chat';
 import { Env } from './types';
@@ -119,5 +120,9 @@ export default {
     }
 
     return jsonResponse({ ok: false, error: 'Not Found' }, 404);
+  },
+
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(handleScheduledCron(event, env, ctx));
   }
 };

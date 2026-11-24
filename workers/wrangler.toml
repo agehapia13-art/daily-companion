@@ -5,11 +5,11 @@ compatibility_date = "2024-11-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "companion-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "1a9fe0eb-ab01-4218-a4bd-497778eca98d"
 
 [[kv_namespaces]]
 binding = "CACHE"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "5ec93de9113548e88f6e9bafc199d21c"
 
 [vars]
 JAPAN_HOLIDAY_CALENDAR_ID = "ja.japanese#holiday@group.v.calendar.google.com"
@@ -20,3 +20,6 @@ HOME_NAME = "自宅(横浜市磯子区)"
 WORK_LATITUDE = "35.6580"
 WORK_LONGITUDE = "139.7016"
 WORK_NAME = "職場(渋谷)"
+
+[triggers]
+crons = ["0 20 * * *", "0 8 * * *"]

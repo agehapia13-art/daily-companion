@@ -26,6 +26,13 @@ function dailyMidnightBatch() {
   const memory = getMemory();
   const targetDateEvents = (typeof getTodayEventsList === 'function') ? getTodayEventsList(yesterday) : [];
 
+  const workersSyncPayload = {
+    memoryUpdates: {},
+    routineUpdates: [],
+    newTasks: [],
+    fastStateUpdates: null
+  };
+
   let isDailyReportSuccess = false;
 
   // ----------------------------------------------------
@@ -72,18 +79,23 @@ function dailyMidnightBatch() {
       );
       if (memoryUpdates.rolling_memory) {
         setMemoryValue('rolling_memory', memoryUpdates.rolling_memory);
+        workersSyncPayload.memoryUpdates.rolling_memory = memoryUpdates.rolling_memory;
       }
       if (memoryUpdates.profile) {
         updateProfileSafely(memoryUpdates.profile);
+        workersSyncPayload.memoryUpdates.profile = getMemory().profile || memoryUpdates.profile;
       }
       if (memoryUpdates.cycle_stamps) {
         setMemoryValue('cycle_stamps', memoryUpdates.cycle_stamps);
+        workersSyncPayload.memoryUpdates.cycle_stamps = memoryUpdates.cycle_stamps;
       }
       if (memoryUpdates.weekly_summary) {
         setMemoryValue('weekly_summary', memoryUpdates.weekly_summary);
+        workersSyncPayload.memoryUpdates.weekly_summary = memoryUpdates.weekly_summary;
       }
       if (memoryUpdates.dictionary) {
         updateDictionarySafely(memoryUpdates.dictionary);
+        workersSyncPayload.memoryUpdates.dictionary = getMemory().dictionary || memoryUpdates.dictionary;
       }
       Logger.log('中長期メモリー・直近活動バッファ・用語辞書更新完了');
     }
@@ -139,6 +151,11 @@ function dailyMidnightBatch() {
       if (isRoutineExpired_(r, now, todayStr)) {
         routineSheet.getRange(r.rowIndex, 6).setValue('期間満了');
         routineSheet.getRange(r.rowIndex, 7).setValue(todayStr);
+        workersSyncPayload.routineUpdates.push({
+          title: r.ruleName,
+          status: '期間満了',
+          completed_at: todayStr
+        });
         Logger.log(`期間限定ルーティンが満了日を過ぎたため自動停止しました: ${r.ruleName}`);
         continue;
       }
@@ -190,6 +207,7 @@ function dailyMidnightBatch() {
         const remindCtx = (typeof normalizeTaskRemindContext_ === 'function')
           ? normalizeTaskRemindContext_(r.ruleName, '日課・隙間時間')
           : '日課・隙間時間';
+        const taskEstMins = r.estimatedMins || (typeof getDefaultTaskEstimatedMins_ === 'function' ? getDefaultTaskEstimatedMins_(r.ruleName) : 30);
         appendRowSafely_(taskSheet, [
           taskId,
           r.ruleName,
@@ -200,9 +218,25 @@ function dailyMidnightBatch() {
           r.memo || '定期ルーティン自動投入',
           remindCtx,
           '',
-          r.estimatedMins || (typeof getDefaultTaskEstimatedMins_ === 'function' ? getDefaultTaskEstimatedMins_(r.ruleName) : 30)
+          taskEstMins
         ]);
         updateRoutineLastGenerated(r.rowIndex, todayStr);
+        workersSyncPayload.newTasks.push({
+          id: taskId,
+          title: r.ruleName,
+          due_date: todayStr,
+          status: '未完了',
+          created_at: todayStr,
+          completed_at: '',
+          memo: r.memo || '定期ルーティン自動投入',
+          remind_context: remindCtx,
+          doc_url: '',
+          estimated_mins: taskEstMins
+        });
+        workersSyncPayload.routineUpdates.push({
+          title: r.ruleName,
+          last_generated_at: todayStr
+        });
         Logger.log(`ルーティンタスク投入成功: ${r.ruleName}`);
       }
     }
@@ -231,6 +265,7 @@ function dailyMidnightBatch() {
       createMonthlyReport(monthlyJournal, prevMonthStr);
 
       setMemoryValue('monthly_report_ready', 'TRUE');
+      workersSyncPayload.memoryUpdates.monthly_report_ready = 'TRUE';
       Logger.log('月報生成・Notion投稿・フラグ設定完了: ' + prevMonthStr);
     }
   } catch (monthlyErr) {
@@ -300,12 +335,56 @@ function dailyMidnightBatch() {
     });
     fastState.listCache = buildListsSnapshot(freshMemory, now);
     saveFastState(fastState, true);
+    workersSyncPayload.fastStateUpdates = {
+      dayKey: fastState.dayKey,
+      dailyBriefing: fastState.dailyBriefing,
+      aiDeck: fastState.aiDeck,
+      listCache: fastState.listCache
+    };
     Logger.log(`v2 初期化完了 (dayKey: ${fastState.dayKey}, cards: ${fastState.aiDeck.cards.length}, lowCards: ${fastState.aiDeck.lowCards.length})`);
   } catch (v2Err) {
     Logger.log('v2 初期化エラー: ' + v2Err.message);
   }
 
+  // ----------------------------------------------------
+  // 8. Cloudflare Workers (D1) への深夜バッチ結果書き戻し
+  // ----------------------------------------------------
+  syncMidnightBatchToWorkers_(workersSyncPayload);
+
   Logger.log('=== 深夜統合バッチ終了 ===');
+}
+
+/**
+ * 深夜統合バッチの更新内容を Cloudflare Workers (/internal/sync-memory) 経由で D1 へ書き戻す
+ * @param {Object} payload
+ * @private
+ */
+function syncMidnightBatchToWorkers_(payload) {
+  try {
+    const config = getConfig();
+    if (!config.workersApiUrl || !config.internalApiSecret) {
+      Logger.log('Workers 同期スキップ: WORKERS_API_URL または INTERNAL_API_SECRET が未設定です');
+      return;
+    }
+    const url = `${config.workersApiUrl}/internal/sync-memory`;
+    const res = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: {
+        'X-Internal-Secret': config.internalApiSecret
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    const code = res.getResponseCode();
+    if (code >= 200 && code < 300) {
+      Logger.log('Workers D1 深夜バッチ同期成功: ' + res.getContentText());
+    } else {
+      Logger.log(`Workers D1 深夜バッチ同期警告 (${code}): ${res.getContentText()}`);
+    }
+  } catch (err) {
+    Logger.log('Workers D1 深夜バッチ同期エラー: ' + err.message);
+  }
 }
 
 /**

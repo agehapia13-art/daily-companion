@@ -127,7 +127,9 @@ function getConfig() {
       name: '職場(渋谷)'
     },
     familyCalendarId: props.FAMILY_CALENDAR_ID ? props.FAMILY_CALENDAR_ID.trim() : '',
-    householdCalendarId: props.HOUSEHOLD_CALENDAR_ID ? props.HOUSEHOLD_CALENDAR_ID.trim() : SYSTEM_CONSTANTS.DEFAULT_HOUSEHOLD_CALENDAR_ID
+    householdCalendarId: props.HOUSEHOLD_CALENDAR_ID ? props.HOUSEHOLD_CALENDAR_ID.trim() : SYSTEM_CONSTANTS.DEFAULT_HOUSEHOLD_CALENDAR_ID,
+    workersApiUrl: props.WORKERS_API_URL ? props.WORKERS_API_URL.trim().replace(/\/+$/, '') : '',
+    internalApiSecret: props.INTERNAL_API_SECRET ? props.INTERNAL_API_SECRET.trim() : ''
   };
 }
 

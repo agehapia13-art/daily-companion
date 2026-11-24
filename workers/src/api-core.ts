@@ -1138,6 +1138,18 @@ export async function handleInternalSyncMemory(
         completed_at?: string;
         memo?: string;
       }>;
+      newTasks?: Array<{
+        id: string;
+        title: string;
+        due_date?: string;
+        status?: string;
+        created_at?: string;
+        completed_at?: string;
+        memo?: string;
+        remind_context?: string;
+        doc_url?: string;
+        estimated_mins?: number;
+      }>;
       fastStateUpdates?: Partial<FastState>;
     };
 
@@ -1196,9 +1208,44 @@ export async function handleInternalSyncMemory(
       }
     }
 
+    let insertedTasks = 0;
+    if (Array.isArray(body.newTasks)) {
+      for (const t of body.newTasks) {
+        if (!t || !t.id || !t.title) continue;
+        await env.DB.prepare(
+          `INSERT OR IGNORE INTO tasks (id, title, due_date, status, created_at, completed_at, memo, remind_context, doc_url, estimated_mins)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+          .bind(
+            String(t.id),
+            String(t.title),
+            String(t.due_date || ''),
+            String(t.status || '未完了'),
+            String(t.created_at || ''),
+            String(t.completed_at || ''),
+            String(t.memo || ''),
+            String(t.remind_context || ''),
+            String(t.doc_url || ''),
+            Number(t.estimated_mins) > 0 ? Number(t.estimated_mins) : 30
+          )
+          .run();
+        insertedTasks++;
+      }
+      if (insertedTasks > 0) {
+        mirrorEvents.push({ type: 'sync_snapshot' });
+      }
+    }
+
     if (body.fastStateUpdates && typeof body.fastStateUpdates === 'object') {
       const fastState = await loadFastState(env);
+      const preservedSleepSession =
+        fastState.activeSession && fastState.activeSession.isSleepCard
+          ? fastState.activeSession
+          : null;
       Object.assign(fastState, body.fastStateUpdates);
+      if (preservedSleepSession && !fastState.activeSession) {
+        fastState.activeSession = preservedSleepSession;
+      }
       const { state: normalized } = ensureLogicalDayBoundary(fastState);
       await saveFastState(env, normalized);
       mirrorEvents.push({ type: 'sync_snapshot' });
@@ -1213,6 +1260,7 @@ export async function handleInternalSyncMemory(
       data: {
         updatedMemoryKeys,
         updatedRoutines,
+        insertedTasks,
         syncedAt: formatJstIso()
       }
     });
@@ -1221,5 +1269,77 @@ export async function handleInternalSyncMemory(
       { ok: false, error: err instanceof Error ? err.message : String(err) },
       500
     );
+  }
+}
+
+export async function handleScheduledCron(
+  event: ScheduledEvent,
+  env: Env,
+  _ctx: ExecutionContext
+): Promise<void> {
+  const now = new Date();
+  const cron = String(event?.cron || '');
+  console.log(`[Cron] Triggered: ${cron} at ${formatJstIso(now)}`);
+
+  try {
+    const [fastState, memory, workBoundary] = await Promise.all([
+      loadFastState(env, now),
+      getMemory(env),
+      getWorkModeAndBoundary(env, now)
+    ]);
+    const mirrorEvents: MirrorEvent[] = [];
+
+    if (cron === '0 20 * * *') {
+      // 05:00 JST: 天気・気圧定期更新バッチ
+      const isCommuteDay = workBoundary.workMode === 'commute';
+      const freshW = await fetchWeatherAndPressure(env, isCommuteDay);
+      if (freshW && freshW.weatherInfo) {
+        await Promise.all([
+          setMemoryValue(env, 'weather_info', freshW.weatherInfo),
+          setMemoryValue(env, 'pressure_alert', freshW.pressureAlert)
+        ]);
+        fastState.weatherFetchedAt = formatJstIso(now);
+        refreshBriefingWeatherLine(
+          fastState,
+          freshW.weatherInfo,
+          freshW.pressureAlert,
+          workBoundary.workMode
+        );
+        await saveFastState(env, fastState);
+        mirrorEvents.push(
+          { type: 'set_memory', key: 'weather_info', value: freshW.weatherInfo },
+          { type: 'set_memory', key: 'pressure_alert', value: freshW.pressureAlert },
+          { type: 'sync_snapshot' }
+        );
+      }
+    } else if (cron === '0 8 * * *') {
+      // 17:00 JST: 夜シフト定期再編成バッチ
+      const [lists, todayLogs] = await Promise.all([
+        buildListsSnapshot(env, memory, now),
+        getLogicalTodayLogs(env, now)
+      ]);
+      fastState.aiDeck = await generateAiDeck(env, {
+        reason: 'evening_batch',
+        now,
+        memory,
+        fastState,
+        workMode: workBoundary.workMode,
+        todayEvents: workBoundary.todayEvents,
+        boundaryInfo: workBoundary.boundaryInfo,
+        tasks: lists.tasks,
+        stock: lists.stock,
+        todayLogsText: buildCondensedLogsFromArray(todayLogs),
+        useFlashModel: false
+      });
+      fastState.listCache = lists;
+      await saveFastState(env, fastState);
+      mirrorEvents.push({ type: 'sync_snapshot' });
+    }
+
+    if (mirrorEvents.length > 0) {
+      await mirrorToSheets(env, mirrorEvents);
+    }
+  } catch (err) {
+    console.error('[Cron] Execution error:', err instanceof Error ? err.message : String(err));
   }
 }

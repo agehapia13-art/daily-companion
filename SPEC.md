@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-24 18:57 JST
+> **最終更新**: 2026-11-24 19:24 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -404,3 +404,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 | **2026-11-24 18:27** | Cloudflare Workers Phase 2: SSE チャットストリーミング ＆ バックグラウンド反映実装 | ① `workers/src/prompts.ts`・`workers/src/chat.ts`・`workers/src/calendar.ts`（`getEventsInDateRange`）を実装し、`POST /chat/stream` で Gemini `streamGenerateContent?alt=sse` から `reply_text` 増分をリアルタイム配信（Web検索・広域カレンダー2段目対応、画像Drive並列保存、DB・カレンダー更新後の `ctx.waitUntil` シートミラー含む）。② `web/js/state-api.js`（`isWorkersApiUrl`, `sendChatStream`）および `web/js/chat-lists-view.js`（`executeChatSend`）で SSE 受信・リアルタイムバブル描画に対応（`dc-pwa-v40`）。 |
 | **2026-11-24 18:26** | Cloudflare Workers Phase 2 フロントエンド（SSE チャットストリーミング受信・リアルタイム描画）実装 | ① `web/js/state-api.js` に `isWorkersApiUrl()` および `sendChatStream(payload, handlers)`（`POST /chat/stream` の SSE パーサ：`status` / `delta` / `done` / `error`）を追加。② `web/js/chat-lists-view.js` の `executeChatSend()` / `renderChat()` で Workers API URL 時はステータス一時表示・`STREAM_` 仮バブルのリアルタイム追記・`done` 確定反映・`error` フォールバックへ分岐するよう実装（GAS URL 時は従来の `apiSendChat` を維持）。 |
 | **2026-11-24 18:57** | Lists タブ（Tasks / Shopping / Stock / Habits）の期限・所要時間・Habits タイトル表示不具合の修正 | Workers 正本 API（`workers/src/types.ts`）とフロントエンド／GAS フォールバック間の `ListsSnapshot` スキーマ乖離（`dueDate`/`due`, `estimatedMins`/`mins`, `label`/`title`, `category`/`cat`）を解消するため、`web/js/chat-lists-view.js`（旧キャッシュ互換フォールバック付き）・`src/FastState.js`・`src/DeckEngine.js` を公式契約（`dueDate`, `estimatedMins`, `label`, `category`）へ統一（`dc-pwa-v41`）。 |
+| **2026-11-24 19:24** | `POST /chat/stream` 送信時に「メッセージまたは画像を入力してください。」エラーが即返却されるバグ修正 | フロントエンド（`web/js/state-api.js`）が `{ authKey, payload }` 形式で送信する一方、Workers（`workers/src/index.ts`）が `messagePayload` / `args` / フラットボディのみを参照し `payload` キーを解釈していなかったため、`payload` キーも解決するよう修正。 |

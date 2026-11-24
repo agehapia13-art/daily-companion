@@ -65,6 +65,7 @@ export default {
         const payload = JSON.parse(rawText) as {
           authKey?: string;
           messagePayload?: unknown;
+          payload?: unknown;
           args?: unknown[];
           text?: string;
           imageBase64?: string;
@@ -76,9 +77,11 @@ export default {
         const messagePayload =
           payload?.messagePayload !== undefined
             ? payload.messagePayload
-            : Array.isArray(payload?.args) && payload.args.length > 1
-              ? payload.args[1]
-              : payload;
+            : payload?.payload !== undefined
+              ? payload.payload
+              : Array.isArray(payload?.args) && payload.args.length > 1
+                ? payload.args[1]
+                : payload;
 
         return handleChatStream(env, ctx, authKey, messagePayload);
       } catch (err) {

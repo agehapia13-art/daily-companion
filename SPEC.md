@@ -40,32 +40,39 @@
 
 ## 2. システム全体アーキテクチャ・通信・認証
 
-### 2.1 コンポーネント構成
+### 2.1 コンポーネント構成（現行本番: Cloudflare Workers + D1）
+
+> [!IMPORTANT]
+> **現在のリアルタイム API・DB 正本は `workers/`（Cloudflare Workers + D1）** です。GAS（`src/`）は深夜 `03:00` バッチ（Notion 日報・月報・長期記憶代謝）および緊急フォールバック用として稼働しています。
 
 ```mermaid
 flowchart LR
-  PWA["PWA Frontend (GitHub Pages: docs/)<br/>localStorage キャッシュ + Service Worker"]
-  GAS["GAS Web App Backend (src/)<br/>doPost / doGet + PropertiesService (V2_FAST_STATE)"]
-  SS["Google スプレッドシート (正本)<br/>tasks / shopping / input_stock / routines / logs / memory"]
-  Drive["Google Drive<br/>写真保存 (DRIVE_FOLDER_ID)"]
-  Cal["Google カレンダー<br/>メイン + 共用 + 日本祝日"]
+  PWA["PWA Frontend (GitHub Pages: docs/)<br/>localStorage キャッシュ + Service Worker + SSE受信"]
+  CFW["Cloudflare Workers (workers/src/)<br/>API Gateway + /chat/stream (SSE) + KV Cache"]
+  D1["Cloudflare D1 (SQLite 正本)<br/>fast_state / tasks / shopping / input_stock / routines / logs / memory"]
+  SS["Google スプレッドシート (確認用ミラー)<br/>ctx.waitUntil() で非同期反映 (D1_LAST_MIRRORED_AT)"]
+  GAS["GAS (src/)<br/>深夜03:00 Notionバッチ & フォールバック"]
+  Drive["Google Drive API v3<br/>写真保存 (DRIVE_FOLDER_ID)"]
+  Cal["Google カレンダー API v3<br/>4カレンダー並列取得 (メイン+共用+祝日)"]
   Weather["Open-Meteo API<br/>天気 + 気圧急降下"]
-  Gemini["Gemini API<br/>gemini-3.8-flash / gemini-3.5-flash-lite"]
+  Gemini["Gemini API<br/>gemini-3.8-flash (SSE) / gemini-3.5-flash-lite"]
   Notion["Notion API<br/>日報DB / 月報DB"]
 
-  PWA <-->|"POST (text/plain JSON)"| GAS
+  PWA <-->|"HTTPS JSON / SSE"| CFW
+  CFW <--> D1
+  CFW -.->|"非同期ミラー"| SS
+  CFW --> Drive
+  CFW <-->|"Promise.all 並列"| Cal
+  CFW --> Weather
+  CFW <--> Gemini
   GAS <--> SS
-  GAS --> Drive
-  GAS <--> Cal
-  GAS --> Weather
-  GAS <--> Gemini
   GAS <--> Notion
 ```
 
-### 2.2 通信方式（CORS 回避）
-- GAS Web App はプリフライトリクエスト（`OPTIONS`）に応答できないため、PWA（GitHub Pages）からの通信はすべて `Content-Type: text/plain;charset=utf-8`・`method: 'POST'`・`redirect: 'follow'` の Simple Request とし、ボディに `{ apiAction: string, args: Array<any> }` を JSON 文字列として送信する。
-- レスポンスは `{ ok: true, data: ... }` または `{ ok: false, error: string }` の JSON とする。
-- GAS 側の HTML Service（`doGet`）併用時にも動作するよう `google.script.run` フォールバックも許容できる設計とする。
+### 2.2 通信方式
+- **Cloudflare Workers 接続時（本番標準）**: CORS ヘッダ付き `POST /`（JSON `{ apiAction, args }`）および `POST /chat/stream`（`text/event-stream` SSE リアルタイム配信）でリダイレクトなしに直接通信する。
+- **GAS フォールバック接続時**: GAS Web App はプリフライトリクエスト（`OPTIONS`）に応答できないため、`Content-Type: text/plain;charset=utf-8`・`method: 'POST'`・`redirect: 'follow'` の Simple Request を使用する。
+- レスポンスは `{ ok: true, data: ... }` または `{ ok: false, error: string }` の JSON（SSE 時は `status` / `delta` / `done` / `error` イベント）とする。
 
 ### 2.3 認証と初期セットアップ
 - **バックエンド検証**: スクリプトプロパティ `DASHBOARD_ACCESS_KEY`（未設定時は `OWNER_AUTH_SECRET` 等からの SHA-256 先頭16文字、または環境固有ソルト生成キー）とリクエストの `authKey` を照合。不一致時は `{ authorized: false, error: '...' }` を返却して全データ操作を遮断する。

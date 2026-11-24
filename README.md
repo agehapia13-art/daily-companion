@@ -1,7 +1,7 @@
-# Companion Cockpit / Daily Companion v2 (PWA × GAS × Gemini × Spreadsheet × Notion)
+# Companion Cockpit / Daily Companion v2 (PWA × Cloudflare Workers/D1 × GAS × Gemini × Notion)
 
 サウンドディレクター専属の生活伴走コックピットシステムです。  
-**「状況の鏡 × 行動の触媒（Home）」**・**「傾聴・整理・相談（Chat）」**・**「一覧・即実行（Lists）」** の 3タブ構成 PWA と、Google Apps Script (GAS)・Gemini（`gemini-3.5-flash-lite` / `gemini-3.8-flash`）・Googleスプレッドシート・Googleカレンダー・Google Drive/Docs・Notion API・Open-Meteo を統合しています（v2 で LINE Bot / Webhook は廃止し PWA 単一窓口へ一本化）。
+**「状況の鏡 × 行動の触媒（Home）」**・**「傾聴・整理・相談（Chat）」**・**「一覧・即実行（Lists）」** の 3タブ構成 PWA と、**Cloudflare Workers + D1（リアルタイム API・DB 正本）**・Google Apps Script (GAS：深夜03:00 Notionバッチ＆フォールバック)・Gemini（`gemini-3.5-flash-lite` / `gemini-3.8-flash`）・Googleスプレッドシート（確認用非同期ミラー）・Googleカレンダー・Google Drive/Docs・Notion API・Open-Meteo を統合しています。
 
 > 🧭 **最高憲章**: 設計・実装原則はリポジトリ内の [GRAND_DESIGN.md](GRAND_DESIGN.md)・[SPEC.md](SPEC.md)・[AGENTS.md](AGENTS.md)・[.agent/rules/prompt-architecture.md](.agent/rules/prompt-architecture.md) に準拠します。
 

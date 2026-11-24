@@ -281,6 +281,14 @@ export async function mirrorToSheets(env: Env, events: MirrorEvent[]): Promise<v
   if (!events || events.length === 0 || !env.SPREADSHEET_ID) return;
 
   try {
+    // 安全ガード: 初回シート取り込み（D1_INITIALIZED = TRUE）が完了するまではシートを上書きしない
+    const initRow = await env.DB.prepare("SELECT value FROM memory WHERE key = 'D1_INITIALIZED'").first<{
+      value?: string;
+    }>();
+    if (!initRow || initRow.value !== 'TRUE') {
+      return;
+    }
+
     const accessToken = await getGoogleAccessToken(env);
     const spreadsheetId = env.SPREADSHEET_ID;
 

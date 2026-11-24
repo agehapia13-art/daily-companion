@@ -262,6 +262,14 @@ export async function importAllFromSheets(
     }
   }
 
+  statements.push(
+    env.DB.prepare('INSERT OR REPLACE INTO memory (key, value, updated_at) VALUES (?, ?, ?)').bind(
+      'D1_INITIALIZED',
+      'TRUE',
+      nowIso
+    )
+  );
+
   await runBatchChunked(env.DB, statements);
   return { imported };
 }

@@ -38,7 +38,7 @@
   - 論理日当日（03:00〜翌02:59）のログを復元。写真送信（JPEG圧縮 → Drive保存）、インライン変数ピル挿入（Lists タブ連携）、Google Docs/Drive リンクカード、エラー時の再試行・入力復元を完備。Workers API URL 設定時は `POST /chat/stream` による SSE ストリーミング受信（ステータス表示・リアルタイム描画）に対応。
   - **スタンプ反応 vs テキスト返信（役割分離）**: DB操作・所要時間変更・相談・調べ物時は `reply_mode: "reply"`＋実行バッジ（`.quiet-badge`）、日常のつぶやき・振り返りはユーザー吹き出し下へ絵文字スタンプ反応（`.reaction-chip`）を中心に控えめに応答。
 - **Lists（一覧・即実行・変数挿入）**:
-  - `Tasks`（7大生活プリフィックス絞込・`docUrl` 資料ボタン・`memo` 吹き出し確認）・`Shopping`・`Stock`（`memo` 吹き出し確認）・`Habits`（`cycle_stamps` 経過日数順）。
+  - `Tasks`（7大生活プリフィックス絞込・期限表示・見込み時間調整・`docUrl` 資料ボタン・`memo` 吹き出し確認）・`Shopping`（カテゴリ表示）・`Stock`（見込み時間表示/調整・`memo` 吹き出し確認）・`Habits`（`cycle_stamps` 経過日数順・見込み時間表示/調整）。スナップショット契約は `workers/src/types.ts`（`dueDate`, `estimatedMins`, `label`, `category`）に統一。
   - カードタップで下部共有入力欄へ変数ピル挿入、`▶` ボタンで Home タイマー即開始、`Shopping` のみ `✓` で即時購入済切替。
 
 ### 2. 二層高速ステート ＆ 役割分離（Code vs AI）

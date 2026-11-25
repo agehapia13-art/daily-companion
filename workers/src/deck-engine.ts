@@ -24,7 +24,7 @@ import {
 } from './utils';
 
 const GEMINI_35_LITE_MODEL = 'gemini-3.5-flash-lite';
-const GEMINI_FLASH_MODEL = 'gemini-3.8-flash';
+const GEMINI_FLASH_MODEL = 'gemini-3.5-flash-lite';
 
 const DECK_RESPONSE_SCHEMA = {
   type: 'OBJECT',

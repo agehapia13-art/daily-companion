@@ -39,7 +39,7 @@ import {
 import { fetchWeatherAndPressure, isWeatherStale } from './weather';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const DEFAULT_CHAT_MODEL = 'gemini-3.8-flash';
+const DEFAULT_CHAT_MODEL = 'gemini-3.5-flash-lite';
 const WEB_SEARCH_MODEL = 'gemini-3.5-flash-lite';
 const ALLOWED_THINKING_LEVELS = new Set(['minimal', 'low', 'medium', 'high']);
 

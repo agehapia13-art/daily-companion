@@ -654,6 +654,27 @@ export async function apiStartAction(
   };
 }
 
+export async function apiPausedSession(
+  env: Env,
+  ctx: ExecutionContext,
+  authKey: string,
+  payload: Record<string, any> | null
+) {
+  if (!verifyDashboardAccess(env, authKey)) {
+    return unauthorizedPayload();
+  }
+  const now = new Date();
+  const fastState = await loadFastState(env, now);
+  const p = payload && typeof payload === 'object' ? payload : {};
+  fastState.pausedSession = p.pausedSession ? (p.pausedSession as any) : null;
+  if (Object.prototype.hasOwnProperty.call(p, 'activeSession')) {
+    fastState.activeSession = p.activeSession ? (p.activeSession as any) : null;
+  }
+  await saveFastState(env, fastState);
+  ctx.waitUntil(mirrorToSheets(env, [{ type: 'sync_snapshot' }]));
+  return { authorized: true, state: fastState };
+}
+
 export async function apiCompleteAction(
   env: Env,
   ctx: ExecutionContext,

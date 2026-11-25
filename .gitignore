@@ -10,4 +10,5 @@ service-account.json
 .env.*
 .wrangler/
 .dev.vars
+.secrets/
 

@@ -1428,7 +1428,7 @@
 
     /* Lists */
     .lists-header {
-      padding: calc(14px + env(safe-area-inset-top)) 16px 10px;
+      padding: calc(34px + env(safe-area-inset-top)) 16px 10px;
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -1603,7 +1603,7 @@
 
     .toast {
       position: fixed;
-      top: max(14px, env(safe-area-inset-top));
+      top: calc(34px + env(safe-area-inset-top));
       left: 50%;
       transform: translateX(-50%);
       padding: 8px 16px;
@@ -1702,6 +1702,50 @@
     }
     .fade-in {
       animation: fadeInUp 0.2s ease-out both;
+    }
+
+    .time-adjust-wrap {
+      margin-top: 10px;
+      text-align: center;
+      width: 100%;
+    }
+    .time-adjust-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--dc-btn-soft-glass);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--dc-glass-border);
+      box-shadow: inset 0 1px 0 var(--dc-glass-inset);
+      color: var(--dc-text-sub);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      padding: 6px 14px;
+      border-radius: 999px;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .time-adjust-toggle:active {
+      background: var(--dc-btn-soft-hover);
+      transform: scale(0.97);
+    }
+    .time-adjust-panel {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px 16px;
+      border-radius: 18px;
+    }
+    .time-adjust-input {
+      background: var(--dc-btn-soft-glass);
+      border: 1px solid var(--dc-glass-border);
+      color: var(--dc-text-main);
+      border-radius: 10px;
+      padding: 5px 10px;
+      font-size: 14px;
+      font-weight: 500;
+      font-family: inherit;
     }
   </style>
 </head>
@@ -1810,7 +1854,21 @@
       <div class="custom-btns">
         <button type="button" onclick="saveSettings()" class="btn-solid" style="width:100%;padding:11px;">保存して同期</button>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v29</div>
+      <div id="settingsDiagnostics" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-subtle, rgba(128,128,128,0.2));">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span class="field-label" style="margin:0;">診断・エラーログ (<span id="errorLogCount">0</span>件)</span>
+          <button type="button" onclick="clearDiagnosticLogs()" style="background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;padding:2px 6px;">クリア</button>
+        </div>
+        <pre id="settingsErrorLogPreview" style="max-height:110px;overflow:auto;font-size:11px;line-height:1.4;padding:8px;border-radius:8px;background:rgba(0,0,0,0.06);color:var(--text-muted);white-space:pre-wrap;word-break:break-all;margin:0 0 8px 0;">エラーログはありません</pre>
+        <div style="display:flex;gap:8px;">
+          <button type="button" onclick="copyDiagnosticLogs()" class="settings-row-btn" style="flex:1;justify-content:center;padding:8px 10px;font-size:12px;">診断ログをコピー</button>
+          <button type="button" id="discardOutboxBtn" onclick="confirmDiscardOutbox()" class="settings-row-btn hidden" style="flex:1;justify-content:center;padding:8px 10px;font-size:12px;color:#ef4444;">未同期を破棄</button>
+        </div>
+        <div style="margin-top:8px;">
+          <button type="button" id="importSheetsBtn" onclick="runImportFromSheets()" class="settings-row-btn" style="width:100%;justify-content:center;padding:8px 10px;font-size:12px;">シートからD1へ取り込む</button>
+        </div>
+      </div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v43</div>
     </div>
   </div>
 
@@ -1864,6 +1922,7 @@
       authorized: false,
       isSyncing: false,
       isSending: false,
+      sendingStatusText: '',
       isSubmittingReflect: false,
       tab: normalizeTabName(urlParams.tab || INITIAL_TAB),
       listSubTab: 'tasks',
@@ -1898,6 +1957,8 @@
       inFlightMutations: 0,
       pendingOutbox: [],
       isFlushingOutbox: false,
+      outboxLastError: '',
+      errorLogs: [],
       toastTimer: null
     };
 
@@ -1905,7 +1966,125 @@
       return typeof google !== 'undefined' && google.script && google.script.run;
     }
 
+    function isWorkersApiUrl() {
+      var u = String(state.apiUrl || '').trim();
+      return Boolean(u) && u.indexOf('script.google.com') === -1;
+    }
+
+    function sendChatStream(payload, handlers) {
+      var h = handlers || {};
+      if (!isWorkersApiUrl()) {
+        var urlErr = new Error('Workers API URLが設定されていません');
+        if (typeof h.onError === 'function') h.onError(urlErr);
+        return Promise.reject(urlErr);
+      }
+
+      var baseUrl = String(state.apiUrl || '').trim().replace(/\/+$/, '');
+      var doneCalled = false;
+      var errorCalled = false;
+
+      function emitError(err) {
+        if (errorCalled) return;
+        errorCalled = true;
+        recordClientError('api:chat/stream', err);
+        if (typeof h.onError === 'function') h.onError(err);
+      }
+
+      function processSseBlock(block) {
+        if (!block) return;
+        var lines = block.split('\n');
+        var eventName = '';
+        var dataLines = [];
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i];
+          if (!line || line.charAt(0) === ':') continue;
+          if (line.indexOf('event:') === 0) {
+            eventName = line.slice(6).trim();
+          } else if (line.indexOf('data:') === 0) {
+            dataLines.push(line.slice(5).replace(/^ /, ''));
+          }
+        }
+        var dataStr = dataLines.join('\n').trim();
+        if (!dataStr) return;
+
+        var parsed = dataStr;
+        try {
+          parsed = JSON.parse(dataStr);
+        } catch (e) {}
+
+        if (eventName === 'status') {
+          if (typeof h.onStatus === 'function') h.onStatus(parsed);
+        } else if (eventName === 'delta') {
+          if (typeof h.onDelta === 'function') h.onDelta(parsed);
+        } else if (eventName === 'done') {
+          doneCalled = true;
+          if (typeof h.onDone === 'function') h.onDone(parsed);
+        } else if (eventName === 'error') {
+          var msg = (parsed && typeof parsed === 'object' && parsed.error)
+            ? String(parsed.error)
+            : (typeof parsed === 'string' ? parsed : 'ストリーミングエラー');
+          emitError(new Error(msg));
+        }
+      }
+
+      return fetch(baseUrl + '/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ authKey: state.authKey, payload: payload })
+      })
+        .then(function(r) {
+          if (!r.ok) {
+            return r.text().then(function(txt) {
+              var errMsg = 'HTTPエラー: ' + r.status;
+              try {
+                var j = JSON.parse(txt);
+                if (j && j.error) errMsg = j.error;
+              } catch (e) {}
+              throw new Error(errMsg);
+            });
+          }
+          if (!r.body || typeof r.body.getReader !== 'function') {
+            throw new Error('ReadableStream がサポートされていません');
+          }
+          var reader = r.body.getReader();
+          var decoder = new TextDecoder('utf-8');
+          var buffer = '';
+
+          function pump() {
+            return reader.read().then(function(result) {
+              if (result.done) {
+                buffer += decoder.decode();
+                buffer = buffer.replace(/\r\n/g, '\n');
+                if (buffer.trim()) {
+                  processSseBlock(buffer);
+                }
+                if (!doneCalled && !errorCalled) {
+                  emitError(new Error('ストリームが途中で終了しました'));
+                }
+                return;
+              }
+              buffer += decoder.decode(result.value, { stream: true });
+              buffer = buffer.replace(/\r\n/g, '\n');
+              var parts = buffer.split('\n\n');
+              buffer = parts.pop();
+              for (var i = 0; i < parts.length; i++) {
+                if (parts[i].trim()) {
+                  processSseBlock(parts[i]);
+                }
+              }
+              return pump();
+            });
+          }
+
+          return pump();
+        })
+        .catch(function(err) {
+          emitError(err);
+        });
+    }
+
     function callServerApi(funcName) {
+      if (window.__mockCallServerApi) return window.__mockCallServerApi.apply(this, arguments);
       var args = Array.prototype.slice.call(arguments, 1);
       return new Promise(function(resolve, reject) {
         if (isGasEnvironment()) {
@@ -1919,12 +2098,14 @@
           reject(new Error('GAS ウェブアプリURLが設定されていません'));
           return;
         }
-        fetch(state.apiUrl, {
+        var bodyStr = JSON.stringify({ apiAction: funcName, args: args });
+        var fetchOpts = {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ apiAction: funcName, args: args }),
+          body: bodyStr,
           redirect: 'follow'
-        })
+        };
+        fetch(state.apiUrl, fetchOpts)
           .then(function(r) {
             if (!r.ok) throw new Error('HTTPエラー: ' + r.status);
             return r.json();
@@ -1935,7 +2116,10 @@
             }
             resolve(json && json.ok === true ? json.data : json);
           })
-          .catch(reject);
+          .catch(function(err) {
+            recordClientError('api:' + funcName, err);
+            reject(err);
+          });
       });
     }
 
@@ -2025,6 +2209,107 @@
 
     loadOutbox();
 
+    function loadErrorLogs() {
+      try {
+        var raw = localStorage.getItem('cc_v2_error_logs');
+        if (!raw) return;
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          state.errorLogs = parsed.slice(-30);
+        }
+      } catch (e) {}
+    }
+
+    function saveErrorLogs() {
+      try {
+        localStorage.setItem('cc_v2_error_logs', JSON.stringify((state.errorLogs || []).slice(-30)));
+      } catch (e) {}
+    }
+
+    function recordClientError(source, errOrMsg, extra) {
+      try {
+        var msg = (errOrMsg && errOrMsg.message) ? errOrMsg.message : String(errOrMsg || 'Unknown error');
+        var entry = {
+          ts: new Date().toISOString(),
+          source: String(source || 'app'),
+          message: msg.slice(0, 400)
+        };
+        if (extra && typeof extra === 'object') {
+          entry.detail = JSON.stringify(extra).slice(0, 300);
+        }
+        state.errorLogs = (state.errorLogs || []).concat([entry]).slice(-30);
+        saveErrorLogs();
+      } catch (e) {}
+    }
+
+    function clearErrorLogs() {
+      state.errorLogs = [];
+      saveErrorLogs();
+    }
+
+    function buildDiagnosticReportText() {
+      var verEl = typeof document !== 'undefined' ? document.getElementById('appBuildVersion') : null;
+      var ver = verEl ? verEl.textContent : 'unknown';
+      var outboxSummary = (state.pendingOutbox || []).map(function(it) {
+        var title = (it.payload && (it.payload.title || (it.payload.session && it.payload.session.title))) || '';
+        var hasPhoto = Boolean(it.payload && it.payload.photoBase64);
+        return { id: it.id, funcName: it.funcName, title: title, hasPhoto: hasPhoto, createdAt: it.createdAt };
+      });
+      var lines = [
+        '=== Companion Cockpit 診断ログ ===',
+        ver,
+        'Time: ' + new Date().toISOString(),
+        'Online: ' + (typeof navigator !== 'undefined' ? navigator.onLine : 'unknown'),
+        'PendingOutbox (' + outboxSummary.length + '): ' + JSON.stringify(outboxSummary),
+        'OutboxLastError: ' + (state.outboxLastError || 'none'),
+        '--- Error Logs (' + (state.errorLogs || []).length + ') ---'
+      ];
+      (state.errorLogs || []).slice().reverse().forEach(function(lg, idx) {
+        lines.push((idx + 1) + '. [' + lg.ts + '] (' + lg.source + ') ' + lg.message + (lg.detail ? ' | ' + lg.detail : ''));
+      });
+      return lines.join('\n');
+    }
+
+    loadErrorLogs();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('error', function(ev) {
+        recordClientError('runtime', ev && ev.message ? ev.message : 'Script error');
+      });
+      window.addEventListener('unhandledrejection', function(ev) {
+        recordClientError('promise', ev && ev.reason ? ev.reason : 'Unhandled rejection');
+      });
+    }
+
+    function coalesceOutbox_() {
+      var list = Array.isArray(state.pendingOutbox) ? state.pendingOutbox.slice() : [];
+      if (list.length <= 1) return;
+      var compacted = [];
+      for (var i = 0; i < list.length; i++) {
+        var cur = list[i];
+        var isStart = cur && cur.funcName === 'apiStartAction';
+        var isSleepStart = isStart && cur.payload && cur.payload.isSleepCard;
+        if (isStart && !isSleepStart) {
+          var hasLaterSameOrComplete = false;
+          for (var j = i + 1; j < list.length; j++) {
+            var nxt = list[j];
+            if (nxt && (nxt.funcName === 'apiStartAction' || nxt.funcName === 'apiCompleteAction')) {
+              hasLaterSameOrComplete = true;
+              break;
+            }
+          }
+          if (hasLaterSameOrComplete) {
+            continue;
+          }
+        }
+        compacted.push(cur);
+      }
+      if (compacted.length !== list.length) {
+        state.pendingOutbox = compacted;
+        saveOutbox();
+      }
+    }
+
     function enqueueOutboxMutation(funcName, payload) {
       var clientOpId = 'op_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
       var body = (payload && typeof payload === 'object')
@@ -2041,46 +2326,103 @@
     }
 
     function flushOutbox() {
+      coalesceOutbox_();
       if (state.isFlushingOutbox || !state.pendingOutbox || state.pendingOutbox.length === 0) {
         return Promise.resolve(true);
       }
       state.isFlushingOutbox = true;
 
-      function processNext() {
+      function buildNextChunk() {
+        var chunk = [];
+        var approxBytes = 0;
+        for (var i = 0; i < state.pendingOutbox.length; i++) {
+          var item = state.pendingOutbox[i];
+          var itemSize = JSON.stringify(item).length;
+          if (chunk.length > 0 && approxBytes + itemSize > 1500000) break;
+          chunk.push(item);
+          approxBytes += itemSize;
+        }
+        return chunk;
+      }
+
+      function processBatch() {
+        coalesceOutbox_();
         if (!state.pendingOutbox || state.pendingOutbox.length === 0) {
           state.isFlushingOutbox = false;
           return Promise.resolve(true);
         }
-        var item = state.pendingOutbox[0];
-        return runMutationApi(item.funcName, state.authKey, item.payload)
+        var chunk = buildNextChunk();
+        return runMutationApi('apiFlushOutboxBatch', state.authKey, chunk)
           .then(function(res) {
             if (!res || !res.authorized) {
               throw new Error((res && res.error) ? res.error : '同期に失敗しました');
             }
-            state.pendingOutbox.shift();
+            var results = Array.isArray(res.results) ? res.results : [];
+            var okIds = {};
+            var firstErr = '';
+            results.forEach(function(r) {
+              if (r && r.ok) {
+                okIds[r.id] = true;
+              } else if (r && r.error && !firstErr) {
+                firstErr = r.error;
+              }
+            });
+            if (results.length === 0) {
+              chunk.forEach(function(c) { okIds[c.id] = true; });
+            }
+            state.pendingOutbox = (state.pendingOutbox || []).filter(function(it) {
+              return !okIds[it.id];
+            });
             saveOutbox();
+
+            if (Array.isArray(res.addedChatMessages) && res.addedChatMessages.length > 0) {
+              res.addedChatMessages.forEach(function(msg) {
+                state.messages.push(msg);
+              });
+            }
+
+            if (firstErr) {
+              state.outboxLastError = firstErr;
+              recordClientError('outbox_batch', firstErr, { remaining: state.pendingOutbox.length });
+              showToast('同期エラー: ' + firstErr);
+              state.isFlushingOutbox = false;
+              if (typeof renderHome === 'function') renderHome();
+              return false;
+            }
+
             if (state.pendingOutbox.length === 0) {
+              state.outboxLastError = '';
               if (!res._stale) {
                 applyServerStatePayload(res);
-              }
-              if (res.addedChatMessage) {
-                state.messages.push(res.addedChatMessage);
               }
               saveLocalSnapshot();
               renderAll();
               state.isFlushingOutbox = false;
               return true;
             }
-            return processNext();
+            if (typeof renderHome === 'function') renderHome();
+            return processBatch();
           })
           .catch(function(err) {
+            var msg = (err && err.message) ? err.message : String(err || '通信エラー');
+            state.outboxLastError = msg;
+            recordClientError('outbox_flush', msg, { pendingCount: (state.pendingOutbox || []).length });
+            showToast('同期エラー: ' + msg);
             state.isFlushingOutbox = false;
             if (typeof renderHome === 'function') renderHome();
             return false;
           });
       }
 
-      return processNext();
+      return processBatch();
+    }
+
+    function discardPendingOutbox() {
+      state.pendingOutbox = [];
+      state.outboxLastError = '';
+      saveOutbox();
+      if (typeof renderHome === 'function') renderHome();
+      syncFromServer(true);
     }
 
     if (typeof window !== 'undefined') {
@@ -2096,9 +2438,10 @@
       });
     }
 
-    function applyServerStatePayload(res) {
+    function applyServerStatePayload(res, opts) {
       if (!res || res._stale) return;
       if (res.state) {
+        var preferServerLow = Boolean(opts && opts.preferServerLowMode);
         var prev = state.fastState || {};
         var sameDay = Boolean(prev.dayKey && res.state.dayKey && prev.dayKey === res.state.dayKey);
         var mergedCompleted = sameDay
@@ -2114,7 +2457,7 @@
         var keepClearedSession = Boolean(!localSession && res.state.activeSession && lockActive);
         var briefingDismissed = sameDay && Boolean((prev.dailyBriefing && prev.dailyBriefing.dismissed) || mergedDismissed['__briefing__']);
         state.fastState = res.state;
-        if (sameDay && typeof prev.isLowMode === 'boolean') {
+        if (!preferServerLow && sameDay && typeof prev.isLowMode === 'boolean') {
           state.fastState.isLowMode = prev.isLowMode;
         }
         state.fastState.completedToday = mergedCompleted;
@@ -2151,7 +2494,8 @@
       var btn = document.getElementById('syncBtn');
       if (btn) btn.classList.add('spinning');
 
-      callServerApi('apiGetHomeBootstrap', state.authKey)
+      var clientRev = (!manual && state.fastState && state.fastState.revision) ? Number(state.fastState.revision) : 0;
+      callServerApi('apiGetHomeBootstrap', state.authKey, { clientRevision: clientRev, force: Boolean(manual) })
         .then(function(res) {
           state.isSyncing = false;
           if (btn) btn.classList.remove('spinning');
@@ -2161,6 +2505,15 @@
           if (!res || !res.authorized) {
             state.authorized = false;
             openSettingsModal((res && res.error) ? res.error : '認証に失敗しました。');
+            return;
+          }
+          if (res.unchanged) {
+            state.authorized = true;
+            state.lastFetchedAt = Date.now();
+            if (typeof res.deltaText === 'string') {
+              state.deltaText = res.deltaText;
+            }
+            closeSettingsModal();
             return;
           }
           state.authorized = true;
@@ -2188,6 +2541,10 @@
             showToast('同期に失敗しました');
           }
         });
+    }
+
+    function importFromSheets() {
+      return callServerApi('apiImportFromSheets', state.authKey);
     }
 
     /* Image compression (handles vertical tall screenshots safely) */
@@ -2285,6 +2642,9 @@
         train: '<rect width="16" height="16" x="4" y="3" rx="2"/><path d="M4 11h16"/><path d="M12 3v8"/><path d="m8 19-2 3"/><path d="m18 22-2-3"/><path d="M8 15h.01"/><path d="M16 15h.01"/>',
         laptop: '<path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"/>',
         droplet: '<path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>',
+        droplets: '<path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>',
+        walk: '<circle cx="13" cy="4.5" r="1.8"/><path d="m9 21 2.2-6.5L13 12l-1.5-3.5L15 7l2 3h2.5"/><path d="m13 12 2.5 3.5L15 21"/><path d="m7.5 14 2-3.5 2-1.5"/>',
+        cart: '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>',
         bed: '<path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/>',
         music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
         book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
@@ -2476,15 +2836,44 @@
      * home-view.js - Home deck rendering, triage cards, custom card slider, focus & reflection
      */
 
+    function getActiveTaskIdSet() {
+      if (!state.lists || !Array.isArray(state.lists.tasks) || state.lists.tasks.length === 0) {
+        return null;
+      }
+      var set = {};
+      state.lists.tasks.forEach(function(t) {
+        if (t && t.id) set[t.id] = true;
+      });
+      return set;
+    }
+
+    function findDeckCardById(cardId) {
+      if (!cardId || !state.composedDeck) return null;
+      var cards = state.composedDeck.cards || [];
+      var found = cards.find(function(c) { return c && c.id === cardId; });
+      if (found) return found;
+      var lowCards = state.composedDeck.lowCards || [];
+      return lowCards.find(function(c) { return c && c.id === cardId; }) || null;
+    }
+
+    function isDeckCardAvailable(c, completed, dismissed, activeTaskIds) {
+      if (!c || !c.id) return false;
+      if (!c.isSleepCard && (completed[c.id] || (c.linkedId && completed[c.linkedId]))) return false;
+      if (dismissed[c.id]) return false;
+      if (activeTaskIds && c.linkedType === 'task' && c.linkedId && !activeTaskIds[c.linkedId]) return false;
+      return true;
+    }
+
     function getVisibleDeckCards() {
       var completed = state.fastState.completedToday || {};
       var dismissed = state.fastState.dismissedToday || {};
+      var activeTaskIds = getActiveTaskIdSet();
       var pool = state.fastState.isLowMode
         ? (state.composedDeck.lowCards || [])
         : (state.composedDeck.cards || []);
       var valid = pool.filter(function(c) {
-        if (!c || !c.id) return false;
-        if (completed[c.id] || dismissed[c.id]) return false;
+        if (window.mockPausedSession && c.id === window.mockPausedSession.id) return false;
+        if (!isDeckCardAvailable(c, completed, dismissed, activeTaskIds)) return false;
         if (c.isTriage && state.fastState.triagedToday) return false;
         return true;
       });
@@ -2521,6 +2910,8 @@
       );
     }
 
+    window.__mockState = state;
+    window.__mockRenderHome = renderHome;
     function renderHome() {
       var metaEl = document.getElementById('homeMeta');
       if (metaEl) metaEl.textContent = state.weatherLine || '横浜・磯子';
@@ -2544,12 +2935,23 @@
       var sess = state.fastState.activeSession;
       var pendingCount = (state.pendingOutbox && state.pendingOutbox.length) || 0;
       if (pendingCount > 0 && !sess && !state.reflection) {
-        subEl.textContent = '未同期の記録が' + pendingCount + '件あります（再送待機中）';
+        if (state.outboxLastError) {
+          subEl.textContent = '未同期 ' + pendingCount + '件（エラー: ' + state.outboxLastError + ' / タップで再送・設定）';
+          subEl.onclick = function() { openSettingsModal('同期エラー: ' + state.outboxLastError); };
+        } else {
+          subEl.textContent = '未同期の記録が' + pendingCount + '件あります（タップで今すぐ同期）';
+          subEl.onclick = function() { syncFromServer(true); };
+        }
+        subEl.style.cursor = 'pointer';
         subEl.classList.remove('hidden');
       } else if (state.deltaText && !sess && !state.reflection) {
         subEl.textContent = state.deltaText;
+        subEl.onclick = null;
+        subEl.style.cursor = '';
         subEl.classList.remove('hidden');
       } else {
+        subEl.onclick = null;
+        subEl.style.cursor = '';
         subEl.classList.add('hidden');
       }
 
@@ -2581,10 +2983,30 @@
         var photoHtml = r.photoDataUrl
           ? '<div class="attach-preview-bar"><div class="attach-thumb-wrap"><img src="' + r.photoDataUrl + '" class="attach-thumb" alt="添付写真" /><button type="button" onclick="clearReflectPhoto()" class="attach-remove-btn" aria-label="削除">×</button></div></div>'
           : '';
+        var startMs = r.startedMs || (r.card && r.card.startedAtMs) || (Date.now() - (r.usedMins || 1) * 60000);
+        var endMs = r.endedMs || Date.now();
+        r.startedMs = startMs;
+        r.endedMs = endMs;
+        var sVal = formatTimeInputHm_(startMs);
+        var eVal = formatTimeInputHm_(endMs);
+        var reflectAdjustHtml = !r.isAdjustOpen
+          ? '<div class="time-adjust-wrap"><button type="button" class="time-adjust-toggle" onclick="toggleReflectTimeAdjust(true)">✎ 時間を調整（' + sVal + ' 〜 ' + eVal + '）</button></div>'
+          : '<div class="time-adjust-wrap"><div class="glass-surface time-adjust-panel fade-in">' +
+              '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;">' +
+                '<label style="font-size:12px;color:var(--dc-text-sub);display:flex;align-items:center;gap:6px;">開始 <input id="reflectStartTimeInput" type="time" class="time-adjust-input" value="' + sVal + '" /></label>' +
+                '<span style="color:var(--dc-text-sub);">〜</span>' +
+                '<label style="font-size:12px;color:var(--dc-text-sub);display:flex;align-items:center;gap:6px;">終了 <input id="reflectEndTimeInput" type="time" class="time-adjust-input" value="' + eVal + '" /></label>' +
+              '</div>' +
+              '<div style="display:flex;gap:8px;justify-content:center;">' +
+                '<button type="button" class="btn-soft" onclick="toggleReflectTimeAdjust(false)">キャンセル</button>' +
+                '<button type="button" class="btn-solid" onclick="applyReflectTimeAdjust()">適用</button>' +
+              '</div>' +
+            '</div></div>';
         center.innerHTML =
           '<div class="reflect-view fade-in">' +
             '<h2 class="reflect-heading">' + (r.card.isSleepCard ? 'おはようございます' : 'お疲れさまでした') + '</h2>' +
             '<div class="reflect-sub">' + escapeHtml(r.card.title) + (r.card.isSleepCard ? '' : ' · ' + r.usedMins + '分') + '</div>' +
+            reflectAdjustHtml +
             '<div class="feeling-row">' + chips + '</div>' +
             photoHtml +
             '<div class="reflect-input-row">' +
@@ -2605,6 +3027,19 @@
       if (sess) {
         var elSec = Math.max(0, Math.floor((Date.now() - (sess.startedAtMs || Date.now())) / 1000));
         var showBreak = Math.floor(elSec / 60) >= 60 && !sess.isWorkBlock && !sess.isSleepCard;
+        var sValActive = formatTimeInputHm_(sess.startedAtMs || Date.now());
+        var activeAdjustHtml = !state.isStartAdjustOpen
+          ? '<div class="time-adjust-wrap"><button type="button" class="time-adjust-toggle" onclick="toggleStartTimeAdjust(true)">✎ 開始時刻を調整（' + sValActive + '〜）</button></div>'
+          : '<div class="time-adjust-wrap"><div class="glass-surface time-adjust-panel fade-in">' +
+              '<div style="display:flex;align-items:center;justify-content:center;gap:8px;">' +
+                '<span style="font-size:12px;color:var(--dc-text-sub);">開始時刻</span>' +
+                '<input id="activeStartTimeInput" type="time" class="time-adjust-input" value="' + sValActive + '" />' +
+              '</div>' +
+              '<div style="display:flex;gap:8px;justify-content:center;">' +
+                '<button type="button" class="btn-soft" onclick="toggleStartTimeAdjust(false)">キャンセル</button>' +
+                '<button type="button" class="btn-solid" onclick="applyStartTimeAdjust()">適用</button>' +
+              '</div>' +
+            '</div></div>';
         center.innerHTML =
           '<div class="focus-view fade-in">' +
             '<h2 class="focus-title">' + escapeHtml(sess.title) + '</h2>' +
@@ -2617,8 +3052,10 @@
             '<div id="focusGentleNote" class="focus-gentle-note' + (showBreak ? '' : ' hidden') + '">そろそろ一息入れませんか</div>' +
             '<div class="focus-actions">' +
               '<button onclick="pauseFocus()" class="btn-pause-soft">キャンセル</button>' +
+              (window.mockPausedSession ? '' : '<button type="button" onclick="window.mockPauseCurrentFocus()" class="btn-pause-soft">一時停止</button>') +
               '<button onclick="finishFocus()" class="btn-done-pill">' + (sess.isSleepCard ? '起きた' : '終わった') + '</button>' +
             '</div>' +
+            activeAdjustHtml +
           '</div>';
         return;
       }
@@ -2684,7 +3121,7 @@
       );
 
       if (state.adjustingCardId) {
-        var adjCard = (state.composedDeck.cards || []).find(function(c) { return c && c.id === state.adjustingCardId; });
+        var adjCard = findDeckCardById(state.adjustingCardId);
         if (adjCard) {
           parts.push(
             '<div class="custom-create-card glass-surface fade-in">' +
@@ -2730,8 +3167,9 @@
       if (state.isRefreshingDeck) return;
       var completed = state.fastState.completedToday || {};
       var dismissed = state.fastState.dismissedToday || {};
+      var activeTaskIds = getActiveTaskIdSet();
       var pool = (state.composedDeck.cards || []).filter(function(c) {
-        return c && c.id && !completed[c.id] && !dismissed[c.id];
+        return isDeckCardAvailable(c, completed, dismissed, activeTaskIds);
       });
       var nextOffset = state.deckOffset + 3;
       if (nextOffset < pool.length) {
@@ -2769,12 +3207,14 @@
     }
 
     function dismissCardToday(cardId) {
-      state.fastState.dismissedToday[cardId] = true;
+      var targetCard = findDeckCardById(cardId);
+      var cardTitle = (targetCard && targetCard.title) ? String(targetCard.title).trim() : '';
+      state.fastState.dismissedToday[cardId] = cardTitle || true;
       state.openSwipeId = null;
       saveLocalSnapshot();
       renderHome();
       showToast('今日は非表示にしました');
-      runMutationApi('apiDismissCardToday', state.authKey, cardId)
+      runMutationApi('apiDismissCardToday', state.authKey, cardId, cardTitle)
         .then(function(res) {
           if (res && res.authorized && !res._stale && res.deck) {
             applyServerStatePayload(res);
@@ -2810,7 +3250,7 @@
     }
 
     function openCardDurAdjust(cardId) {
-      var card = (state.composedDeck.cards || []).find(function(c) { return c && c.id === cardId; });
+      var card = findDeckCardById(cardId);
       if (!card) return;
       state.showCustomForm = false;
       state.adjustingCardId = cardId;
@@ -2831,7 +3271,7 @@
     }
 
     function confirmCardDurStart() {
-      var card = (state.composedDeck.cards || []).find(function(c) { return c && c.id === state.adjustingCardId; });
+      var card = findDeckCardById(state.adjustingCardId);
       state.adjustingCardId = null;
       if (!card) { renderHome(); return; }
       var updated = Object.assign({}, card, { mins: state.adjustingCardMins || card.mins || 30 });
@@ -2879,13 +3319,75 @@
       enqueueOutboxMutation('apiStartAction', null);
     }
 
+    function formatTimeInputHm_(ms) {
+      var d = new Date(ms || Date.now());
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+
+    function applyTimeInputToMs_(baseMs, timeStr) {
+      var parts = String(timeStr || '').split(':');
+      if (parts.length !== 2) return baseMs || Date.now();
+      var d = new Date(baseMs || Date.now());
+      d.setHours(Number(parts[0]), Number(parts[1]), 0, 0);
+      if (d.getTime() > Date.now() + 60000) {
+        d.setDate(d.getDate() - 1);
+      }
+      return d.getTime();
+    }
+
+    function toggleStartTimeAdjust(open) {
+      state.isStartAdjustOpen = Boolean(open);
+      renderHome();
+    }
+
+    function applyStartTimeAdjust() {
+      var el = document.getElementById('activeStartTimeInput');
+      var sess = state.fastState && state.fastState.activeSession;
+      if (!el || !el.value || !sess) return;
+      var newMs = applyTimeInputToMs_(sess.startedAtMs || Date.now(), el.value);
+      sess.startedAtMs = newMs;
+      sess.startedAtIso = new Date(newMs).toISOString();
+      state.isStartAdjustOpen = false;
+      saveLocalSnapshot();
+      renderHome();
+      enqueueOutboxMutation('apiStartAction', sess);
+      showToast('開始時刻を ' + el.value + ' に更新しました');
+    }
+
+    function toggleReflectTimeAdjust(open) {
+      if (!state.reflection) return;
+      state.reflection.isAdjustOpen = Boolean(open);
+      renderHome();
+    }
+
+    function applyReflectTimeAdjust() {
+      var r = state.reflection;
+      if (!r) return;
+      var sEl = document.getElementById('reflectStartTimeInput');
+      var eEl = document.getElementById('reflectEndTimeInput');
+      if (sEl && sEl.value) {
+        r.startedMs = applyTimeInputToMs_(r.startedMs, sEl.value);
+        if (r.card) r.card.startedAtMs = r.startedMs;
+      }
+      if (eEl && eEl.value) r.endedMs = applyTimeInputToMs_(r.endedMs, eEl.value);
+      r.usedMins = Math.max(1, Math.round((r.endedMs - r.startedMs) / 60000));
+      r.isAdjustOpen = false;
+      renderHome();
+      showToast('実績時間を ' + r.usedMins + '分 に更新しました');
+    }
+
     function finishFocus() {
       var sess = state.fastState.activeSession;
       if (!sess) return;
-      var elMins = Math.max(1, Math.round((Date.now() - (sess.startedAtMs || Date.now())) / 60000));
+      var endMs = Date.now();
+      var startMs = sess.startedAtMs || endMs;
+      var elMins = Math.max(1, Math.round((endMs - startMs) / 60000));
+      state.isStartAdjustOpen = false;
       state.fastState.activeSession = null;
       state.reflection = {
         card: sess,
+        startedMs: startMs,
+        endedMs: endMs,
         usedMins: elMins,
         feeling: '',
         note: '',
@@ -2912,7 +3414,7 @@
       state.pendingSessionLockUntil = Date.now() + 15000;
       state.reflection = null;
       state.fastState.activeSession = null;
-      if (r.card && r.card.id && !r.card.isCustom) {
+      if (r.card && r.card.id && !r.card.isCustom && !r.card.isSleepCard) {
         state.fastState.completedToday[r.card.id] = true;
       }
       if (!keepOpen && r.card && r.card.linkedType === 'task' && r.card.linkedId) {
@@ -2927,6 +3429,9 @@
         mood: r.feeling,
         note: note,
         keepOpen: Boolean(keepOpen),
+        startedAtMs: r.startedMs,
+        endedAtMs: r.endedMs,
+        usedMins: r.usedMins,
         photoBase64: r.photoBase64 || '',
         photoMimeType: r.photoMimeType || 'image/jpeg'
       });
@@ -3156,6 +3661,7 @@
             '<div class="bubble-wrap user fade-in">' +
               '<div class="bubble">' + imgHtml + (uTextHtml ? '<div>' + uTextHtml + '</div>' : '') + '</div>' +
               reactHtml +
+              (m.time ? '<div class="bubble-time">' + escapeHtml(m.time) + '</div>' : '') +
             '</div>'
           );
         }
@@ -3186,7 +3692,10 @@
       }).join('');
 
       if (state.isSending) {
-        html += '<div class="bubble-wrap ai fade-in"><div class="thinking-bubble"><span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span></div></div>';
+        var statusHtml = state.sendingStatusText
+          ? '<span class="thinking-status" style="margin-left:8px;font-size:12px;color:var(--text-sub,#64748b);">' + escapeHtml(state.sendingStatusText) + '</span>'
+          : '';
+        html += '<div class="bubble-wrap ai fade-in"><div class="thinking-row" style="display:inline-flex;align-items:center;"><div class="thinking-bubble"><span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span></div>' + statusHtml + '</div></div>';
       }
       list.innerHTML = html;
     }
@@ -3269,8 +3778,11 @@
       state.pendingChatPhoto = null;
       renderChatPhotoPreview();
 
+      var now = new Date();
+      var nowTime = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
       var msgObj = {
         id: 'MSG_' + Date.now(),
+        time: nowTime,
         userText: plainText,
         tokens: tokens,
         localPhotoUrl: photo ? photo.dataUrl : '',
@@ -3283,46 +3795,160 @@
       executeChatSend(msgObj, plainText, photo);
     }
 
+    function finalizeChatResponse(msgObj, res, fallbackAiText) {
+      msgObj.reactionEmoji = res.reactionEmoji || '';
+      msgObj.aiText = res.replyText || res.aiText || fallbackAiText || '';
+      msgObj.badges = Array.isArray(res.badges) ? res.badges : [];
+      msgObj.docLinks = Array.isArray(res.docLinks) ? res.docLinks : [];
+      msgObj.time = res.time || msgObj.time || '';
+      if (Array.isArray(res.imageUrls) && res.imageUrls.length > 0) {
+        msgObj.imageUrls = res.imageUrls;
+      } else if (res.imageUrl) {
+        msgObj.imageUrls = [res.imageUrl];
+      }
+      applyServerStatePayload(res, { preferServerLowMode: true });
+      saveLocalSnapshot();
+      renderAll();
+      scrollToChatBottom();
+      if (res.needsDeckRefresh) {
+        runMutationApi('apiRefreshDeck', state.authKey, [])
+          .then(function(deckRes) {
+            if (deckRes && deckRes.authorized && deckRes.deck) {
+              state.composedDeck = deckRes.deck;
+              if (deckRes.aiDeck && state.fastState) state.fastState.aiDeck = deckRes.aiDeck;
+              saveLocalSnapshot();
+              if (state.tab === 'home') renderHome();
+            }
+          })
+          .catch(function() {});
+      }
+    }
+
+    function appendChatErrorCard(msgObj, plainText, photo, err) {
+      var errId = 'ERR_' + Date.now();
+      state.failedPayloads[errId] = { msgObj: msgObj, plainText: plainText, photo: photo };
+      state.messages.push({
+        id: errId,
+        isError: true,
+        errorText: (err && err.message) ? err.message : String(err || '通信エラー')
+      });
+      renderChat();
+      scrollToChatBottom();
+    }
+
     function executeChatSend(msgObj, plainText, photo) {
       if (state.messages.indexOf(msgObj) === -1) state.messages.push(msgObj);
       state.isSending = true;
+      state.sendingStatusText = '';
       if (state.tab === 'lists') state.tab = 'talk';
       renderNav();
       renderChat();
       scrollToChatBottom();
 
-      runMutationApi('apiSendChat', state.authKey, {
+      var chatPayload = {
         text: plainText,
         imageBase64: photo ? photo.base64 : '',
         imageMimeType: photo ? photo.mimeType : ''
-      })
+      };
+
+      if (typeof isWorkersApiUrl === 'function' && isWorkersApiUrl()) {
+        var tempId = Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        var streamMsgId = 'STREAM_' + tempId;
+        var streamMsgObj = null;
+        var accumulatedText = '';
+        var settled = false;
+
+        state.syncEpoch = (state.syncEpoch || 0) + 1;
+        state.inFlightMutations = (state.inFlightMutations || 0) + 1;
+
+        function finishInFlight() {
+          if (settled) return;
+          settled = true;
+          state.inFlightMutations = Math.max(0, (state.inFlightMutations || 1) - 1);
+        }
+
+        function removeStreamDraft() {
+          if (!streamMsgObj) return;
+          state.messages = state.messages.filter(function(m) { return m.id !== streamMsgId; });
+          streamMsgObj = null;
+        }
+
+        sendChatStream(chatPayload, {
+          onStatus: function(data) {
+            if (data && typeof data === 'object' && data.resetDraft) {
+              accumulatedText = '';
+              removeStreamDraft();
+              state.isSending = true;
+            }
+            var statusText = '';
+            if (typeof data === 'string') {
+              statusText = data;
+            } else if (data && typeof data === 'object') {
+              statusText = String(data.text || data.status || data.message || '');
+            }
+            state.sendingStatusText = statusText;
+            if (state.isSending) {
+              renderChat();
+              scrollToChatBottom();
+            }
+          },
+          onDelta: function(data) {
+            var chunk = '';
+            if (typeof data === 'string') {
+              chunk = data;
+            } else if (data && typeof data === 'object') {
+              chunk = String(data.text || data.delta || data.chunk || '');
+            }
+            if (!chunk) return;
+            accumulatedText += chunk;
+            if (!streamMsgObj) {
+              streamMsgObj = {
+                id: streamMsgId,
+                time: '',
+                userText: '',
+                aiText: accumulatedText,
+                badges: [],
+                docLinks: []
+              };
+              state.messages.push(streamMsgObj);
+            } else {
+              streamMsgObj.aiText = accumulatedText;
+            }
+            state.isSending = false;
+            state.sendingStatusText = '';
+            renderChat();
+            scrollToChatBottom();
+          },
+          onDone: function(data) {
+            finishInFlight();
+            state.isSending = false;
+            state.sendingStatusText = '';
+            removeStreamDraft();
+            if (!data || data.authorized === false) {
+              appendChatErrorCard(msgObj, plainText, photo, new Error((data && data.error) ? data.error : '認証エラー'));
+              return;
+            }
+            finalizeChatResponse(msgObj, data, accumulatedText);
+          },
+          onError: function(err) {
+            finishInFlight();
+            state.isSending = false;
+            state.sendingStatusText = '';
+            removeStreamDraft();
+            appendChatErrorCard(msgObj, plainText, photo, err);
+          }
+        });
+        return;
+      }
+
+      runMutationApi('apiSendChat', state.authKey, chatPayload)
         .then(function(res) {
           state.isSending = false;
+          state.sendingStatusText = '';
           if (!res || !res.authorized) {
             throw new Error((res && res.error) ? res.error : '認証エラー');
           }
-          msgObj.reactionEmoji = res.reactionEmoji || '';
-          msgObj.aiText = res.replyText || '';
-          msgObj.badges = Array.isArray(res.badges) ? res.badges : [];
-          msgObj.docLinks = Array.isArray(res.docLinks) ? res.docLinks : [];
-          msgObj.time = res.time || '';
-          if (res.imageUrl) msgObj.imageUrls = [res.imageUrl];
-          applyServerStatePayload(res);
-          saveLocalSnapshot();
-          renderAll();
-          scrollToChatBottom();
-          if (res.needsDeckRefresh) {
-            runMutationApi('apiRefreshDeck', state.authKey, [])
-              .then(function(deckRes) {
-                if (deckRes && deckRes.authorized && deckRes.deck) {
-                  state.composedDeck = deckRes.deck;
-                  if (deckRes.state) state.fastState = deckRes.state;
-                  saveLocalSnapshot();
-                  if (state.tab === 'home') renderHome();
-                }
-              })
-              .catch(function() {});
-          }
+          finalizeChatResponse(msgObj, res, '');
         })
         .catch(function(err) {
           setTimeout(function() {
@@ -3339,6 +3965,7 @@
                   }
                   if (matched) {
                     state.isSending = false;
+                    state.sendingStatusText = '';
                     applyServerStatePayload(boot);
                     var localErrors = state.messages.filter(function(m) { return m.isError; });
                     state.messages = boot.chatMessages.concat(localErrors);
@@ -3352,15 +3979,8 @@
               })
               .catch(function() {
                 state.isSending = false;
-                var errId = 'ERR_' + Date.now();
-                state.failedPayloads[errId] = { msgObj: msgObj, plainText: plainText, photo: photo };
-                state.messages.push({
-                  id: errId,
-                  isError: true,
-                  errorText: (err && err.message) ? err.message : String(err)
-                });
-                renderChat();
-                scrollToChatBottom();
+                state.sendingStatusText = '';
+                appendChatErrorCard(msgObj, plainText, photo, err);
               });
           }, 1500);
         });
@@ -3412,13 +4032,15 @@
         container.innerHTML = filtered.length === 0
           ? '<div class="chat-empty">該当するタスクはありません</div>'
           : filtered.map(function(t) {
+              var dueStr = t.dueDate || t.due || '';
+              var estMins = Number(t.estimatedMins || t.mins) || 30;
               var metaParts = [];
-              if (t.due) metaParts.push('期限: ' + t.due);
-              if (t.mins) metaParts.push(t.mins + '分');
+              if (dueStr) metaParts.push('期限: ' + dueStr);
+              metaParts.push(estMins + '分');
               if (t.done) metaParts.push('完了済');
               var durBtn = t.done
                 ? ''
-                : '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'task\',\'' + escapeJsAttr(t.id) + '\',' + (t.mins || 30) + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(t.mins || 30) + '</button>';
+                : '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'task\',\'' + escapeJsAttr(t.id) + '\',' + estMins + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(estMins) + '</button>';
               var memoBtn = buildListMemoBtnHtml('task', t.id, t.memo);
               var docBtn = t.docUrl
                 ? '<a href="' + escapeHtml(t.docUrl) + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" class="circle-action-btn" aria-label="資料を開く" title="資料を開く" style="text-decoration:none;">' + getIconSvg('fileText', 14) + '</a>'
@@ -3452,7 +4074,7 @@
                 '<div class="list-item ' + (s.done ? 'done' : '') + '" onclick="insertPillToSharedComposer(\'shopping\',\'' + escapeJsAttr(s.id) + '\',\'' + escapeJsAttr(s.item) + '\')">' +
                   '<div class="list-item-main">' +
                     '<div class="list-item-title">' + escapeHtml(s.item) + '</div>' +
-                    '<div class="list-item-meta">' + escapeHtml(s.cat || '日用品') + (s.done ? ' · 購入済' : '') + '</div>' +
+                    '<div class="list-item-meta">' + escapeHtml(s.category || s.cat || '日用品') + (s.done ? ' · 購入済' : '') + '</div>' +
                   '</div>' +
                   '<button type="button" onclick="event.stopPropagation();toggleShoppingDone(\'' + escapeJsAttr(s.id) + '\')" class="circle-action-btn" aria-label="購入済を切替">' + getIconSvg('check', 15) + '</button>' +
                 '</div>'
@@ -3466,9 +4088,10 @@
         container.innerHTML = stocks.length === 0
           ? '<div class="chat-empty">インプットストックはありません</div>'
           : stocks.map(function(st) {
+              var estMins = Number(st.estimatedMins || st.mins) || 30;
               var durBtn = st.done
                 ? ''
-                : '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'stock\',\'' + escapeJsAttr(st.id) + '\',' + (st.mins || 30) + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(st.mins || 30) + '</button>';
+                : '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'stock\',\'' + escapeJsAttr(st.id) + '\',' + estMins + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(estMins) + '</button>';
               var memoBtn = buildListMemoBtnHtml('stock', st.id, st.memo);
               var playBtn = st.done
                 ? ''
@@ -3477,7 +4100,7 @@
                 '<div class="list-item ' + (st.done ? 'done' : '') + '" onclick="insertPillToSharedComposer(\'stock\',\'' + escapeJsAttr(st.id) + '\',\'' + escapeJsAttr(st.title) + '\')">' +
                   '<div class="list-item-main">' +
                     '<div class="list-item-title">[' + escapeHtml(st.type) + '] ' + escapeHtml(st.title) + '</div>' +
-                    '<div class="list-item-meta">' + (st.done ? '消化済' : st.mins + '分') + '</div>' +
+                    '<div class="list-item-meta">' + (st.done ? '消化済' : estMins + '分') + '</div>' +
                   '</div>' +
                   '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + durBtn + memoBtn + playBtn + '</div>' +
                 '</div>' +
@@ -3492,17 +4115,19 @@
       container.innerHTML = habits.length === 0
         ? '<div class="chat-empty">周期・習慣記録はありません</div>'
         : habits.map(function(h) {
-              var durBtn = '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'habits\',\'' + escapeJsAttr(h.id) + '\',' + (h.mins || 20) + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(h.mins || 20) + '</button>';
+              var habitTitle = h.label || h.title || '';
+              var estMins = Number(h.estimatedMins || h.mins) || 20;
+              var durBtn = '<button type="button" onclick="event.stopPropagation();openListDurAdjust(\'habits\',\'' + escapeJsAttr(h.id) + '\',' + estMins + ')" class="cat-chip" style="padding:4px 8px;font-size:11px;" title="所要時間を調整して開始">' + formatCustomDurLabel(estMins) + '</button>';
               return (
-              '<div class="list-item" onclick="insertPillToSharedComposer(\'habits\',\'' + escapeJsAttr(h.id) + '\',\'' + escapeJsAttr(h.title) + '\')">' +
+              '<div class="list-item" onclick="insertPillToSharedComposer(\'habits\',\'' + escapeJsAttr(h.id) + '\',\'' + escapeJsAttr(habitTitle) + '\')">' +
                 '<div class="list-item-main">' +
-                  '<div class="list-item-title">' + escapeHtml(h.title) + '</div>' +
-                  '<div class="list-item-meta">' + escapeHtml(h.elapsed || '') + ' · ' + (h.mins || 20) + '分</div>' +
+                  '<div class="list-item-title">' + escapeHtml(habitTitle) + '</div>' +
+                  '<div class="list-item-meta">' + escapeHtml(h.elapsed || '') + ' · ' + estMins + '分</div>' +
                 '</div>' +
                 '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' + durBtn +
                 '<button type="button" onclick="event.stopPropagation();startFromList(\'habits\',\'' + escapeJsAttr(h.id) + '\')" class="circle-action-btn" aria-label="今すぐ始める">' + getIconSvg('play', 14) + '</button></div>' +
               '</div>' +
-              renderListDurAdjustCard('habits', h.id, h.title)
+              renderListDurAdjustCard('habits', h.id, habitTitle)
             );
           }).join('');
     }
@@ -3604,15 +4229,16 @@
       if (kind === 'task') {
         var t = (state.lists.tasks || []).find(function(x) { return x.id === itemId; });
         if (!t) return;
-        card = { id: t.id, linkedType: 'task', linkedId: t.id, icon: 'checkCircle', title: t.cleanTitle || t.title, sub: t.memo || 'タスク', mins: overrideMins || t.mins || 30 };
+        card = { id: t.id, linkedType: 'task', linkedId: t.id, icon: 'checkCircle', title: t.cleanTitle || t.title, sub: t.memo || 'タスク', mins: overrideMins || Number(t.estimatedMins || t.mins) || 30 };
       } else if (kind === 'stock') {
         var st = (state.lists.stock || []).find(function(x) { return x.id === itemId; });
         if (!st) return;
-        card = { id: st.id, linkedType: 'stock', linkedId: st.title, icon: st.type === '音楽' ? 'music' : 'book', title: st.title, sub: st.type, mins: overrideMins || st.mins || 30 };
+        card = { id: st.id, linkedType: 'stock', linkedId: st.title, icon: st.type === '音楽' ? 'music' : 'book', title: st.title, sub: st.type, mins: overrideMins || Number(st.estimatedMins || st.mins) || 30 };
       } else if (kind === 'habits') {
         var h = (state.lists.habits || []).find(function(x) { return x.id === itemId; });
         if (!h) return;
-        card = { id: h.id, linkedType: 'habit', linkedId: h.title, cycleStampLabel: h.title, icon: 'wind', title: h.title, sub: h.elapsed || '習慣ケア', mins: overrideMins || h.mins || 20 };
+        var habitTitle = h.label || h.title || '';
+        card = { id: h.id, linkedType: 'habit', linkedId: habitTitle, cycleStampLabel: habitTitle, icon: 'wind', title: habitTitle, sub: h.elapsed || '習慣ケア', mins: overrideMins || Number(h.estimatedMins || h.mins) || 20 };
       }
       if (!card) return;
       state.pendingSessionLockUntil = Date.now() + 8000;
@@ -3633,7 +4259,7 @@
         rowIndex: s.rowIndex,
         done: s.done
       }).then(function(res) {
-        if (res && res.authorized && res.lists) {
+        if (res && res.authorized && !res._stale && res.lists) {
           state.lists = res.lists;
           saveLocalSnapshot();
         }
@@ -3646,13 +4272,105 @@
       document.getElementById('apiUrlFieldGroup').classList.toggle('hidden', isGasEnvironment());
       document.getElementById('inputApiUrl').value = state.apiUrl || '';
       document.getElementById('inputAuthKey').value = state.authKey || '';
+      var importBtn = document.getElementById('importSheetsBtn');
+      if (importBtn) {
+        var showImport = typeof isWorkersApiUrl === 'function' && isWorkersApiUrl();
+        var importWrap = importBtn.parentElement || importBtn;
+        importWrap.classList.toggle('hidden', !showImport);
+      }
       if (errMsg) {
         errEl.textContent = errMsg;
         errEl.classList.remove('hidden');
       } else {
         errEl.classList.add('hidden');
       }
+      renderSettingsDiagnostics();
       modal.classList.remove('hidden');
+    }
+
+    function renderSettingsDiagnostics() {
+      var countEl = document.getElementById('errorLogCount');
+      var previewEl = document.getElementById('settingsErrorLogPreview');
+      var discardBtn = document.getElementById('discardOutboxBtn');
+      var logs = (state && Array.isArray(state.errorLogs)) ? state.errorLogs : [];
+      if (countEl) countEl.textContent = String(logs.length);
+      if (previewEl) {
+        if (logs.length === 0 && !state.outboxLastError) {
+          previewEl.textContent = 'エラーログはありません';
+        } else {
+          previewEl.textContent = buildDiagnosticReportText();
+        }
+      }
+      if (discardBtn) {
+        var pendingCount = (state && state.pendingOutbox) ? state.pendingOutbox.length : 0;
+        discardBtn.classList.toggle('hidden', pendingCount === 0);
+        if (pendingCount > 0) {
+          discardBtn.textContent = '未同期(' + pendingCount + '件)を破棄';
+        }
+      }
+    }
+
+    function copyDiagnosticLogs() {
+      var text = buildDiagnosticReportText();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text)
+          .then(function() { showToast('診断ログをコピーしました'); })
+          .catch(function() { fallbackCopyText_(text); });
+      } else {
+        fallbackCopyText_(text);
+      }
+    }
+
+    function runImportFromSheets() {
+      if (!confirm('スプレッドシートの最新データを D1 データベースへ取り込みますか？')) return;
+      var btn = document.getElementById('importSheetsBtn');
+      if (btn) btn.disabled = true;
+      importFromSheets()
+        .then(function(res) {
+          if (btn) btn.disabled = false;
+          if (res && res.error) {
+            showToast('取り込みに失敗しました: ' + res.error);
+            return;
+          }
+          showToast('シートからデータを取り込みました');
+          syncFromServer(true);
+        })
+        .catch(function(err) {
+          if (btn) btn.disabled = false;
+          showToast('取り込みに失敗しました: ' + (err && err.message ? err.message : String(err || '不明なエラー')));
+        });
+    }
+
+    function fallbackCopyText_(text) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('診断ログをコピーしました');
+      } catch (e) {
+        showToast('コピーに失敗しました');
+      }
+    }
+
+    function clearDiagnosticLogs() {
+      if (typeof clearErrorLogs === 'function') clearErrorLogs();
+      state.outboxLastError = '';
+      renderSettingsDiagnostics();
+      showToast('エラーログをクリアしました');
+    }
+
+    function confirmDiscardOutbox() {
+      var cnt = (state && state.pendingOutbox) ? state.pendingOutbox.length : 0;
+      if (cnt === 0) return;
+      if (confirm('未同期の記録 ' + cnt + '件 を破棄してサーバーと再同期しますか？')) {
+        closeSettingsModal();
+        if (typeof discardPendingOutbox === 'function') discardPendingOutbox();
+      }
     }
 
     function closeSettingsModal() {
@@ -3833,204 +4551,192 @@
   </script>
 
 <style>
-  .mock-time-link {
-    display: inline-flex;
+  .focus-actions { gap: 8px !important; flex-wrap: nowrap; }
+  .focus-actions .btn-pause-soft, .focus-actions .btn-done-pill { padding-left: 14px; padding-right: 14px; font-size: 13px; white-space: nowrap; }
+  .mock-paused-bar {
+    display: flex;
     align-items: center;
-    gap: 5px;
-    background: var(--dc-btn-soft-glass);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--dc-glass-border);
-    box-shadow: inset 0 1px 0 var(--dc-glass-inset);
-    color: var(--dc-text-sub);
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    padding: 6px 14px;
-    border-radius: 999px;
-    transition: background 0.15s, transform 0.1s;
-  }
-  .mock-time-link:active { background: var(--dc-btn-soft-hover); transform: scale(0.97); }
-  .mock-time-link:active { opacity: 1; background: var(--dc-btn-soft-glass); }
-  .mock-time-panel {
-    display: inline-flex;
-    flex-direction: column;
+    justify-content: space-between;
     gap: 10px;
-    padding: 12px 16px;
+    padding: 10px 14px;
+    margin: 0 0 12px 0;
     border-radius: 18px;
+    font-size: 13px;
   }
-  .mock-time-input {
-    background: var(--dc-btn-soft-glass);
-    border: 1px solid var(--dc-glass-border);
-    color: var(--dc-text-main);
-    border-radius: 10px;
-    padding: 5px 10px;
-    font-size: 14px;
-    font-weight: 500;
-    font-family: inherit;
+  .mock-paused-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+  }
+  .mock-paused-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: var(--dc-btn-soft-glass, rgba(255,255,255,0.45));
+    border: 1px solid var(--dc-glass-border, rgba(255,255,255,0.5));
+    color: var(--dc-text-sub, #64748b);
+    white-space: nowrap;
+  }
+  .mock-paused-title {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mock-paused-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .mock-paused-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+    border-radius: 999px;
   }
 </style>
 <script>
-// 完全ドライランモック：認証バイパス & アプリ標準トンマナのオンデマンド時刻調整UI
 (function() {
-  const dummyCards = [
-    { id: "m1", title: "朝食", sub: "まずは食べて体を起こす", mins: 20, icon: "coffee", linkedType: "habit", linkedId: "朝食" },
-    { id: "m2", title: "朝のストレッチ", sub: "5分だけ体をほぐす", mins: 5, icon: "wind", linkedType: "habit", linkedId: "ストレッチ" },
-    { id: "m3", title: "インボックス整理", sub: "溜まった連絡を確認", mins: 15, icon: "checkCircle", linkedType: "task", linkedId: "t1" }
+  try {
+    localStorage.setItem("companion_auth_key", "mock-dry-run");
+  } catch (e) {}
+  window.openSettingsModal = function() {};
+  window.saveLocalSnapshot = function() {};
+
+  var MOCK_DECK = [
+    { id: "mock-commute", title: "会社へ移動", sub: "これから出かけるぞ・移動枠", mins: 35, icon: "compass" },
+    { id: "mock-game", title: "電車内でゲーム", sub: "スキマ時間の趣味インプット", mins: 15, icon: "sparkles" },
+    { id: "mock-mail", title: "メール返信・小タスク", sub: "10分で片付く軽作業", mins: 10, icon: "checkCircle" },
+    { id: "mock-cook", title: "料理の仕込み", sub: "煮込み待ちあり", mins: 30, icon: "flame" }
   ];
 
-  function pad(n) { return String(n).padStart(2, "0"); }
-  function toTimeStr(msOrIso) {
-    const d = msOrIso ? new Date(msOrIso) : new Date();
-    return pad(d.getHours()) + ":" + pad(d.getMinutes());
-  }
-  function applyTimeStrToMs(baseMs, timeStr) {
-    const parts = String(timeStr || "").split(":");
-    if (parts.length !== 2) return baseMs || Date.now();
-    const d = baseMs ? new Date(baseMs) : new Date();
-    d.setHours(Number(parts[0]), Number(parts[1]), 0, 0);
-    if (d.getTime() > Date.now() + 60000) {
-      d.setDate(d.getDate() - 1);
-    }
-    return d.getTime();
-  }
-
-  try { localStorage.setItem("companion_auth_key", "mock-dry-run"); } catch(e) {}
-
-  window.callServerApi = function(fnName) {
-    var payload = arguments[2] || {};
-    var nowMs = Date.now();
-    var nowIso = new Date(nowMs).toISOString();
+  window.__mockCallServerApi = function() {
     return Promise.resolve({
+      ok: true,
       authorized: true,
-      validKey: "mock-dry-run",
-      state: {
-        dayKey: nowIso.slice(0, 10),
-        activeSession: fnName === "apiStartAction" ? Object.assign({ startedAt: nowIso, startedAtMs: nowMs }, payload) : null,
-        dailyBriefing: { dismissed: true, lines: [] },
-        aiDeck: { cards: dummyCards, lowCards: dummyCards }
-      },
-      deck: { cards: dummyCards, lowCards: dummyCards },
-      boundary: { text: "午前の時間 · ~12:30頃" },
-      workMode: "holiday",
-      weatherLine: "磯子 概ね晴れ 0%",
-      chatMessages: [],
-      lists: { tasks: [], shopping: [], stock: [], habits: [] }
+      composedDeck: { cards: MOCK_DECK.slice(), lowCards: MOCK_DECK.slice() },
+      fastState: { completedToday: {}, dismissedToday: {}, activeSession: null, isLowMode: false },
+      tasks: [],
+      habits: [],
+      stock: [],
+      shopping: [],
+      messages: [],
+      boundaryText: "モック検証モード（ドライラン）",
+      subLine: "一時停止→別タスク→完了→再開を試せます"
     });
   };
 
-  window.openSettingsModal = function() {};
-  window.saveLocalSnapshot = function() {};
-  try { localStorage.removeItem("companion_fast_snapshot_v1"); } catch(e) {}
+  window.mockPausedSession = null;
 
-  var startAdjustOpen = false;
-  var endAdjustOpen = false;
+  function formatPausedDur(sec) {
+    var m = Math.floor((sec || 0) / 60);
+    var s = (sec || 0) % 60;
+    return m + "分" + (s < 10 ? "0" : "") + s + "秒";
+  }
 
-  const origRenderHome = window.renderHome;
-  window.renderHome = function() {
-    if (origRenderHome) origRenderHome.apply(this, arguments);
-    const center = document.getElementById("homeCenterArea");
+  function injectPausedBar() {
+    var st = window.__mockState;
+    var center = document.getElementById("homeCenterArea");
     if (!center) return;
-
-    // 1. 実行中画面：必要な時だけ開く「開始時刻を調整」
-    if (state.fastState && state.fastState.activeSession && !state.reflection) {
-      endAdjustOpen = false;
-      var sess = state.fastState.activeSession;
-      var baseMs = sess.startedAtMs || (sess.startedAt ? new Date(sess.startedAt).getTime() : Date.now());
-      var startVal = toTimeStr(baseMs);
-      var wrap = document.createElement("div");
-      wrap.id = "mockStartAdjustWrap";
-      wrap.style.cssText = "margin-top:12px;text-align:center;";
-      if (!startAdjustOpen) {
-        wrap.innerHTML =
-          "<button type=\"button\" class=\"mock-time-link\" onclick=\"window._toggleStartAdjust(true)\">✎ 開始時刻を調整（" + startVal + "〜）</button>";
-      } else {
-        wrap.innerHTML =
-          "<div class=\"glass-surface mock-time-panel fade-in\">" +
-            "<div style=\"display:flex;align-items:center;justify-content:center;gap:8px;\">" +
-              "<span style=\"font-size:12px;color:var(--dc-text-sub);\">開始時刻</span>" +
-              "<input id=\"mockStartTimeInput\" type=\"time\" class=\"mock-time-input\" value=\"" + startVal + "\" />" +
-            "</div>" +
-            "<div style=\"display:flex;gap:8px;justify-content:center;\">" +
-              "<button type=\"button\" class=\"btn-soft\" onclick=\"window._toggleStartAdjust(false)\">キャンセル</button>" +
-              "<button type=\"button\" class=\"btn-solid\" onclick=\"window._applyStartTime()\">適用</button>" +
-            "</div>" +
-          "</div>";
-      }
-      center.appendChild(wrap);
+    var existing = center.querySelector(".mock-paused-bar");
+    if (existing) existing.remove();
+    // 他のカードのタイマー中・振り返り中は中断中バーを表示しない（目の前の1つに集中）
+    var hasActive = !!(st && st.fastState && st.fastState.activeSession);
+    if (window.mockPausedSession && !(st && st.reflection) && !hasActive) {
+      var p = window.mockPausedSession;
+      var bar = document.createElement("div");
+      bar.className = "glass-surface mock-paused-bar fade-in";
+      bar.innerHTML =
+        "<div class=\"mock-paused-info\">" +
+          "<span class=\"mock-paused-badge\">⏸ 中断中</span>" +
+          "<span class=\"mock-paused-title\">" + (p.title || "") + " (" + formatPausedDur(p.elapsedSec) + ")</span>" +
+        "</div>" +
+        "<div class=\"mock-paused-actions\">" +
+          "<button type=\"button\" class=\"btn-solid mock-paused-btn\" onclick=\"window.mockResumePaused()\">再開</button>" +
+          "<button type=\"button\" class=\"btn-soft mock-paused-btn\" onclick=\"window.mockCompletePaused()\">完了</button>" +
+          "<button type=\"button\" class=\"btn-soft mock-paused-btn\" onclick=\"window.mockDiscardPaused()\" aria-label=\"破棄\">×</button>" +
+        "</div>";
+      center.insertBefore(bar, center.firstChild);
     }
+  }
 
-    // 2. 完了画面（reflection）：必要な時だけ開く「時間を調整」
-    if (state.reflection) {
-      startAdjustOpen = false;
-      var sub = center.querySelector(".reflect-sub");
-      if (sub) {
-        var r = state.reflection;
-        if (!r._endMs) r._endMs = Date.now();
-        if (!r._startMs) {
-          r._startMs = (r.card && r.card.startedAtMs) ? r.card.startedAtMs : (r._endMs - (r.usedMins || 1) * 60000);
-        }
-        var sVal = toTimeStr(r._startMs);
-        var eVal = toTimeStr(r._endMs);
+  window.mockPauseCurrentFocus = function() {
+    var st = window.__mockState;
+    if (!st || !st.fastState || !st.fastState.activeSession) return;
+    if (window.mockPausedSession) return; // 1件制限
+    var s = st.fastState.activeSession;
+    var elSec = Math.max(0, Math.floor((Date.now() - (s.startedAtMs || Date.now())) / 1000));
+    window.mockPausedSession = {
+      id: s.id, title: s.title, icon: s.icon || "compass", mins: s.mins || 15,
+      elapsedSec: elSec, isSleepCard: !!s.isSleepCard, isWorkBlock: !!s.isWorkBlock, linkedType: s.linkedType
+    };
+    st.fastState.activeSession = null;
+    if (window.__mockRenderHome) window.__mockRenderHome();
+    injectPausedBar();
+  };
 
-        var wrap2 = document.createElement("div");
-        wrap2.id = "mockEndAdjustWrap";
-        wrap2.style.cssText = "margin:4px 0 10px;text-align:center;width:100%;";
-        if (!endAdjustOpen) {
-          wrap2.innerHTML =
-            "<button type=\"button\" class=\"mock-time-link\" onclick=\"window._toggleEndAdjust(true)\">✎ 時間を調整（" + sVal + " 〜 " + eVal + "）</button>";
-        } else {
-          wrap2.innerHTML =
-            "<div class=\"glass-surface mock-time-panel fade-in\">" +
-              "<div style=\"display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;\">" +
-                "<label style=\"font-size:12px;color:var(--dc-text-sub);display:flex;align-items:center;gap:6px;\">開始 <input id=\"mockRefStartInput\" type=\"time\" class=\"mock-time-input\" value=\"" + sVal + "\" /></label>" +
-                "<span style=\"color:var(--dc-text-sub);\">〜</span>" +
-                "<label style=\"font-size:12px;color:var(--dc-text-sub);display:flex;align-items:center;gap:6px;\">終了 <input id=\"mockRefEndInput\" type=\"time\" class=\"mock-time-input\" value=\"" + eVal + "\" /></label>" +
-              "</div>" +
-              "<div style=\"display:flex;gap:8px;justify-content:center;\">" +
-                "<button type=\"button\" class=\"btn-soft\" onclick=\"window._toggleEndAdjust(false)\">キャンセル</button>" +
-                "<button type=\"button\" class=\"btn-solid\" onclick=\"window._applyReflectTimes()\">適用</button>" +
-              "</div>" +
-            "</div>";
-        }
-        sub.insertAdjacentElement("afterend", wrap2);
+  window.mockResumePaused = function() {
+    var st = window.__mockState;
+    if (!window.mockPausedSession || !st || !st.fastState) return;
+    var target = window.mockPausedSession;
+    window.mockPausedSession = null;
+    st.fastState.activeSession = {
+      id: target.id, title: target.title, icon: target.icon, mins: target.mins,
+      startedAtMs: Date.now() - (target.elapsedSec * 1000),
+      isSleepCard: target.isSleepCard, isWorkBlock: target.isWorkBlock, linkedType: target.linkedType
+    };
+    if (window.__mockRenderHome) window.__mockRenderHome();
+    injectPausedBar();
+  };
+
+  window.mockCompletePaused = function() {
+    var st = window.__mockState;
+    if (!window.mockPausedSession || !st) return;
+    var p = window.mockPausedSession;
+    window.mockPausedSession = null;
+    st.reflection = {
+      card: { id: p.id, title: p.title, icon: p.icon, isSleepCard: p.isSleepCard, linkedType: p.linkedType },
+      usedMins: Math.max(1, Math.round((p.elapsedSec || 60) / 60)),
+      startedMs: Date.now() - (p.elapsedSec * 1000),
+      endedMs: Date.now(), feeling: "", note: ""
+    };
+    if (window.__mockRenderHome) window.__mockRenderHome();
+  };
+
+  window.mockDiscardPaused = function() {
+    window.mockPausedSession = null;
+    if (window.__mockRenderHome) window.__mockRenderHome();
+    injectPausedBar();
+  };
+
+  var centerEl = document.getElementById("homeCenterArea");
+  if (centerEl && typeof MutationObserver !== "undefined") {
+    var obs = new MutationObserver(function() {
+      var st = window.__mockState;
+      var hasActive = !!(st && st.fastState && st.fastState.activeSession);
+      if (window.mockPausedSession && !(st && st.reflection) && !hasActive && !centerEl.querySelector(".mock-paused-bar")) {
+        injectPausedBar();
       }
-    }
-  };
+    });
+    obs.observe(centerEl, { childList: true });
+  }
 
-  window._toggleStartAdjust = function(open) {
-    startAdjustOpen = open;
-    renderHome();
-  };
-  window._applyStartTime = function() {
-    var el = document.getElementById("mockStartTimeInput");
-    if (!el || !el.value || !state.fastState || !state.fastState.activeSession) return;
-    var sess = state.fastState.activeSession;
-    var newMs = applyTimeStrToMs(sess.startedAtMs || Date.now(), el.value);
-    sess.startedAtMs = newMs;
-    sess.startedAt = new Date(newMs).toISOString();
-    startAdjustOpen = false;
-    renderHome();
-    if (typeof updateActiveTimer === "function") updateActiveTimer();
-    if (typeof showToast === "function") showToast("開始時刻を " + el.value + " に更新しました");
-  };
-  window._toggleEndAdjust = function(open) {
-    endAdjustOpen = open;
-    renderHome();
-  };
-  window._applyReflectTimes = function() {
-    var r = state.reflection;
-    if (!r) return;
-    var sEl = document.getElementById("mockRefStartInput");
-    var eEl = document.getElementById("mockRefEndInput");
-    if (sEl && sEl.value) r._startMs = applyTimeStrToMs(r._startMs, sEl.value);
-    if (eEl && eEl.value) r._endMs = applyTimeStrToMs(r._endMs, eEl.value);
-    var diffMins = Math.max(1, Math.round((r._endMs - r._startMs) / 60000));
-    r.usedMins = diffMins;
-    endAdjustOpen = false;
-    renderHome();
-    if (typeof showToast === "function") showToast("実績時間を " + diffMins + "分 に更新しました");
-  };
+  window.addEventListener("DOMContentLoaded", function() {
+    setTimeout(function() {
+      var st = window.__mockState;
+      if (st) {
+        st.composedDeck = { cards: MOCK_DECK.slice(), lowCards: MOCK_DECK.slice() };
+        if (st.fastState) {
+          st.fastState.completedToday = {};
+          st.fastState.dismissedToday = {};
+        }
+        if (window.__mockRenderHome) window.__mockRenderHome();
+      }
+    }, 250);
+  });
 })();
 </script>
 

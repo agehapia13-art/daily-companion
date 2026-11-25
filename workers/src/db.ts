@@ -156,6 +156,7 @@ export function createEmptyFastState(dayKey?: string): FastState {
     dayKey: dayKey || getLogicalDayKey(),
     revision: 1,
     activeSession: null,
+    pausedSession: null,
     completedToday: {},
     dismissedToday: {},
     isLowMode: false,
@@ -217,6 +218,7 @@ export function ensureLogicalDayBoundary(
 
   normalized.dayKey = currentDayKey;
   normalized.activeSession = preservedSleep;
+  normalized.pausedSession = null;
   normalized.completedToday = {};
   normalized.dismissedToday = {};
   normalized.isLowMode = false;

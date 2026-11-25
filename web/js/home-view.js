@@ -38,6 +38,7 @@ function getVisibleDeckCards() {
     ? (state.composedDeck.lowCards || [])
     : (state.composedDeck.cards || []);
   var valid = pool.filter(function(c) {
+    if (state.fastState.pausedSession && c.id === state.fastState.pausedSession.id) return false;
     if (!isDeckCardAvailable(c, completed, dismissed, activeTaskIds)) return false;
     if (c.isTriage && state.fastState.triagedToday) return false;
     return true;
@@ -188,7 +189,7 @@ function renderHome() {
   }
 
   if (sess) {
-    var elSec = Math.max(0, Math.floor((Date.now() - (sess.startedAtMs || Date.now())) / 1000));
+    var elSec = Math.max(0, Math.floor((Date.now() - (sess.startedAtMs || Date.now()) - (sess.pausedDurationMs || 0)) / 1000));
     var showBreak = Math.floor(elSec / 60) >= 60 && !sess.isWorkBlock && !sess.isSleepCard;
     var sValActive = formatTimeInputHm_(sess.startedAtMs || Date.now());
     var activeAdjustHtml = !state.isStartAdjustOpen
@@ -215,6 +216,7 @@ function renderHome() {
         '<div id="focusGentleNote" class="focus-gentle-note' + (showBreak ? '' : ' hidden') + '">そろそろ一息入れませんか</div>' +
         '<div class="focus-actions">' +
           '<button onclick="pauseFocus()" class="btn-pause-soft">キャンセル</button>' +
+          (!sess.isSleepCard && !state.fastState.pausedSession ? '<button type="button" onclick="pauseActiveToHold()" class="btn-pause-soft">一時停止</button>' : '') +
           '<button onclick="finishFocus()" class="btn-done-pill">' + (sess.isSleepCard ? '起きた' : '終わった') + '</button>' +
         '</div>' +
         activeAdjustHtml +
@@ -223,7 +225,28 @@ function renderHome() {
   }
 
   var cards = getVisibleDeckCards();
-  var parts = ['<div class="cards-stack fade-in">'];
+  var parts = [];
+  if (state.fastState.pausedSession) {
+    var ps = state.fastState.pausedSession;
+    var pElSec = Math.max(0, Math.floor(((ps.pausedAtMs || Date.now()) - (ps.startedAtMs || Date.now()) - (ps.pausedDurationMs || 0)) / 1000));
+    var pMin = Math.floor(pElSec / 60);
+    var pSec = pElSec % 60;
+    var pLabel = pMin + '分' + (pSec < 10 ? '0' : '') + pSec + '秒';
+    parts.push(
+      '<div class="glass-surface paused-session-bar fade-in">' +
+        '<div class="paused-session-info">' +
+          '<span class="paused-session-badge">⏸ 中断中</span>' +
+          '<span class="paused-session-title">' + escapeHtml(ps.title || '') + ' (' + pLabel + ')</span>' +
+        '</div>' +
+        '<div class="paused-session-actions">' +
+          '<button type="button" class="btn-solid paused-session-btn" onclick="resumePausedSession()">再開</button>' +
+          '<button type="button" class="btn-soft paused-session-btn" onclick="completePausedSession()">完了</button>' +
+          '<button type="button" class="btn-soft paused-session-btn" onclick="discardPausedSession()" aria-label="破棄">×</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+  parts.push('<div class="cards-stack fade-in">');
   if (state.isRefreshingDeck) {
     parts.push(
       '<div class="action-card" style="cursor:default;">' +
@@ -481,6 +504,68 @@ function pauseFocus() {
   enqueueOutboxMutation('apiStartAction', null);
 }
 
+function pauseActiveToHold() {
+  var sess = state.fastState && state.fastState.activeSession;
+  if (!sess || sess.isSleepCard || state.fastState.pausedSession) return;
+  state.pendingSessionLockUntil = Date.now() + 8000;
+  var held = Object.assign({}, sess, { pausedAtMs: Date.now() });
+  state.fastState.pausedSession = held;
+  state.fastState.activeSession = null;
+  saveLocalSnapshot();
+  renderHome();
+  enqueueOutboxMutation('apiPausedSession', { pausedSession: held, activeSession: null });
+}
+
+function resumePausedSession() {
+  var ps = state.fastState && state.fastState.pausedSession;
+  if (!ps) return;
+  state.pendingSessionLockUntil = Date.now() + 8000;
+  var nowMs = Date.now();
+  var addedPause = Math.max(0, nowMs - (ps.pausedAtMs || nowMs));
+  var resumed = Object.assign({}, ps, {
+    pausedDurationMs: (ps.pausedDurationMs || 0) + addedPause
+  });
+  delete resumed.pausedAtMs;
+  state.fastState.pausedSession = null;
+  state.fastState.activeSession = resumed;
+  saveLocalSnapshot();
+  renderHome();
+  enqueueOutboxMutation('apiPausedSession', { pausedSession: null, activeSession: resumed });
+}
+
+function completePausedSession() {
+  var ps = state.fastState && state.fastState.pausedSession;
+  if (!ps) return;
+  state.pendingSessionLockUntil = Date.now() + 8000;
+  var endMs = ps.pausedAtMs || Date.now();
+  var startMs = ps.startedAtMs || endMs;
+  var elMins = Math.max(1, Math.round((endMs - startMs - (ps.pausedDurationMs || 0)) / 60000));
+  state.fastState.pausedSession = null;
+  state.reflection = {
+    card: ps,
+    startedMs: startMs,
+    endedMs: endMs,
+    usedMins: elMins,
+    feeling: '',
+    note: '',
+    photoDataUrl: '',
+    photoBase64: '',
+    photoMimeType: 'image/jpeg'
+  };
+  saveLocalSnapshot();
+  renderHome();
+  enqueueOutboxMutation('apiPausedSession', { pausedSession: null });
+}
+
+function discardPausedSession() {
+  if (!state.fastState || !state.fastState.pausedSession) return;
+  state.pendingSessionLockUntil = Date.now() + 8000;
+  state.fastState.pausedSession = null;
+  saveLocalSnapshot();
+  renderHome();
+  enqueueOutboxMutation('apiPausedSession', { pausedSession: null });
+}
+
 function formatTimeInputHm_(ms) {
   var d = new Date(ms || Date.now());
   return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
@@ -543,7 +628,7 @@ function finishFocus() {
   if (!sess) return;
   var endMs = Date.now();
   var startMs = sess.startedAtMs || endMs;
-  var elMins = Math.max(1, Math.round((endMs - startMs) / 60000));
+  var elMins = Math.max(1, Math.round((endMs - startMs - (sess.pausedDurationMs || 0)) / 60000));
   state.isStartAdjustOpen = false;
   state.fastState.activeSession = null;
   state.reflection = {

@@ -50,6 +50,7 @@ var state = {
   fastState: {
     dayKey: '',
     activeSession: null,
+    pausedSession: null,
     completedToday: {},
     dismissedToday: {},
     isLowMode: false,
@@ -566,10 +567,13 @@ function applyServerStatePayload(res, opts) {
       ? Object.assign({}, prev.dismissedToday || {}, res.state.dismissedToday || {})
       : (res.state.dismissedToday || {});
     var localSession = prev.activeSession;
+    var localPaused = prev.pausedSession;
     var hasPendingOutbox = Boolean(state.pendingOutbox && state.pendingOutbox.length > 0);
     var lockActive = hasPendingOutbox || Boolean(state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil);
     var keepLocalSession = Boolean(localSession && !res.state.activeSession && lockActive);
     var keepClearedSession = Boolean(!localSession && res.state.activeSession && lockActive);
+    var keepLocalPaused = Boolean(localPaused && !res.state.pausedSession && lockActive);
+    var keepClearedPaused = Boolean(!localPaused && res.state.pausedSession && lockActive);
     var briefingDismissed = sameDay && Boolean((prev.dailyBriefing && prev.dailyBriefing.dismissed) || mergedDismissed['__briefing__']);
     state.fastState = res.state;
     if (!preferServerLow && sameDay && typeof prev.isLowMode === 'boolean') {
@@ -582,6 +586,8 @@ function applyServerStatePayload(res, opts) {
     }
     if (keepLocalSession) state.fastState.activeSession = localSession;
     if (keepClearedSession) state.fastState.activeSession = null;
+    if (keepLocalPaused) state.fastState.pausedSession = localPaused;
+    if (keepClearedPaused) state.fastState.pausedSession = null;
   }
   if (res.deck) state.composedDeck = res.deck;
   if (res.lists) state.lists = res.lists;

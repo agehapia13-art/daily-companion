@@ -1747,6 +1747,63 @@
       font-weight: 500;
       font-family: inherit;
     }
+
+    /* Paused Session (Hold) Bar & 3-button focus actions */
+    .focus-actions {
+      gap: 8px;
+      flex-wrap: nowrap;
+    }
+    .focus-actions .btn-pause-soft,
+    .focus-actions .btn-done-pill {
+      padding-left: 14px;
+      padding-right: 14px;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .paused-session-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 14px;
+      margin: 0 0 12px 0;
+      border-radius: 18px;
+      font-size: 13px;
+    }
+    .paused-session-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+    }
+    .paused-session-badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: var(--dc-btn-soft-glass);
+      border: 1px solid var(--dc-glass-border);
+      color: var(--dc-text-sub);
+      white-space: nowrap;
+    }
+    .paused-session-title {
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .paused-session-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .paused-session-btn {
+      padding: 6px 10px;
+      font-size: 12px;
+      border-radius: 999px;
+    }
   </style>
 </head>
 <body>
@@ -1868,7 +1925,7 @@
           <button type="button" id="importSheetsBtn" onclick="runImportFromSheets()" class="settings-row-btn" style="width:100%;justify-content:center;padding:8px 10px;font-size:12px;">シートからD1へ取り込む</button>
         </div>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v43</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v44</div>
     </div>
   </div>
 
@@ -1934,6 +1991,7 @@
       fastState: {
         dayKey: '',
         activeSession: null,
+        pausedSession: null,
         completedToday: {},
         dismissedToday: {},
         isLowMode: false,
@@ -2450,10 +2508,13 @@
           ? Object.assign({}, prev.dismissedToday || {}, res.state.dismissedToday || {})
           : (res.state.dismissedToday || {});
         var localSession = prev.activeSession;
+        var localPaused = prev.pausedSession;
         var hasPendingOutbox = Boolean(state.pendingOutbox && state.pendingOutbox.length > 0);
         var lockActive = hasPendingOutbox || Boolean(state.pendingSessionLockUntil && Date.now() < state.pendingSessionLockUntil);
         var keepLocalSession = Boolean(localSession && !res.state.activeSession && lockActive);
         var keepClearedSession = Boolean(!localSession && res.state.activeSession && lockActive);
+        var keepLocalPaused = Boolean(localPaused && !res.state.pausedSession && lockActive);
+        var keepClearedPaused = Boolean(!localPaused && res.state.pausedSession && lockActive);
         var briefingDismissed = sameDay && Boolean((prev.dailyBriefing && prev.dailyBriefing.dismissed) || mergedDismissed['__briefing__']);
         state.fastState = res.state;
         if (!preferServerLow && sameDay && typeof prev.isLowMode === 'boolean') {
@@ -2466,6 +2527,8 @@
         }
         if (keepLocalSession) state.fastState.activeSession = localSession;
         if (keepClearedSession) state.fastState.activeSession = null;
+        if (keepLocalPaused) state.fastState.pausedSession = localPaused;
+        if (keepClearedPaused) state.fastState.pausedSession = null;
       }
       if (res.deck) state.composedDeck = res.deck;
       if (res.lists) state.lists = res.lists;
@@ -2871,6 +2934,7 @@
         ? (state.composedDeck.lowCards || [])
         : (state.composedDeck.cards || []);
       var valid = pool.filter(function(c) {
+        if (state.fastState.pausedSession && c.id === state.fastState.pausedSession.id) return false;
         if (!isDeckCardAvailable(c, completed, dismissed, activeTaskIds)) return false;
         if (c.isTriage && state.fastState.triagedToday) return false;
         return true;
@@ -3021,7 +3085,7 @@
       }
 
       if (sess) {
-        var elSec = Math.max(0, Math.floor((Date.now() - (sess.startedAtMs || Date.now())) / 1000));
+        var elSec = Math.max(0, Math.floor((Date.now() - (sess.startedAtMs || Date.now()) - (sess.pausedDurationMs || 0)) / 1000));
         var showBreak = Math.floor(elSec / 60) >= 60 && !sess.isWorkBlock && !sess.isSleepCard;
         var sValActive = formatTimeInputHm_(sess.startedAtMs || Date.now());
         var activeAdjustHtml = !state.isStartAdjustOpen
@@ -3048,6 +3112,7 @@
             '<div id="focusGentleNote" class="focus-gentle-note' + (showBreak ? '' : ' hidden') + '">そろそろ一息入れませんか</div>' +
             '<div class="focus-actions">' +
               '<button onclick="pauseFocus()" class="btn-pause-soft">キャンセル</button>' +
+              (!sess.isSleepCard && !state.fastState.pausedSession ? '<button type="button" onclick="pauseActiveToHold()" class="btn-pause-soft">一時停止</button>' : '') +
               '<button onclick="finishFocus()" class="btn-done-pill">' + (sess.isSleepCard ? '起きた' : '終わった') + '</button>' +
             '</div>' +
             activeAdjustHtml +
@@ -3056,7 +3121,28 @@
       }
 
       var cards = getVisibleDeckCards();
-      var parts = ['<div class="cards-stack fade-in">'];
+      var parts = [];
+      if (state.fastState.pausedSession) {
+        var ps = state.fastState.pausedSession;
+        var pElSec = Math.max(0, Math.floor(((ps.pausedAtMs || Date.now()) - (ps.startedAtMs || Date.now()) - (ps.pausedDurationMs || 0)) / 1000));
+        var pMin = Math.floor(pElSec / 60);
+        var pSec = pElSec % 60;
+        var pLabel = pMin + '分' + (pSec < 10 ? '0' : '') + pSec + '秒';
+        parts.push(
+          '<div class="glass-surface paused-session-bar fade-in">' +
+            '<div class="paused-session-info">' +
+              '<span class="paused-session-badge">⏸ 中断中</span>' +
+              '<span class="paused-session-title">' + escapeHtml(ps.title || '') + ' (' + pLabel + ')</span>' +
+            '</div>' +
+            '<div class="paused-session-actions">' +
+              '<button type="button" class="btn-solid paused-session-btn" onclick="resumePausedSession()">再開</button>' +
+              '<button type="button" class="btn-soft paused-session-btn" onclick="completePausedSession()">完了</button>' +
+              '<button type="button" class="btn-soft paused-session-btn" onclick="discardPausedSession()" aria-label="破棄">×</button>' +
+            '</div>' +
+          '</div>'
+        );
+      }
+      parts.push('<div class="cards-stack fade-in">');
       if (state.isRefreshingDeck) {
         parts.push(
           '<div class="action-card" style="cursor:default;">' +
@@ -3314,6 +3400,68 @@
       enqueueOutboxMutation('apiStartAction', null);
     }
 
+    function pauseActiveToHold() {
+      var sess = state.fastState && state.fastState.activeSession;
+      if (!sess || sess.isSleepCard || state.fastState.pausedSession) return;
+      state.pendingSessionLockUntil = Date.now() + 8000;
+      var held = Object.assign({}, sess, { pausedAtMs: Date.now() });
+      state.fastState.pausedSession = held;
+      state.fastState.activeSession = null;
+      saveLocalSnapshot();
+      renderHome();
+      enqueueOutboxMutation('apiPausedSession', { pausedSession: held, activeSession: null });
+    }
+
+    function resumePausedSession() {
+      var ps = state.fastState && state.fastState.pausedSession;
+      if (!ps) return;
+      state.pendingSessionLockUntil = Date.now() + 8000;
+      var nowMs = Date.now();
+      var addedPause = Math.max(0, nowMs - (ps.pausedAtMs || nowMs));
+      var resumed = Object.assign({}, ps, {
+        pausedDurationMs: (ps.pausedDurationMs || 0) + addedPause
+      });
+      delete resumed.pausedAtMs;
+      state.fastState.pausedSession = null;
+      state.fastState.activeSession = resumed;
+      saveLocalSnapshot();
+      renderHome();
+      enqueueOutboxMutation('apiPausedSession', { pausedSession: null, activeSession: resumed });
+    }
+
+    function completePausedSession() {
+      var ps = state.fastState && state.fastState.pausedSession;
+      if (!ps) return;
+      state.pendingSessionLockUntil = Date.now() + 8000;
+      var endMs = ps.pausedAtMs || Date.now();
+      var startMs = ps.startedAtMs || endMs;
+      var elMins = Math.max(1, Math.round((endMs - startMs - (ps.pausedDurationMs || 0)) / 60000));
+      state.fastState.pausedSession = null;
+      state.reflection = {
+        card: ps,
+        startedMs: startMs,
+        endedMs: endMs,
+        usedMins: elMins,
+        feeling: '',
+        note: '',
+        photoDataUrl: '',
+        photoBase64: '',
+        photoMimeType: 'image/jpeg'
+      };
+      saveLocalSnapshot();
+      renderHome();
+      enqueueOutboxMutation('apiPausedSession', { pausedSession: null });
+    }
+
+    function discardPausedSession() {
+      if (!state.fastState || !state.fastState.pausedSession) return;
+      state.pendingSessionLockUntil = Date.now() + 8000;
+      state.fastState.pausedSession = null;
+      saveLocalSnapshot();
+      renderHome();
+      enqueueOutboxMutation('apiPausedSession', { pausedSession: null });
+    }
+
     function formatTimeInputHm_(ms) {
       var d = new Date(ms || Date.now());
       return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
@@ -3376,7 +3524,7 @@
       if (!sess) return;
       var endMs = Date.now();
       var startMs = sess.startedAtMs || endMs;
-      var elMins = Math.max(1, Math.round((endMs - startMs) / 60000));
+      var elMins = Math.max(1, Math.round((endMs - startMs - (sess.pausedDurationMs || 0)) / 60000));
       state.isStartAdjustOpen = false;
       state.fastState.activeSession = null;
       state.reflection = {

@@ -125,10 +125,16 @@ export interface ListsSnapshot {
   habits: HabitSnapshotItem[];
 }
 
+export interface PausedSession extends ActiveSession {
+  pausedAtMs: number;
+  pausedDurationMs?: number;
+}
+
 export interface FastState {
   dayKey: string;
   revision: number;
   activeSession: ActiveSession | null;
+  pausedSession?: PausedSession | null;
   completedToday: Record<string, string | boolean>;
   dismissedToday: Record<string, string | boolean>;
   isLowMode: boolean;

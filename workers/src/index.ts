@@ -7,6 +7,7 @@ import {
   apiMutateListItem,
   apiRefreshDeck,
   apiStartAction,
+  apiPausedSession,
   handleInternalExportDay,
   handleInternalSyncMemory,
   handleScheduledCron
@@ -20,6 +21,7 @@ type ApiHandler = (env: Env, ctx: ExecutionContext, ...args: any[]) => Promise<u
 const API_HANDLERS: Record<string, ApiHandler> = {
   apiGetHomeBootstrap,
   apiStartAction,
+  apiPausedSession,
   apiCompleteAction,
   apiDismissCardToday,
   apiMutateListItem,

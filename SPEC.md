@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-24 19:44 JST
+> **最終更新**: 2026-11-25 23:11 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -408,3 +408,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 | **2026-11-24 19:44** | フロントエンド × Cloudflare Workers 総チェック修正（重要度高・中 19項目の一括堅牢化） | ① `chat.ts`: `thinking_level` ホワイトリスト検証、SSE 後 `safeParseGeminiJson`、`FastState` Lost Update / `revision` 二重加算解消、2パス目 `resetDraft: true`、`profile` 汎用追記化。② `utils.ts`/`db.ts`/`deck-engine.ts`: `parseCycleStampItems`・`addDaysToYmd` 共通化、論理日（03:00境界）統一、`fastState` `null` 汚染防止。③ `calendar.ts`/`sheets-import.ts`/`sheets-mirror.ts`: 日付のみ文字列の JST `00:00` 解釈・不正日付ガード、時刻ゼロ埋め＆厳格 `YYYY-MM-DD` 抽出、インポート一括バッチ化、`RAW` 書き戻し。④ `api-core.ts`/`Api.js`/`web/`: ふりかえり時刻調整（`usedMins`）送信・反映、`isLowMode` AI 切替反映＆`lowCards` カード検索統一、`apiRefreshDeck` 反映修正、`getIconSvg` 補完（`droplets`/`walk`/`cart`）、GAS接続時の D1 取り込みボタン非表示（`dc-pwa-v42`）。 |
 | **2026-11-24 20:09** | `2026-11-24T10:26:57Z` `(api:chat/stream)` `thinking_level` 400 エラー修復・モデル統一・`memory-validator` Skill 新設 | ① D1 `memory` テーブルでプロンプト断片により破損していた `thinking_level`（`'low'`）および `backend_model`（`'3.5-lite'`）を修復。② `workers/src/chat.ts`・`workers/src/deck-engine.ts` のデフォルトモデルを `'gemini-3.5-flash-lite'` に統一し、Cloudflare Workers を本番デプロイ。③ `.agent/skills/memory-validator/SKILL.md` を新設し、`memory` シート／D1 テーブルの入力規則・検証手順を定義。 |
 | **2026-11-24 20:23** | Cloudflare Workers Phase 3: 深夜バッチ D1 書き戻し連携 ＆ Cron Triggers（05:00/17:00 JST）実装 | ① `workers/wrangler.toml`・`workers/src/index.ts`・`workers/src/api-core.ts` に `scheduled()` Cron（05:00 JST 天気更新、17:00 JST 夜デッキ先読み）を追加し、`handleInternalSyncMemory` へ `newTasks` 受け入れと就寝セッション保護を実装。② `src/Config.js`・`src/Batch.js` に `WORKERS_API_URL` / `INTERNAL_API_SECRET` 連携（`syncMidnightBatchToWorkers_`）を追加し、03:00 バッチの記憶・ルーティン投入タスク・朝ブリーフィング・初期デッキを D1 へ自動同期するよう対応。 |
+| **2026-11-25 23:11** | 通知トースト・Lists ヘッダーの上端位置を Home/Talk と同じ基準に統一 | `web/styles.css` の `.lists-header` の `padding-top` および `.toast` の `top` を `calc(34px + env(safe-area-inset-top))` に統一し、iPhone での視認性を改善（`dc-pwa-v43`）。 |

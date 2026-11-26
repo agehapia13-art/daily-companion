@@ -1925,7 +1925,7 @@
           <button type="button" id="importSheetsBtn" onclick="runImportFromSheets()" class="settings-row-btn" style="width:100%;justify-content:center;padding:8px 10px;font-size:12px;">シートからD1へ取り込む</button>
         </div>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v44</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v45</div>
     </div>
   </div>
 
@@ -2872,7 +2872,7 @@
         }
         var sess = state.fastState.activeSession;
         if (sess && sess.startedAtMs && !state.reflection) {
-          var elSec = Math.max(0, Math.floor((Date.now() - sess.startedAtMs) / 1000));
+          var elSec = Math.max(0, Math.floor((Date.now() - sess.startedAtMs - (sess.pausedDurationMs || 0)) / 1000));
           var tEl = document.getElementById('focusTimerText');
           if (tEl) tEl.textContent = formatTimer(elSec);
           var noteEl = document.getElementById('focusGentleNote');

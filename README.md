@@ -21,7 +21,7 @@
 ## 🌟 v2 アーキテクチャと主要機能
 
 ### 1. 3タブ PWA UI/UX（Sheer Frosted Glass × Fluid Mist）
-`docs/index.html`（`scripts/build-dashboard.js` が `web/` から生成。GAS 直接配信時は `src/Dashboard.js` が `src/DashboardHtml.html` を提供）は **GitHub Pages + Service Worker (`sw.js`) + iOS Safe Area (`viewport-fit=cover` / `black-translucent`)** 対応のスタンドアロン PWA として動作します。
+`docs/index.html`（`scripts/build-dashboard.js` が `web/` から生成）は **GitHub Pages + Service Worker (`sw.js`) + iOS Safe Area (`viewport-fit=cover` / `black-translucent`)** 対応のスタンドアロン PWA として動作します。
 
 - **Home（状況の鏡 × 行動の触媒）**:
   - **ヘッダ**: OS 時計と重複する現在時刻表示を省き、天気・気圧サマリー（`weatherLine`）と次の予定／就寝境界カウントダウン（`HH:MM:SS`）、前回完了行動からの経過時間 $\Delta t$（`deltaText`）を表示。
@@ -178,7 +178,7 @@
 # 1. src/*.js ＆ web/js/*.js 構文チェック ＋ DashboardHtml/sw.js 検証
 npm run check
 
-# 2. web/ → src/DashboardHtml.html ＆ docs/ PWA 一式ビルド
+# 2. web/ → docs/ PWA 一式ビルド
 npm run build:dashboard
 
 # 3. ローカルモックサーバー ＆ E2E検証（インメモリDB ＋ .env 読み込み時実Gemini連携）
@@ -189,9 +189,8 @@ npm run mock:server
 node scripts/sync-prompts-to-sheet.js --test
 node scripts/sync-prompts-to-sheet.js
 
-# 5. GAS へ反映（確認・承認済みブランチの最終反映時）
+# 5. GAS（深夜 03:00 バッチ専用）へ反映（確認・承認済みブランチの最終反映時）
 npm run push
-npx clasp deploy -i <デプロイID> -d "v2: Companion Cockpit"
 ```
 
 ※ `memory` シート／D1 テーブルの入力規則・バリデーション手順は `.agent/skills/memory-validator/SKILL.md` を参照してください。

@@ -921,6 +921,15 @@ export async function apiFlushOutboxBatch(
         }
         if (opId) await markOpProcessed(env, opId);
         results.push({ id: opId, ok: true });
+      } else if (funcName === 'apiPausedSession' || funcName === 'paused_session') {
+        const pp = (p && typeof p === 'object' ? p : {}) as Record<string, any>;
+        fastState.pausedSession = pp.pausedSession ? (pp.pausedSession as any) : null;
+        if (Object.prototype.hasOwnProperty.call(pp, 'activeSession')) {
+          fastState.activeSession = pp.activeSession ? (pp.activeSession as any) : null;
+        }
+        mirrorEvents.push({ type: 'sync_snapshot' });
+        if (opId) await markOpProcessed(env, opId);
+        results.push({ id: opId, ok: true });
       } else {
         results.push({
           id: opId,

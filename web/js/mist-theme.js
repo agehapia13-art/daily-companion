@@ -211,7 +211,7 @@ function startLiveClocks() {
     }
     var sess = state.fastState.activeSession;
     if (sess && sess.startedAtMs && !state.reflection) {
-      var elSec = Math.max(0, Math.floor((Date.now() - sess.startedAtMs) / 1000));
+      var elSec = Math.max(0, Math.floor((Date.now() - sess.startedAtMs - (sess.pausedDurationMs || 0)) / 1000));
       var tEl = document.getElementById('focusTimerText');
       if (tEl) tEl.textContent = formatTimer(elSec);
       var noteEl = document.getElementById('focusGentleNote');

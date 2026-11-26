@@ -121,7 +121,8 @@ function setupSpreadsheet() {
 }
 
 /**
- * v2 定期トリガー（03:00 深夜統合 / 05:00 朝天気 / 17:00 夜デッキ再編成）を自動作成
+ * v2 定期トリガー（03:00 深夜統合バッチのみ）を自動作成
+ * ※ 05:00 天気更新 / 17:00 夜デッキ再編成は Cloudflare Workers Cron へ一本化済み
  */
 function setupTriggers() {
   const targetHandlers = {
@@ -142,19 +143,7 @@ function setupTriggers() {
     .everyDays(1)
     .create();
 
-  ScriptApp.newTrigger('morningWeatherBatch')
-    .timeBased()
-    .atHour(5)
-    .everyDays(1)
-    .create();
-
-  ScriptApp.newTrigger('eveningDeckBatch')
-    .timeBased()
-    .atHour(17)
-    .everyDays(1)
-    .create();
-
-  Logger.log('v2 トリガー（03:00 dailyMidnightBatch / 05:00 morningWeatherBatch / 17:00 eveningDeckBatch）を登録しました！');
+  Logger.log('v2 トリガー（03:00 dailyMidnightBatch のみ）を登録しました！');
 }
 
 /**

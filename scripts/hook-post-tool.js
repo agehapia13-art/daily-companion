@@ -13,11 +13,7 @@ process.stdin.on('end', () => {
     const args = data.tool_input || {};
     const cmd = args.CommandLine || '';
 
-    if (toolName === 'run_command' && /\bclasp\s+push\b/.test(cmd) && !/\bclasp\s+deploy\b/.test(cmd)) {
-      console.log(
-        '[デプロイ確認] `clasp push` を実行しました。Webアプリ（/exec）の挙動を変更した場合は、続けて `npx clasp deploy -i AKfycbxk5S1ISzlMGNHmV09GhptgalE9LQ1scNXclXzIEkRSlw1e5eiXsI4VgK-LsDV-jCiGxg` で本番デプロイも更新してください（Batchトリガーのみ・/dev検証のみの場合は不要）。'
-      );
-    } else if (toolName === 'run_command' && /\bworkers\b/.test(cmd) && /\btypecheck\b/.test(cmd) && !/\bdeploy\b/.test(cmd)) {
+    if (toolName === 'run_command' && /\bworkers\b/.test(cmd) && /\btypecheck\b/.test(cmd) && !/\bdeploy\b/.test(cmd)) {
       console.log(
         '[Workersデプロイ確認] `workers/` の型チェックを実行しました。Workers 側のコードを変更した場合は、完了前に `cd workers && npm run deploy` で本番反映も行ってください。'
       );

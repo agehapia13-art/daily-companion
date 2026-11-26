@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-25 23:11 JST
+> **最終更新**: 2026-11-26 15:42 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -411,3 +411,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 | **2026-11-25 23:11** | 通知トースト・Lists ヘッダーの上端位置を Home/Talk と同じ基準に統一 | `web/styles.css` の `.lists-header` の `padding-top` および `.toast` の `top` を `calc(34px + env(safe-area-inset-top))` に統一し、iPhone での視認性を改善（`dc-pwa-v43`）。 |
 
 - **2026-11-26**: タイマーの一時停止機能（`pausedSession`）を追加。`startedAtMs` を固定したまま `pausedDurationMs` で正味経過時間を管理し、最大1件制限・タイマー中の非表示・選択肢からの一時非表示を実装（`dc-pwa-v44`）。
+- **2026-11-26 15:42**: ①リアルタイム系を Cloudflare Workers + `docs/` へ一本化し、GAS 側 05:00/17:00 トリガー登録（`src/Setup.js`）および `src/DashboardHtml.html` 生成（`scripts/build-dashboard.js`）・`clasp deploy` 運用を廃止。②タイマー一時停止の1秒表示計算漏れ（`web/js/mist-theme.js`）および Outbox バッチ未対応（`workers/src/api-core.ts`）を修正（`dc-pwa-v45`）。

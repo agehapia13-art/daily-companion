@@ -25,11 +25,10 @@ function main() {
   const errors = [];
 
   if (hasWebChange) {
-    const hasBuildHtml = staged.includes('src/DashboardHtml.html');
     const hasDocsAsset = staged.some((f) => f.startsWith('docs/'));
-    if (!hasBuildHtml || !hasDocsAsset) {
+    if (!hasDocsAsset) {
       errors.push(
-        '❌ web/ 配下に変更がありますが、ビルド成果物（src/DashboardHtml.html および docs/）がステージングされていません。\n' +
+        '❌ web/ 配下に変更がありますが、ビルド成果物（docs/）がステージングされていません。\n' +
         '   → scripts/build-dashboard.js の CACHE_NAME をインクリメントし、`node scripts/build-dashboard.js` を実行してください。'
       );
     }

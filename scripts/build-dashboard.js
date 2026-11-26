@@ -270,7 +270,7 @@ function encodeRgbPng(width, height, rawScanlines) {
 }
 
 function buildServiceWorkerJs() {
-  return `const CACHE_NAME = 'dc-pwa-v44';
+  return `const CACHE_NAME = 'dc-pwa-v45';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -395,42 +395,15 @@ const isCheckOnly = process.argv.includes('--check');
 const staticHtml = assembleDashboardHtml();
 validateHtmlScripts(staticHtml, 'dashboard_static');
 
-const dashboardSrc = fs.readFileSync('src/Dashboard.js', 'utf8');
-const sandbox = {
-  HtmlService: {
-    createHtmlOutputFromFile: (name) => {
-      if (name !== 'DashboardHtml') {
-        throw new Error('Unexpected HtmlService file name: ' + name);
-      }
-      return { getContent: () => staticHtml };
-    }
-  }
-};
-vm.createContext(sandbox);
-vm.runInContext(dashboardSrc, sandbox);
-
-if (typeof sandbox.buildDashboardTemplate !== 'function') {
-  console.error('❌ buildDashboardTemplate function not found in src/Dashboard.js');
-  process.exit(1);
-}
-
-const gasHtml = sandbox.buildDashboardTemplate('lists', 'verify$key', '');
-validateHtmlScripts(gasHtml, 'dashboard_gas');
-if (!gasHtml.includes('var INITIAL_TAB = "lists";') || !gasHtml.includes('var SERVER_PRE_KEY = "verify$key";')) {
-  console.error('❌ GAS boot variable injection check failed in buildDashboardTemplate');
-  process.exit(1);
-}
-
 const swCode = buildServiceWorkerJs();
 new vm.Script(swCode, { filename: 'sw.js' });
 
 if (isCheckOnly) {
-  console.log('✅ Web modules, DashboardHtml, inline <script> & sw.js syntax OK');
+  console.log('✅ Web modules, inline <script> & sw.js syntax OK');
   process.exit(0);
 }
 
-// GAS Web App 用バンドルHTML (src/DashboardHtml.html) ＆ GitHub Pages PWA 一式 (docs/) を同時生成
-fs.writeFileSync('src/DashboardHtml.html', staticHtml, 'utf8');
+// GitHub Pages PWA 一式 (docs/) を生成（GAS Web App 版は Cloudflare 一本化により廃止）
 fs.mkdirSync('docs', { recursive: true });
 fs.writeFileSync('docs/index.html', staticHtml, 'utf8');
 fs.writeFileSync('docs/.nojekyll', '', 'utf8');
@@ -440,4 +413,4 @@ fs.writeFileSync('docs/apple-touch-icon.png', renderLeafIconPng(180));
 fs.writeFileSync('docs/icon-192.png', renderLeafIconPng(192));
 fs.writeFileSync('docs/icon-512.png', renderLeafIconPng(512));
 fs.writeFileSync('docs/sw.js', swCode, 'utf8');
-console.log('✅ Generated src/DashboardHtml.html & docs/ PWA assets (index.html: ' + staticHtml.length + ' bytes)');
+console.log('✅ Generated docs/ PWA assets (index.html: ' + staticHtml.length + ' bytes)');

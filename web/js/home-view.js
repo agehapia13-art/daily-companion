@@ -353,7 +353,8 @@ function rotateDeck() {
   var completed = state.fastState.completedToday || {};
   var dismissed = state.fastState.dismissedToday || {};
   var activeTaskIds = getActiveTaskIdSet();
-  var pool = (state.composedDeck.cards || []).filter(function(c) {
+  var rawCards = state.fastState.isLowMode ? (state.composedDeck.lowCards || []) : (state.composedDeck.cards || []);
+  var pool = rawCards.filter(function(c) {
     return isDeckCardAvailable(c, completed, dismissed, activeTaskIds);
   });
   var nextOffset = state.deckOffset + 3;

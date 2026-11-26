@@ -367,7 +367,7 @@ function syncMidnightBatchToWorkers_(payload) {
       return;
     }
     const url = `${config.workersApiUrl}/internal/sync-memory`;
-    const res = UrlFetchApp.fetch(url, {
+    const options = {
       method: 'post',
       contentType: 'application/json',
       headers: {
@@ -375,8 +375,15 @@ function syncMidnightBatchToWorkers_(payload) {
       },
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
-    });
-    const code = res.getResponseCode();
+    };
+    let res = UrlFetchApp.fetch(url, options);
+    let code = res.getResponseCode();
+    if (code < 200 || code >= 300) {
+      Logger.log(`Workers D1 深夜バッチ同期リトライ (${code})`);
+      Utilities.sleep(2000);
+      res = UrlFetchApp.fetch(url, options);
+      code = res.getResponseCode();
+    }
     if (code >= 200 && code < 300) {
       Logger.log('Workers D1 深夜バッチ同期成功: ' + res.getContentText());
     } else {

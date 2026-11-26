@@ -182,7 +182,7 @@ async function syncSnapshotToSheets(
   spreadsheetId: string,
   pendingMemoryPairs: Array<{ key: string; value: string }>
 ): Promise<void> {
-  const [tasksRes, shoppingRes, stockRes, fastStateRow] = await Promise.all([
+  const [tasksRes, shoppingRes, stockRes, routinesRes, fastStateRow] = await Promise.all([
     env.DB.prepare(
       'SELECT id, title, due_date, status, created_at, completed_at, memo, remind_context, doc_url, estimated_mins FROM tasks ORDER BY rowid ASC'
     ).all<any>(),
@@ -191,6 +191,9 @@ async function syncSnapshotToSheets(
     ).all<any>(),
     env.DB.prepare(
       'SELECT type, title, memo, status, consumed_at, estimated_mins FROM input_stock ORDER BY id ASC'
+    ).all<any>(),
+    env.DB.prepare(
+      'SELECT name, type, value, last_generated, memo, status, completed_at FROM routines ORDER BY id ASC'
     ).all<any>(),
     env.DB.prepare('SELECT json_data FROM fast_state WHERE id = 1').first<{ json_data: string }>()
   ]);
@@ -233,12 +236,25 @@ async function syncSnapshotToSheets(
     ])
   ];
 
+  const routineValues: (string | number)[][] = [
+    ['ルール名', 'タイプ', '設定値', '最終生成日', 'メモ', 'ステータス', '完了日'],
+    ...routinesRes.results.map((r) => [
+      r.name || '',
+      r.type || 'day_of_week',
+      r.value || '',
+      r.last_generated || '',
+      r.memo || '',
+      r.status || '有効',
+      r.completed_at || ''
+    ])
+  ];
+
   // 既存行ズレ防止のため、対象範囲をクリアしてから一括書き込み
   const clearUrl = `${SHEETS_API_BASE}/${spreadsheetId}/values:batchClear`;
   await sheetsFetch(accessToken, clearUrl, {
     method: 'POST',
     body: JSON.stringify({
-      ranges: ['tasks!A:J', 'shopping!A:D', 'input_stock!A:F']
+      ranges: ['tasks!A:J', 'shopping!A:D', 'input_stock!A:F', 'routines!A:G']
     })
   });
 
@@ -250,7 +266,8 @@ async function syncSnapshotToSheets(
       data: [
         { range: 'tasks!A1', values: taskValues },
         { range: 'shopping!A1', values: shoppingValues },
-        { range: 'input_stock!A1', values: stockValues }
+        { range: 'input_stock!A1', values: stockValues },
+        { range: 'routines!A1', values: routineValues }
       ]
     })
   });
@@ -275,6 +292,36 @@ async function enqueueMirrorFailure(
   } catch (qErr) {
     console.error('[sheets-mirror] Failed to enqueue mirror failure:', qErr);
   }
+}
+
+export async function drainMirrorQueue(env: Env): Promise<number> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, payload_json, retry_count FROM mirror_queue WHERE retry_count < 5 ORDER BY id ASC LIMIT 10`
+  ).all<{ id: number; payload_json: string; retry_count: number }>();
+
+  if (!results || results.length === 0) return 0;
+
+  let processed = 0;
+  for (const row of results) {
+    try {
+      const event = JSON.parse(row.payload_json) as MirrorEvent;
+      await mirrorToSheets(env, [event]);
+      await env.DB.prepare('DELETE FROM mirror_queue WHERE id = ?').bind(row.id).run();
+      processed += 1;
+    } catch (err) {
+      const nextRetry = (row.retry_count || 0) + 1;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (nextRetry >= 5) {
+        console.warn(`[sheets-mirror] mirror_queue id=${row.id} 破棄（上限到達）: ${msg}`);
+        await env.DB.prepare('DELETE FROM mirror_queue WHERE id = ?').bind(row.id).run();
+      } else {
+        await env.DB.prepare('UPDATE mirror_queue SET retry_count = ?, last_error = ? WHERE id = ?')
+          .bind(nextRetry, msg.slice(0, 1000), row.id)
+          .run();
+      }
+    }
+  }
+  return processed;
 }
 
 export async function mirrorToSheets(env: Env, events: MirrorEvent[]): Promise<void> {

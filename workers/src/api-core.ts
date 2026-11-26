@@ -1,4 +1,5 @@
 import { getWorkModeAndBoundary } from './calendar';
+import { drainMirrorQueue } from './sheets-mirror';
 import {
   appendLog,
   applyInputStockActions,
@@ -1369,6 +1370,7 @@ export async function handleScheduledCron(
     if (mirrorEvents.length > 0) {
       await mirrorToSheets(env, mirrorEvents);
     }
+    await drainMirrorQueue(env);
   } catch (err) {
     console.error('[Cron] Execution error:', err instanceof Error ? err.message : String(err));
   }

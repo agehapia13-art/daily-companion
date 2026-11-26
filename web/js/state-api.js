@@ -215,14 +215,18 @@ function callServerApi(funcName) {
       return;
     }
     var bodyStr = JSON.stringify({ apiAction: funcName, args: args });
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timeoutId = controller ? setTimeout(function() { controller.abort(); }, 60000) : null;
     var fetchOpts = {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: bodyStr,
-      redirect: 'follow'
+      redirect: 'follow',
+      signal: controller ? controller.signal : undefined
     };
     fetch(state.apiUrl, fetchOpts)
       .then(function(r) {
+        if (timeoutId) clearTimeout(timeoutId);
         if (!r.ok) throw new Error('HTTPエラー: ' + r.status);
         return r.json();
       })
@@ -233,8 +237,10 @@ function callServerApi(funcName) {
         resolve(json && json.ok === true ? json.data : json);
       })
       .catch(function(err) {
-        recordClientError('api:' + funcName, err);
-        reject(err);
+        if (timeoutId) clearTimeout(timeoutId);
+        var normErr = err && err.name === 'AbortError' ? new Error('通信がタイムアウトしました（60秒）') : err;
+        recordClientError('api:' + funcName, normErr);
+        reject(normErr);
       });
   });
 }

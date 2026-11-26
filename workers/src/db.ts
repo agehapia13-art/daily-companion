@@ -556,15 +556,21 @@ export async function buildListsSnapshot(
   const todayStr = getLogicalDayKey(now);
   const mem = memory || (await getMemory(env));
 
-  // 1. Tasks（未完了 ＋ 本日完了分、緊急度順ソート）
-  const { results: rawTaskRows } = await env.DB.prepare(
+  // 1. Tasks（未完了 ＋ 本日論理日完了分、緊急度順ソート）
+  const { results: allTaskRows } = await env.DB.prepare(
     `SELECT id, title, due_date, status, created_at, completed_at, memo, remind_context, doc_url, estimated_mins, sheet_row
      FROM tasks
-     WHERE status = '未完了' OR (status = '完了' AND completed_at LIKE ?)
+     WHERE status = '未完了' OR status = '完了'
      ORDER BY rowid ASC`
-  )
-    .bind(`${todayStr}%`)
-    .all<TaskRow>();
+  ).all<TaskRow>();
+
+  const rawTaskRows = allTaskRows.filter((row) => {
+    if (row.status === '未完了') return true;
+    const raw = String(row.completed_at || '').trim();
+    if (!raw) return false;
+    const d = new Date(raw.includes('T') ? raw : `${raw.replace(' ', 'T')}+09:00`);
+    return !Number.isNaN(d.getTime()) && getLogicalDayKey(d) === todayStr;
+  });
 
   const tasks = sortTasksByUrgency(
     rawTaskRows.map((row, idx) => mapTaskRow(row, idx)),
@@ -759,9 +765,10 @@ export async function applyTaskActions(
       }
     } else if (act.action === 'complete') {
       const tasks = await getTasks(env, '未完了');
+      const targetTitle = String(act.target_title || act.title || '').trim();
       for (const t of tasks) {
         const matchById = Boolean(act.task_id && t.id === act.task_id);
-        const matchByTitle = Boolean(act.title && (t.title.includes(act.title) || String(act.title).includes(t.title)));
+        const matchByTitle = Boolean(targetTitle && (t.title.includes(targetTitle) || targetTitle.includes(t.title)));
         if (matchById || matchByTitle) {
           const completedAtStr = formatJstDateTime();
           await env.DB.prepare("UPDATE tasks SET status = '完了', completed_at = ? WHERE id = ?")
@@ -774,9 +781,10 @@ export async function applyTaskActions(
       }
     } else if (act.action === 'delete') {
       const tasks = await getTasks(env);
+      const targetTitle = String(act.target_title || act.title || '').trim();
       for (const t of tasks) {
         const matchById = Boolean(act.task_id && t.id === act.task_id);
-        const matchByTitle = Boolean(act.title && (t.title.includes(act.title) || String(act.title).includes(t.title)));
+        const matchByTitle = Boolean(targetTitle && (t.title.includes(targetTitle) || targetTitle.includes(t.title)));
         if (matchById || matchByTitle) {
           await env.DB.prepare("UPDATE tasks SET status = '破棄' WHERE id = ?").bind(t.id).run();
           notices.push(`🗑️ タスク破棄: ${formatTaskTitleWithBadge(t.title)}`);

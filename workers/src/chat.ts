@@ -1118,12 +1118,18 @@ export async function handleChatStream(
       let pressureAlertVal = memory.pressure_alert || 'FALSE';
       if (isWeatherStale(fastState, workBoundary.workMode, weatherDisplay, now)) {
         try {
-          const freshW = await fetchWeatherAndPressure(env);
+          const freshW = await fetchWeatherAndPressure(env, workBoundary.workMode === 'commute');
           if (freshW && freshW.weatherInfo) {
             weatherDisplay = freshW.weatherInfo;
             pressureAlertVal = freshW.pressureAlert;
             memory.weather_info = freshW.weatherInfo;
             memory.pressure_alert = freshW.pressureAlert;
+            fastState.weatherFetchedAt = now.toISOString();
+            await Promise.all([
+              setMemoryValue(env, 'weather_info', freshW.weatherInfo),
+              setMemoryValue(env, 'pressure_alert', freshW.pressureAlert),
+              saveFastState(env, fastState)
+            ]);
           }
         } catch (wErr) {
           console.warn('Chat天気更新警告:', wErr);

@@ -885,6 +885,7 @@ function escapeJsAttr(s) {
   return String(s || '')
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "\\'")
+    .replace(/"/g, '&quot;')
     .replace(/\n/g, '\\n')
     .replace(/\r/g, '');
 }

@@ -47,8 +47,8 @@
   - **論理日境界（03:00 JST）**: `03:00〜翌02:59` を1日とし、日跨ぎの `isSleepCard` 進行中セッションは 03:00 リセット時も消去せず保護。
 - **定時トリガー（3本：`03:00` / `05:00` / `17:00`）**:
   1. `03:00` **`dailyMidnightBatch`**: 前日 `03:00〜02:59` の Notion 日報投稿、中長期メモリー代謝、ルーティンタスク自動投入、毎月1日の月報作成、Drive プロジェクト台帳同期、30日ローリング整理、**v2 論理日リセット・朝ブリーフィング・初期 `aiDeck` 生成（`gemini-3.8-flash`）**。
-  2. `05:00` **`morningWeatherBatch`（Workers Cron）**: Open-Meteo 天気・気圧急降下取得＆ブリーフィング天気表示最新化。
-  3. `17:00` **`eveningDeckBatch`（Workers Cron）**: 退勤〜夜間帯へ向けた `aiDeck` 先読み再編成（`03:00` GAS バッチの結果は `/internal/sync-memory` 経由で D1 へ自動同期）。
+  2. `05:00` **`morningWeatherBatch`（Workers Cron）**: Open-Meteo 天気・気圧急降下取得＆ブリーフィング天気表示最新化（失敗ミラー `mirror_queue` の再送ドレイン含む）。
+  3. `17:00` **`eveningDeckBatch`（Workers Cron）**: 退勤〜夜間帯へ向けた `aiDeck` 先読み再編成（`03:00` GAS バッチの結果は `/internal/sync-memory` 経由で D1 へ自動同期、失敗ミラー `mirror_queue` の再送ドレイン含む）。
 - **動的更新**:
   - 天気は最終取得から **3時間以上経過後の初回起動時**（および取得エラー・出社日の渋谷欠損時）に再取得。
   - `aiDeck` は行動開始時（業務ブロック・就寝を除く）、候補枯渇時の `別の候補`、Chat での DB/低負荷状態変化時にバックグラウンド再編成。

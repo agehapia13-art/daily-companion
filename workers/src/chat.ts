@@ -64,7 +64,12 @@ interface TokenStats {
 function verifyDashboardAccess(env: Env, authKey: unknown): boolean {
   const expected = String(env.DASHBOARD_ACCESS_KEY || '').trim();
   const actual = String(authKey ?? '').trim();
-  return Boolean(expected && actual && expected === actual);
+  if (!expected || !actual) return false;
+  const enc = new TextEncoder();
+  const bufA = enc.encode(expected);
+  const bufB = enc.encode(actual);
+  if (bufA.byteLength !== bufB.byteLength) return false;
+  return (crypto.subtle as unknown as { timingSafeEqual: (x: BufferSource, y: BufferSource) => boolean }).timingSafeEqual(bufA, bufB);
 }
 
 function parseBase64Image(

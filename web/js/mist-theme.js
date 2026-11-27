@@ -143,6 +143,10 @@ function startMistCanvas() {
 
     var palette = (state.isDark ? MIST_PALETTES.dark : MIST_PALETTES.light)[mode];
     ctx.globalCompositeOperation = state.isDark ? 'screen' : 'source-over';
+    if (typeof document !== 'undefined' && document.hidden) {
+      requestAnimationFrame(drawMist);
+      return;
+    }
 
     for (var r = 0; r < MIST_RIBBONS.length; r++) {
       var rb = MIST_RIBBONS[r];

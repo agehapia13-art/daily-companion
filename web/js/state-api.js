@@ -489,8 +489,8 @@ function flushOutbox() {
             firstErr = r.error;
           }
         });
-        if (results.length === 0) {
-          chunk.forEach(function(c) { okIds[c.id] = true; });
+        if (results.length === 0 && !firstErr) {
+          firstErr = '同期結果が空です';
         }
         state.pendingOutbox = (state.pendingOutbox || []).filter(function(it) {
           return !okIds[it.id];
@@ -550,13 +550,6 @@ function discardPendingOutbox() {
 if (typeof window !== 'undefined') {
   window.addEventListener('online', function() {
     flushOutbox();
-  });
-}
-if (typeof document !== 'undefined') {
-  document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'visible') {
-      flushOutbox();
-    }
   });
 }
 
@@ -645,10 +638,6 @@ function syncFromServer(manual) {
       }
       state.authorized = true;
       state.lastFetchedAt = Date.now();
-      if (res.validKey) {
-        state.authKey = res.validKey;
-        try { localStorage.setItem('companion_auth_key', res.validKey); } catch (e) {}
-      }
       applyServerStatePayload(res);
       if (Array.isArray(res.chatMessages)) {
         var localErrors = state.messages.filter(function(m) { return m.isError; });

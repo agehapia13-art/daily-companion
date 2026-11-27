@@ -1,4 +1,5 @@
 import { getWorkModeAndBoundary } from './calendar';
+import { timingSafeEqualStr } from './utils';
 import { drainMirrorQueue } from './sheets-mirror';
 import {
   appendLog,
@@ -59,7 +60,7 @@ import {
 function verifyDashboardAccess(env: Env, authKey: unknown): boolean {
   const expected = String(env.DASHBOARD_ACCESS_KEY || '').trim();
   const actual = String(authKey ?? '').trim();
-  return Boolean(expected && actual && expected === actual);
+  return Boolean(expected && actual && timingSafeEqualStr(expected, actual));
 }
 
 function unauthorizedPayload() {
@@ -445,24 +446,6 @@ export async function apiGetHomeBootstrap(
     getWorkModeAndBoundary(env, now)
   ]);
 
-  if (
-    !force &&
-    clientRevision > 0 &&
-    Number(fastState.revision) === clientRevision &&
-    fastState.dailyBriefing &&
-    fastState.dailyBriefing.dateKey === fastState.dayKey &&
-    fastState.aiDeck &&
-    Array.isArray(fastState.aiDeck.cards) &&
-    fastState.aiDeck.cards.length > 0
-  ) {
-    return {
-      authorized: true,
-      unchanged: true,
-      revision: fastState.revision,
-      deltaText: buildDeltaText(fastState.lastAction, now)
-    };
-  }
-
   let stateDirty = false;
   const mirrorEvents: MirrorEvent[] = [];
 
@@ -492,6 +475,26 @@ export async function apiGetHomeBootstrap(
     } catch (wErr) {
       console.warn('Bootstrap 天気更新警告:', wErr instanceof Error ? wErr.message : String(wErr));
     }
+  }
+
+  // 日跨ぎ・天気鮮度チェックの後にリビジョン一致を判定（天気・日付更新のスキップを防止）
+  if (
+    !force &&
+    !stateDirty &&
+    clientRevision > 0 &&
+    Number(fastState.revision) === clientRevision &&
+    fastState.dailyBriefing &&
+    fastState.dailyBriefing.dateKey === fastState.dayKey &&
+    fastState.aiDeck &&
+    Array.isArray(fastState.aiDeck.cards) &&
+    fastState.aiDeck.cards.length > 0
+  ) {
+    return {
+      authorized: true,
+      unchanged: true,
+      revision: fastState.revision,
+      deltaText: buildDeltaText(fastState.lastAction, now)
+    };
   }
 
   const [lists, todayLogs] = await Promise.all([
@@ -553,7 +556,6 @@ export async function apiGetHomeBootstrap(
 
   return {
     authorized: true,
-    validKey: env.DASHBOARD_ACCESS_KEY,
     state: fastState,
     deck,
     boundary: workBoundary.heroBoundary,
@@ -1371,6 +1373,27 @@ export async function handleScheduledCron(
       await mirrorToSheets(env, mirrorEvents);
     }
     await drainMirrorQueue(env);
+
+    // D1 容量 400MB 到達アラートチェック
+    try {
+      const pageCountRes = await env.DB.prepare('PRAGMA page_count').first<{ page_count: number }>();
+      const pageSizeRes = await env.DB.prepare('PRAGMA page_size').first<{ page_size: number }>();
+      const dbBytes = Number(pageCountRes?.page_count || 0) * Number(pageSizeRes?.page_size || 0);
+      const limitBytes = 400 * 1024 * 1024;
+      if (dbBytes >= limitBytes) {
+        const mb = (dbBytes / (1024 * 1024)).toFixed(1);
+        const warnLine = `⚠️ D1容量が400MBを超えました（現在 ${mb}MB / 上限 500MB）。ログ整理をご検討ください`;
+        console.warn('[Cron] ' + warnLine);
+        const fsNow = await loadFastState(env, now);
+        if (fsNow.dailyBriefing && Array.isArray(fsNow.dailyBriefing.lines) && !fsNow.dailyBriefing.lines.includes(warnLine)) {
+          fsNow.dailyBriefing.lines.unshift(warnLine);
+          fsNow.dailyBriefing.dismissed = false;
+          await saveFastState(env, fsNow);
+        }
+      }
+    } catch (sizeErr) {
+      console.warn('[Cron] D1 size check warning:', sizeErr instanceof Error ? sizeErr.message : String(sizeErr));
+    }
   } catch (err) {
     console.error('[Cron] Execution error:', err instanceof Error ? err.message : String(err));
   }

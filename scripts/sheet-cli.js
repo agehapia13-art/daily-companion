@@ -43,7 +43,7 @@ const PROMPT_KEYS = [
 async function getMemory() {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'memory!A2:B50'
+    range: 'memory!A2:B'
   });
   const map = {};
   for (const row of (res.data.values || [])) {
@@ -55,7 +55,7 @@ async function getMemory() {
 async function setMemory(key, value) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'memory!A2:B50'
+    range: 'memory!A2:B'
   });
   const rows = res.data.values || [];
   let targetRowIndex = -1;

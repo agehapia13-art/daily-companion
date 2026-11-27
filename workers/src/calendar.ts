@@ -835,10 +835,9 @@ export async function applyCalendarActions(env: Env, actions: any[]): Promise<st
 
   // cal_today_* キャッシュを無効化
   try {
-    const listed = await env.CACHE.list({ prefix: 'cal_today_' });
-    if (listed.keys.length > 0) {
-      await Promise.all(listed.keys.map((k) => env.CACHE.delete(k.name)));
-    }
+    const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const ymd = jstNow.toISOString().slice(0, 10);
+    await env.CACHE.delete(`cal_today_${ymd}`);
   } catch (cacheErr) {
     console.warn('cal_today_* cache invalidation failed:', cacheErr);
   }

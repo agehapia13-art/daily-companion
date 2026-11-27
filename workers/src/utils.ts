@@ -135,7 +135,15 @@ export function parsePositiveEstimatedMins(val: unknown): number | null {
   return Math.round(n);
 }
 
-export function corsHeaders(origin = '*'): Record<string, string> {
+export function timingSafeEqualStr(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const bufA = enc.encode(a);
+  const bufB = enc.encode(b);
+  if (bufA.byteLength !== bufB.byteLength) return false;
+  return (crypto.subtle as unknown as { timingSafeEqual: (x: BufferSource, y: BufferSource) => boolean }).timingSafeEqual(bufA, bufB);
+}
+
+export function corsHeaders(origin = 'https://agehapia13-art.github.io'): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',

@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-27 13:57 JST
+> **最終更新**: 2026-11-27 19:43 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -415,3 +415,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 - **2026-11-26 20:02**: P0 回避不能バグ一括修正：①Workers 論理日完了判定・`target_title` 参照・Chat 天気保存（`db.ts`, `chat.ts`）、②Sheets ミラーに `routines` 追加 ＆ `mirror_queue` 再送ドレイン（`sheets-mirror.ts`, `api-core.ts`）、③GAS 深夜バッチ D1 書き戻しリトライ（`Batch.js`）、④`isLowMode` デッキ送り・`escapeJsAttr` `"` 対応・`fetch` 60秒タイムアウト（`home-view.js`, `chat-lists-view.js`, `state-api.js`, `dc-pwa-v46`）。
 - **2026-11-27 10:15**: P1 実装：①セキュリティ強化（`timingSafeEqual` 認証比較・本番 CORS の GitHub Pages 限定・`validKey` 削除：`utils.ts`, `api-core.ts`, `chat.ts`, `state-api.js`）、②D1 容量 400MB 到達アラート ＆ Bootstrap 早期リターン順序修正 ＆ KV `list` 廃止（`api-core.ts`, `calendar.ts`）、③`visibilitychange` 統合・Outbox 空配列誤削除修正・背景 Canvas 省電力（`state-api.js`, `mist-theme.js`, `dc-pwa-v47`）、④`sheet-cli.js` の `memory` 範囲固定解除。
 - **2026-11-27 13:57**: ①設定モーダル裏にトーストが隠れる問題を修正（`web/styles.css` `.toast` `z-index: 80`、`dc-pwa-v48`）。②`importAllFromSheets` を仮テーブル（`*_tmp`）方式へ変更し、途中失敗時の D1 全データ消失リスクを解消（`workers/src/sheets-import.ts`）。③`apiCompleteAction` の `processed_ops` をアトミック確保＋失敗時ロールバックへ変更（`workers/src/api-core.ts`）。※なお `fast_state` の厳格な CAS ロック（Lost Update 対策）は個人利用における衝突確率の低さと過剰設計抑止（`GRAND_DESIGN.md`）の観点から意図的に見送り・許容とする。
+- **2026-11-27 19:43**: iPhone でのアプリ表示中の発熱・GPU 負荷を軽減するため、`web/styles.css` の `.focus-dial::before` の常時回転アニメーション（`spinHalo`）を停止し、静的な光彩表示に変更（`dc-pwa-v49`）。

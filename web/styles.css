@@ -842,7 +842,6 @@ button {
   filter: blur(18px);
   opacity: 0.78;
   z-index: -1;
-  animation: spinHalo 16s linear infinite;
 }
 
 .focus-dial-inner {
@@ -859,11 +858,6 @@ button {
   align-items: center;
   justify-content: center;
   gap: 6px;
-}
-
-@keyframes spinHalo {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .focus-kicker {

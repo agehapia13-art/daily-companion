@@ -649,7 +649,9 @@ function buildChatPayload(params: {
   );
 
   if (memory.monthly_report_ready === 'TRUE') {
-    dynamicLines.push('【月報通知フラグ】: TRUE');
+    dynamicLines.push(
+      '【月報通知】: 今回は返信末尾に「先月の振り返りまとめをNotionにまとめておきました！」と添えること'
+    );
   }
   if (precomputed.stampsFormatted) {
     dynamicLines.push(`【活動・メンテナンス最終記録 (cycle_stamps)】:\n${precomputed.stampsFormatted}`);

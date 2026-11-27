@@ -126,7 +126,7 @@ export async function importAllFromSheets(
 
     statements.push(
       env.DB.prepare(
-        'INSERT INTO logs (timestamp_str, sender, message, image_url, ai_reply, meta_json) VALUES (?, ?, ?, ?, ?, ?)'
+        'INSERT INTO logs_tmp (timestamp_str, sender, message, image_url, ai_reply, meta_json) VALUES (?, ?, ?, ?, ?, ?)'
       ).bind(ts, sender || 'user', message, imageUrl, aiReply, metaJson)
     );
     imported.logs++;
@@ -150,7 +150,7 @@ export async function importAllFromSheets(
 
     statements.push(
       env.DB.prepare(
-        `INSERT INTO tasks (id, title, due_date, status, created_at, completed_at, memo, remind_context, doc_url, estimated_mins, sheet_row)
+        `INSERT INTO tasks_tmp (id, title, due_date, status, created_at, completed_at, memo, remind_context, doc_url, estimated_mins, sheet_row)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(id, title, dueDate, status, createdAt, completedAt, memo, remindContext, docUrl, estMins, idx + 2)
     );
@@ -179,7 +179,7 @@ export async function importAllFromSheets(
 
     statements.push(
       env.DB.prepare(
-        `INSERT INTO routines (title, type, value, last_generated_at, memo, status, completed_at, estimated_mins, sheet_row)
+        `INSERT INTO routines_tmp (title, type, value, last_generated_at, memo, status, completed_at, estimated_mins, sheet_row)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(title, type, value, lastGeneratedAt, memo, status, completedAt, estMins, idx + 2)
     );
@@ -197,7 +197,7 @@ export async function importAllFromSheets(
 
     statements.push(
       env.DB.prepare(
-        'INSERT INTO shopping (item, category, status, created_at, sheet_row) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO shopping_tmp (item, category, status, created_at, sheet_row) VALUES (?, ?, ?, ?, ?)'
       ).bind(item, category, status, createdAt, idx + 2)
     );
     imported.shopping++;
@@ -218,7 +218,7 @@ export async function importAllFromSheets(
 
     statements.push(
       env.DB.prepare(
-        `INSERT INTO input_stock (type, title, memo, status, consumed_at, estimated_mins, sheet_row)
+        `INSERT INTO input_stock_tmp (type, title, memo, status, consumed_at, estimated_mins, sheet_row)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
       ).bind(type, title, memo, status, consumedAt, estMins, idx + 2)
     );
@@ -240,7 +240,7 @@ export async function importAllFromSheets(
     }
 
     statements.push(
-      env.DB.prepare('INSERT INTO memory (key, value, updated_at) VALUES (?, ?, ?)').bind(key, val, nowIso)
+      env.DB.prepare('INSERT INTO memory_tmp (key, value, updated_at) VALUES (?, ?, ?)').bind(key, val, nowIso)
     );
     imported.memory++;
   }
@@ -251,7 +251,7 @@ export async function importAllFromSheets(
       const { state } = ensureLogicalDayBoundary(parsed);
       statements.push(
         env.DB.prepare(
-          'INSERT INTO fast_state (id, day_key, revision, json_data, updated_at) VALUES (1, ?, ?, ?, ?)'
+          'INSERT INTO fast_state_tmp (id, day_key, revision, json_data, updated_at) VALUES (1, ?, ?, ?, ?)'
         ).bind(state.dayKey, state.revision || 1, JSON.stringify(state), nowIso)
       );
       imported.fast_state = 1;
@@ -268,20 +268,28 @@ export async function importAllFromSheets(
     )
   );
 
-  const deleteStmts: D1PreparedStatement[] = [
-    env.DB.prepare('DELETE FROM logs'),
-    env.DB.prepare('DELETE FROM tasks'),
-    env.DB.prepare('DELETE FROM routines'),
-    env.DB.prepare('DELETE FROM shopping'),
-    env.DB.prepare('DELETE FROM input_stock'),
-    env.DB.prepare('DELETE FROM memory'),
-    env.DB.prepare('DELETE FROM fast_state')
-  ];
-  const allStmts = [...deleteStmts, ...statements];
-  if (allStmts.length <= 100) {
-    await env.DB.batch(allStmts);
-  } else {
-    await runBatchChunked(env.DB, allStmts);
+  const targetTables = ['logs', 'tasks', 'routines', 'shopping', 'input_stock', 'memory', 'fast_state'];
+  const setupTmpStmts: D1PreparedStatement[] = [];
+  for (const tbl of targetTables) {
+    setupTmpStmts.push(env.DB.prepare(`DROP TABLE IF EXISTS ${tbl}_tmp`));
+    setupTmpStmts.push(env.DB.prepare(`CREATE TABLE ${tbl}_tmp AS SELECT * FROM ${tbl} WHERE 0`));
   }
+  await env.DB.batch(setupTmpStmts);
+
+  if (statements.length > 0) {
+    if (statements.length <= 100) {
+      await env.DB.batch(statements);
+    } else {
+      await runBatchChunked(env.DB, statements);
+    }
+  }
+
+  const swapStmts: D1PreparedStatement[] = [];
+  for (const tbl of targetTables) {
+    swapStmts.push(env.DB.prepare(`DELETE FROM ${tbl}`));
+    swapStmts.push(env.DB.prepare(`INSERT INTO ${tbl} SELECT * FROM ${tbl}_tmp`));
+    swapStmts.push(env.DB.prepare(`DROP TABLE IF EXISTS ${tbl}_tmp`));
+  }
+  await env.DB.batch(swapStmts);
   return { imported };
 }

@@ -696,33 +696,50 @@ export async function apiCompleteAction(
   const logicalDayStr = getLogicalDayKey(now);
   const fastState = await loadFastState(env, now);
 
-  if (clientOpId && (await isOpProcessed(env, clientOpId))) {
-    const [memoryDup, workBoundaryDup] = await Promise.all([
-      getMemory(env),
-      getWorkModeAndBoundary(env, now)
-    ]);
-    const listsDup =
-      fastState.listCache || (await buildListsSnapshot(env, memoryDup, now));
-    return {
-      authorized: true,
-      duplicateSkipped: true,
-      state: fastState,
-      deck: composeHomeDeck(workBoundaryDup.workMode, now, fastState),
-      lists: listsDup,
-      boundary: workBoundaryDup.heroBoundary
-    };
+  if (clientOpId) {
+    const claimRes = await env.DB.prepare(
+      'INSERT OR IGNORE INTO processed_ops (op_id, processed_at) VALUES (?, ?)'
+    )
+      .bind(clientOpId, nowIso)
+      .run();
+    if ((claimRes.meta?.changes ?? 0) === 0) {
+      const [memoryDup, workBoundaryDup] = await Promise.all([
+        getMemory(env),
+        getWorkModeAndBoundary(env, now)
+      ]);
+      const listsDup =
+        fastState.listCache || (await buildListsSnapshot(env, memoryDup, now));
+      return {
+        authorized: true,
+        duplicateSkipped: true,
+        state: fastState,
+        deck: composeHomeDeck(workBoundaryDup.workMode, now, fastState),
+        lists: listsDup,
+        boundary: workBoundaryDup.heroBoundary
+      };
+    }
   }
 
-  const { notices, addedChatMessage, mirrorEvents } = await executeCompleteSessionCore(
-    env,
-    fastState,
-    p,
-    now,
-    nowStr,
-    nowIso,
-    logicalDayStr,
-    0
-  );
+  let execResult: Awaited<ReturnType<typeof executeCompleteSessionCore>>;
+  try {
+    execResult = await executeCompleteSessionCore(
+      env,
+      fastState,
+      p,
+      now,
+      nowStr,
+      nowIso,
+      logicalDayStr,
+      0
+    );
+  } catch (err) {
+    if (clientOpId) {
+      await env.DB.prepare('DELETE FROM processed_ops WHERE op_id = ?').bind(clientOpId).run().catch(() => {});
+    }
+    throw err;
+  }
+
+  const { notices, addedChatMessage, mirrorEvents } = execResult;
 
   const memory = await getMemory(env);
   const [lists, workBoundary] = await Promise.all([
@@ -732,10 +749,6 @@ export async function apiCompleteAction(
 
   fastState.listCache = lists;
   await saveFastState(env, fastState);
-
-  if (clientOpId) {
-    await markOpProcessed(env, clientOpId);
-  }
 
   mirrorEvents.push({ type: 'sync_snapshot' });
   ctx.waitUntil(mirrorToSheets(env, mirrorEvents));

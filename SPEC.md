@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-28 10:16 JST
+> **最終更新**: 2026-11-28 10:54 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -418,3 +418,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 - **2026-11-27 19:43**: iPhone でのアプリ表示中の発熱・GPU 負荷を軽減するため、`web/styles.css` の `.focus-dial::before` の常時回転アニメーション（`spinHalo`）を停止し、静的な光彩表示に変更（`dc-pwa-v49`）。
 - **2026-11-27 20:01**: Chat の `prompt_core`（`workers/src/prompts.ts` および D1 `memory.prompt_core`）から内部UI構造説明・JSONスキーマ重複仕様・個別月報通知ルールを分離してスリム化し、月報通知は `workers/src/chat.ts` の動的コンテキスト側へ移行。あわせて `.agent/rules/root-cause-first.md` に D1 正本事前確認ルールを追記。
 - **2026-11-28 10:16**: ライト/ダークモードの自動追従修復：`オート` / `ライト` / `ダーク` の3状態サイクルと OS テーマ変更の即時反映（`dc-pwa-v50`）。
+- **2026-11-28 10:54**: `workers/src/sheets-mirror.ts` の `syncSnapshotToSheets()` 内で `routines` テーブルの旧カラム名（`name`, `last_generated`）を参照していたため `sync_snapshot` が `D1_ERROR: no such column: name` で失敗し、D1→スプレッドシート同期が停止していた不具合を修正（`title`, `last_generated_at` へ統一）。これにより、前日完了済みルーティンタスクがスプレッドシート上で未完了のまま残り深夜バッチの重複ガードに引っかかる問題を解消。

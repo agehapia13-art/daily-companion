@@ -193,7 +193,7 @@ async function syncSnapshotToSheets(
       'SELECT type, title, memo, status, consumed_at, estimated_mins FROM input_stock ORDER BY id ASC'
     ).all<any>(),
     env.DB.prepare(
-      'SELECT name, type, value, last_generated, memo, status, completed_at FROM routines ORDER BY id ASC'
+      'SELECT title, type, value, last_generated_at, memo, status, completed_at FROM routines ORDER BY id ASC'
     ).all<any>(),
     env.DB.prepare('SELECT json_data FROM fast_state WHERE id = 1').first<{ json_data: string }>()
   ]);
@@ -239,10 +239,10 @@ async function syncSnapshotToSheets(
   const routineValues: (string | number)[][] = [
     ['ルール名', 'タイプ', '設定値', '最終生成日', 'メモ', 'ステータス', '完了日'],
     ...routinesRes.results.map((r) => [
-      r.name || '',
+      r.title || '',
       r.type || 'day_of_week',
       r.value || '',
-      r.last_generated || '',
+      r.last_generated_at || '',
       r.memo || '',
       r.status || '有効',
       r.completed_at || ''

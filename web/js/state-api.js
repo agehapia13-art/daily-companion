@@ -28,10 +28,12 @@ var urlParams = readUrlParams();
 
 var savedTheme = '';
 try { savedTheme = localStorage.getItem('companion_theme') || ''; } catch (e) {}
+if (savedTheme !== 'light' && savedTheme !== 'dark') savedTheme = '';
 
 var osDark = Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
 var state = {
+  themeMode: savedTheme || 'auto',
   isDark: savedTheme ? savedTheme === 'dark' : osDark,
   authKey: (urlParams.key || SERVER_PRE_KEY || localStorage.getItem('companion_auth_key') || '').trim(),
   apiUrl: (urlParams.api || localStorage.getItem('companion_api_url') || '').trim(),

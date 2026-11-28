@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-27 20:01 JST
+> **最終更新**: 2026-11-28 10:16 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -417,3 +417,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 - **2026-11-27 13:57**: ①設定モーダル裏にトーストが隠れる問題を修正（`web/styles.css` `.toast` `z-index: 80`、`dc-pwa-v48`）。②`importAllFromSheets` を仮テーブル（`*_tmp`）方式へ変更し、途中失敗時の D1 全データ消失リスクを解消（`workers/src/sheets-import.ts`）。③`apiCompleteAction` の `processed_ops` をアトミック確保＋失敗時ロールバックへ変更（`workers/src/api-core.ts`）。※なお `fast_state` の厳格な CAS ロック（Lost Update 対策）は個人利用における衝突確率の低さと過剰設計抑止（`GRAND_DESIGN.md`）の観点から意図的に見送り・許容とする。
 - **2026-11-27 19:43**: iPhone でのアプリ表示中の発熱・GPU 負荷を軽減するため、`web/styles.css` の `.focus-dial::before` の常時回転アニメーション（`spinHalo`）を停止し、静的な光彩表示に変更（`dc-pwa-v49`）。
 - **2026-11-27 20:01**: Chat の `prompt_core`（`workers/src/prompts.ts` および D1 `memory.prompt_core`）から内部UI構造説明・JSONスキーマ重複仕様・個別月報通知ルールを分離してスリム化し、月報通知は `workers/src/chat.ts` の動的コンテキスト側へ移行。あわせて `.agent/rules/root-cause-first.md` に D1 正本事前確認ルールを追記。
+- **2026-11-28 10:16**: ライト/ダークモードの自動追従修復：`オート` / `ライト` / `ダーク` の3状態サイクルと OS テーマ変更の即時反映（`dc-pwa-v50`）。

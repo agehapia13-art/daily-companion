@@ -1919,7 +1919,7 @@
           <button type="button" id="importSheetsBtn" onclick="runImportFromSheets()" class="settings-row-btn" style="width:100%;justify-content:center;padding:8px 10px;font-size:12px;">シートからD1へ取り込む</button>
         </div>
       </div>
-      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v49</div>
+      <div id="appBuildVersion" style="margin-top:10px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.75;">Version: dc-pwa-v50</div>
     </div>
   </div>
 
@@ -1963,10 +1963,12 @@
 
     var savedTheme = '';
     try { savedTheme = localStorage.getItem('companion_theme') || ''; } catch (e) {}
+    if (savedTheme !== 'light' && savedTheme !== 'dark') savedTheme = '';
 
     var osDark = Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
     var state = {
+      themeMode: savedTheme || 'auto',
       isDark: savedTheme ? savedTheme === 'dark' : osDark,
       authKey: (urlParams.key || SERVER_PRE_KEY || localStorage.getItem('companion_auth_key') || '').trim(),
       apiUrl: (urlParams.api || localStorage.getItem('companion_api_url') || '').trim(),
@@ -2722,17 +2724,29 @@
       return '<svg ' + common + '>' + (paths[name] || paths.compass) + '</svg>';
     }
 
+    function resolveIsDark(mode) {
+      if (mode === 'dark') return true;
+      if (mode === 'light') return false;
+      return Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+
     function applyTheme() {
+      state.isDark = resolveIsDark(state.themeMode);
       document.body.classList.toggle('dc-dark', Boolean(state.isDark));
       var meta = document.getElementById('metaThemeColor');
       if (meta) meta.setAttribute('content', state.isDark ? '#0D091A' : '#FDFCFF');
       var lbl = document.getElementById('themeStateLabel');
-      if (lbl) lbl.textContent = state.isDark ? 'ダーク' : 'ライト';
+      if (lbl) lbl.textContent = state.themeMode === 'auto' ? 'オート' : (state.themeMode === 'dark' ? 'ダーク' : 'ライト');
     }
 
     function toggleTheme() {
-      state.isDark = !state.isDark;
-      try { localStorage.setItem('companion_theme', state.isDark ? 'dark' : 'light'); } catch (e) {}
+      if (state.themeMode === 'auto') state.themeMode = 'light';
+      else if (state.themeMode === 'light') state.themeMode = 'dark';
+      else state.themeMode = 'auto';
+      try {
+        if (state.themeMode === 'auto') localStorage.removeItem('companion_theme');
+        else localStorage.setItem('companion_theme', state.themeMode);
+      } catch (e) {}
       applyTheme();
     }
 
@@ -4641,9 +4655,7 @@
       if (window.matchMedia) {
         var mq = window.matchMedia('(prefers-color-scheme: dark)');
         var onSchemeChange = function(ev) {
-          var manual = '';
-          try { manual = localStorage.getItem('companion_theme') || ''; } catch (e) {}
-          if (!manual) {
+          if (state.themeMode === 'auto') {
             state.isDark = Boolean(ev.matches);
             applyTheme();
           }

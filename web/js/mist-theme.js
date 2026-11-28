@@ -72,17 +72,29 @@ function getIconSvg(name, size) {
   return '<svg ' + common + '>' + (paths[name] || paths.compass) + '</svg>';
 }
 
+function resolveIsDark(mode) {
+  if (mode === 'dark') return true;
+  if (mode === 'light') return false;
+  return Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+}
+
 function applyTheme() {
+  state.isDark = resolveIsDark(state.themeMode);
   document.body.classList.toggle('dc-dark', Boolean(state.isDark));
   var meta = document.getElementById('metaThemeColor');
   if (meta) meta.setAttribute('content', state.isDark ? '#0D091A' : '#FDFCFF');
   var lbl = document.getElementById('themeStateLabel');
-  if (lbl) lbl.textContent = state.isDark ? 'ダーク' : 'ライト';
+  if (lbl) lbl.textContent = state.themeMode === 'auto' ? 'オート' : (state.themeMode === 'dark' ? 'ダーク' : 'ライト');
 }
 
 function toggleTheme() {
-  state.isDark = !state.isDark;
-  try { localStorage.setItem('companion_theme', state.isDark ? 'dark' : 'light'); } catch (e) {}
+  if (state.themeMode === 'auto') state.themeMode = 'light';
+  else if (state.themeMode === 'light') state.themeMode = 'dark';
+  else state.themeMode = 'auto';
+  try {
+    if (state.themeMode === 'auto') localStorage.removeItem('companion_theme');
+    else localStorage.setItem('companion_theme', state.themeMode);
+  } catch (e) {}
   applyTheme();
 }
 

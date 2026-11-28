@@ -953,9 +953,7 @@ window.addEventListener('DOMContentLoaded', function() {
   if (window.matchMedia) {
     var mq = window.matchMedia('(prefers-color-scheme: dark)');
     var onSchemeChange = function(ev) {
-      var manual = '';
-      try { manual = localStorage.getItem('companion_theme') || ''; } catch (e) {}
-      if (!manual) {
+      if (state.themeMode === 'auto') {
         state.isDark = Boolean(ev.matches);
         applyTheme();
       }

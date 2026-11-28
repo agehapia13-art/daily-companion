@@ -64,7 +64,7 @@ var state = {
   reflection: null,
   showCustomForm: false,
   customDurMins: 30,
-  deckOffset: 0,
+  deckPage: 0,
   openSwipeId: null,
   lists: { tasks: [], shopping: [], stock: [], habits: [] },
   messages: [],

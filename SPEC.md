@@ -1,6 +1,6 @@
 # 📐 Companion Cockpit (Daily Companion v2) — システム全体設計仕様書
 
-> **最終更新**: 2026-11-28 10:54 JST
+> **最終更新**: 2026-11-29 00:52 JST
 
 本仕様書は、[GRAND_DESIGN.md](GRAND_DESIGN.md) の思想に基づき構築する **マイコックピット（Companion Cockpit v2 / 旧称: 生活伴走システム）** の全体像・アーキテクチャ・画面仕様・データモデル・API・AI稼働設計・外部連携・運用仕様を定義する。PWA アプリ名（`manifest.json`）・`<title>`・プロンプト内の自称は **「マイコックピット」**（コックピット計器モチーフのベクターアイコン）に統一する。
 
@@ -199,14 +199,13 @@ Sheer Frosted Glass・リアルタイム `<canvas>` Fluid Mist 背景・ライ�
    - 直前行動経過行（$\Delta t$）: 前回行動完了からの経過時間（例：`直前: 夕食（25分前）`、`直前: 朝食（完了直後）`、`おはようございます · 起床直後`）。未完了や初回アクセス時は非表示。
 2. **朝のブリーフィングカード**:
    - `dailyBriefing` が当日未破棄かつ非進行中の場合に表示。`×` で閉じるか、何か行動を開始した時点で非表示にする。
-3. **通常状態（カードデッキ・最大3枚）**:
-   - 生活ルーティンテンプレート＋事前キャッシュされた `aiDeck` から最大3枚を表示（引き算カード該当時は最上段に Opal Prism スタイルで強調表示）。
-   - **タップ**: 行動開始（Focus 画面へ遷移）。引き算カードタップ時は対象タスクを一括リスケ＋Chat ログへ記録＋トースト通知。
-   - **左スワイプ（または「今日は提案しない」ボタン）**: `dismissedToday` に登録し、次候補を繰り上げる。
+3. **通常状態（カードデッキ・最大3枚/ページ＋双方向ページネーション）**:
+   - 生活ルーティンテンプレート＋事前キャッシュされた `aiDeck` の有効カード末尾に「別の候補を生成する」カード（1枠）を結合した配列を1ページ3枚で分割表示し、2ページ以上の場合はカード直下にページャー（前へ・ページドット＋`1 / N`・次へ）を表示して前後を自由に行き来できるようにする（引き算カード該当時は先頭に Opal Prism スタイルで強調表示）。
+   - **タップ**: 行動開始（Focus 画面へ遷移）。引き算カードタップ時は対象タスクを一括リスケ＋Chat ログへ記録＋トースト通知。末尾の「別の候補を生成する」タップ時は既存カードを保持したまま `apiRefreshDeck(..., { mode: 'append', isLowMode })` で新規候補を末尾へ追記し、現在ページ位置を維持して新しいカードを表示する。
+   - **左スワイプ（または「今日は提案しない」ボタン）**: `dismissedToday` に登録し、次候補を繰り上げる（※「別の候補を生成する」カードはスワイプ対象外）。
    - **下部サブアクション**:
      - `自分で始める`: タイトル入力＋**1本の非線形スライダー（`5分 / 10分 / 15分 / 30分 / 45分 / 1時間 / 1.5時間 / 2時間 / 2.5時間 / 3時間 / 4時間 / 6時間`、初期値 `30分`、数値ラベルのみのシンプル表示）**を展開して自由行動でタイマー開始。
-     - `別の候補`: 事前キャッシュ済み `aiDeck.cards` をページネーション（オフセット送り）する。すべて見切った（枯渇した）場合はローディング表示の上 `apiRefreshDeck` で新規候補を追加生成する。
-     - `少しだるい / 通常に戻す`: 低負荷モード（`isLowMode`）切替。**AI がその時間帯・状況に合わせて事前生成・キャッシュ済みの `aiDeck.lowCards`（3〜5件）へ待ち時間 0ms で切り替える**（未生成時のみコード側フォールバックを使用）。
+     - `少しだるい / 通常に戻す`: 低負荷モード（`isLowMode`）切替。**AI がその時間帯・状況に合わせて事前生成・キャッシュ済みの `aiDeck.lowCards`（3〜5件）へ待ち時間 0ms で切り替える**（未生成時のみコード側フォールバックを使用）。切替時は1ページ目へ戻る。
 4. **進行中状態（Focus）**:
    - クリスタルダイヤル内に経過時間（`MM:SS`、1時間超時は `HH:MM:SS` 相当）を表示。
    - **60分経過の優しい通知**: `elapsed >= 60分` かつ業務ブロック・就寝カードでない場合のみ、`そろそろ一息入れませんか` のソフトバッジを表示。
@@ -283,7 +282,7 @@ Sheer Frosted Glass・リアルタイム `<canvas>` Fluid Mist 背景・ライ�
 | **1** | **深夜バッチ（`03:00`）**<br>＋朝初回起動時未生成フォールバック | `gemini-3.8-flash` | 日報/月報生成、中長期記憶代謝、**朝のブリーフィング＋午前用 `aiDeck`（`cards` 6〜9件 ＋ `lowCards` 3〜5件）**の事前生成。 |
 | **2** | **夕方パッチ（`17:00`）** | `gemini-3.5-flash-lite` | 午後の勤務中（13:00〜19:00）や休日にアプリ未操作でも、夕方〜退勤後に備えて夜の生活・余白・引き算に向けた `aiDeck`（`cards` ＋ `lowCards`）を最新化。 |
 | **3** | **行動開始時（`apiStartAction`）**<br>※業務ブロック・`isSleepCard` 除く | `gemini-3.5-flash-lite` | タイマー画面遷移の裏で実行。今始めた行動と終了見込み時刻・状況から**次の `aiDeck`（`cards` ＋ `lowCards` ＋必要時の引き算）**を再編成し、完了時の待ち時間 0ms と画面書き換わり防止を両立。 |
-| **4** | **「別の候補」枯渇時（`apiRefreshDeck`）** | `gemini-3.5-flash-lite` | 事前キャッシュした `aiDeck.cards` をすべて表示／スルーしきった場合のみ、別角度の候補を追加生成。 |
+| **4** | **末尾「別の候補を生成する」タップ時（`apiRefreshDeck`）** | `gemini-3.5-flash-lite` | 既存候補を保持したまま、既出タイトルを除外した別角度の候補を末尾へ追記生成。 |
 | **5** | **Chat 送信時（`apiSendChat`）** | `gemini-3.5-flash-lite`<br>（原則1段。Web検索/広域予定参照時のみオンデマンド2段。`memory.backend_model` 指定可） | マルチモーダル画像解析・意図理解・DB/カレンダー/Docs操作・スタンプ/返信生成・必要時 `aiDeck` 再編成を基本1パスで実行。 |
 
 ### 6.2 状況適応型デッキ編成ルール（固定スロット廃止）
@@ -296,7 +295,7 @@ Sheer Frosted Glass・リアルタイム `<canvas>` Fluid Mist 背景・ライ�
   - 残余時間に対して当日タスクが超過している、または `pressure_alert === 'TRUE'` や直近ログに疲労・低調サインがある場合、AI がデッキ先頭候補として `isTriage: true` カード（例：「今夜は1件だけに絞る」、残すタスクと明日に回す `triageTaskIds` を内包）を組み込む。
   - ユーザーが引き算カードをタップした場合（または確認実行時）、`triageTaskIds` の期限を翌日へ一括更新し、Chat ログに静かな実行記録を残す。
 - **Home 表示時の合成**:
-  - `triageCards`（引き算）を最上位に置き、続いて `aiDeck.cards`（`isLowMode` 時は `aiDeck.lowCards`、同一論理日の同期時はローカルの `isLowMode` を維持）の順序をそのまま採用する。コード側のアンカー（朝・勤務・昼食・夕食・入浴・就寝）は AI へ候補として渡しており、AI が未配置のもののみ後方へ補完して先頭3枚を Home に表示する（「別の候補」で 4枚目以降へページネーション）。
+  - `triageCards`（引き算）を最上位に置き、続いて `aiDeck.cards`（`isLowMode` 時は `aiDeck.lowCards`、同一論理日の同期時はローカルの `isLowMode` を維持）の順序をそのまま採用する。コード側のアンカー（朝・勤務・昼食・夕食・入浴・就寝）は AI へ候補として渡しており、AI が未配置のもののみ後方へ補完し、末尾に「別の候補を生成する」カード（1枠）を結合して3枚ずつページネーション表示する。
 
 ### 6.3 Chat 処理・返信ポリシー
 1. **口調とパーソナリティ**: `memory.custom_system_prompt`（**さっぱりとした等身大の敬体、情緒的な慰めや定型の労い・前置きは最小限にとどめ、要点へ端的に入る**）を最優先順守する。
@@ -355,7 +354,7 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 | **4** | `apiDismissCardToday` | `(authKey, cardId)` | `dismissedToday[cardId] = true` を `V2_FAST_STATE` へ保存（`03:00` 境界リセット対象） | `{ authorized, dismissedToday }` |
 | **5** | `apiSendChat` | `(authKey, messagePayload)` | `{ text, plainText, referencedPills, photoBase64?, mimeType? }` を処理。画像があれば Drive 保存＋Gemini マルチモーダル解析。DB操作（見込み時間編集含む）・状態更新・必要時 `aiDeck` 再編成・`logs` 追記 | `{ authorized, mode: 'reaction'|'reply', reactionEmoji, replyText, badges, docLinks, imageUrl, lists, state }` |
 | **6** | `apiMutateListItem` | `(authKey, mutation)` | Lists タブからの即時変更（現状 `Shopping` の購入済/未買トグル `{ kind: 'shopping', rowIndex, done }`）を実行し `listCache` 更新 | `{ authorized, lists }` |
-| **7** | `apiRefreshDeck` | `(authKey, excludeIds)` | Home で「別の候補」を表示しきった（枯渇した）際に呼び出し、現在表示・スルー済みを除外した新規候補（3〜6件）を AI で生成して `aiDeck` に追加 | `{ authorized, aiDeck }` |
+| **7** | `apiRefreshDeck` | `(authKey, excludeIds, options?)` | `options.mode === 'append'` 時は既存 `aiDeck` を保持したまま新規候補を末尾へ追記（`isLowMode` 対応）。通常時は新規候補を生成して再編成 | `{ authorized, aiDeck, deck }` |
 
 ---
 
@@ -419,3 +418,4 @@ GAS の時間主導トリガーは以下の3本とし、論理日境界は従来
 - **2026-11-27 20:01**: Chat の `prompt_core`（`workers/src/prompts.ts` および D1 `memory.prompt_core`）から内部UI構造説明・JSONスキーマ重複仕様・個別月報通知ルールを分離してスリム化し、月報通知は `workers/src/chat.ts` の動的コンテキスト側へ移行。あわせて `.agent/rules/root-cause-first.md` に D1 正本事前確認ルールを追記。
 - **2026-11-28 10:16**: ライト/ダークモードの自動追従修復：`オート` / `ライト` / `ダーク` の3状態サイクルと OS テーマ変更の即時反映（`dc-pwa-v50`）。
 - **2026-11-28 10:54**: `workers/src/sheets-mirror.ts` の `syncSnapshotToSheets()` 内で `routines` テーブルの旧カラム名（`name`, `last_generated`）を参照していたため `sync_snapshot` が `D1_ERROR: no such column: name` で失敗し、D1→スプレッドシート同期が停止していた不具合を修正（`title`, `last_generated_at` へ統一）。これにより、前日完了済みルーティンタスクがスプレッドシート上で未完了のまま残り深夜バッチの重複ガードに引っかかる問題を解消。
+- **2026-11-29 00:52**: Home デッキの単方向「別の候補」ボタンを廃止し、3枚単位の双方向ページネーション（`.deck-pager`）と、有効カード配列末尾に常時配置される説明なし1行の「別の候補を生成する」カード（`apiRefreshDeck` の `mode: 'append'` による既存保持・末尾追記、`isLowMode` 対応）を実装（`dc-pwa-v51`）。

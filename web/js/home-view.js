@@ -30,26 +30,40 @@ function isDeckCardAvailable(c, completed, dismissed, activeTaskIds) {
   return true;
 }
 
-function getVisibleDeckCards() {
+var DECK_PAGE_SIZE = 3;
+
+function getAvailableDeckCards() {
   var completed = state.fastState.completedToday || {};
   var dismissed = state.fastState.dismissedToday || {};
   var activeTaskIds = getActiveTaskIdSet();
   var pool = state.fastState.isLowMode
     ? (state.composedDeck.lowCards || [])
     : (state.composedDeck.cards || []);
-  var valid = pool.filter(function(c) {
+  return pool.filter(function(c) {
     if (state.fastState.pausedSession && c.id === state.fastState.pausedSession.id) return false;
     if (!isDeckCardAvailable(c, completed, dismissed, activeTaskIds)) return false;
     if (c.isTriage && state.fastState.triagedToday) return false;
     return true;
   });
-  if (valid.length <= 3) return valid;
-  var out = [];
-  var start = state.deckOffset % valid.length;
-  for (var i = 0; i < 3; i++) {
-    out.push(valid[(start + i) % valid.length]);
-  }
-  return out;
+}
+
+function getVisibleDeckCards() {
+  return getAvailableDeckCards();
+}
+
+function getDeckPaginationState() {
+  var validCards = getAvailableDeckCards();
+  var itemsWithGenerate = validCards.concat([{ __isGenerateMore: true }]);
+  var totalPages = Math.max(1, Math.ceil(itemsWithGenerate.length / DECK_PAGE_SIZE));
+  var currentPage = Math.max(0, Math.min(totalPages - 1, Number(state.deckPage) || 0));
+  state.deckPage = currentPage;
+  var start = currentPage * DECK_PAGE_SIZE;
+  return {
+    validCards: validCards,
+    totalPages: totalPages,
+    page: currentPage,
+    pageItems: itemsWithGenerate.slice(start, start + DECK_PAGE_SIZE)
+  };
 }
 
 function renderDurSliderHtml(sliderId, displayId, oninputFn, currentMins) {
@@ -224,7 +238,8 @@ function renderHome() {
     return;
   }
 
-  var cards = getVisibleDeckCards();
+  var deckPageState = getDeckPaginationState();
+  var pageItems = deckPageState.pageItems;
   var parts = [];
   if (state.fastState.pausedSession) {
     var ps = state.fastState.pausedSession;
@@ -247,60 +262,71 @@ function renderHome() {
     );
   }
   parts.push('<div class="cards-stack fade-in">');
-  if (state.isRefreshingDeck) {
-    parts.push(
-      '<div class="action-card" style="cursor:default;">' +
-        '<div class="card-icon-badge">' + getIconSvg('refresh', 18) + '</div>' +
-        '<div class="card-body">' +
-          '<div class="card-row1"><span class="card-title">新しい候補を探しています…</span></div>' +
-          '<div class="card-row2">反映まで少しお待ちください</div>' +
-        '</div>' +
-      '</div>'
-    );
-  } else if (cards.length === 0) {
-    parts.push(
-      '<div class="action-card" style="cursor:default;">' +
-        '<div class="card-icon-badge">' + getIconSvg('checkCircle', 18) + '</div>' +
-        '<div class="card-body">' +
-          '<div class="card-row1"><span class="card-title">今の手札は落ち着いています</span></div>' +
-          '<div class="card-row2">「別の候補」か「自分で始める」から選べます</div>' +
-        '</div>' +
-      '</div>'
-    );
-  } else {
-    cards.forEach(function(c) {
-      var cls = c.isTriage ? 'action-card triage' : 'action-card';
-      var rightHtml = c.isTriage
-        ? '<span class="card-right triage-badge">' + escapeHtml(c.rightLabel || '引き算') + ' ' + getIconSvg('chevron', 14) + '</span>'
-        : '<span class="card-right">' +
-            (c.isSleepCard ? '' : '<button type="button" onclick="event.stopPropagation();openCardDurAdjust(\'' + escapeJsAttr(c.id) + '\')" style="background:rgba(139,92,246,0.12);border:none;border-radius:999px;color:inherit;font:inherit;font-weight:600;padding:6px 10px;margin:-4px 2px -4px 0;cursor:pointer;" title="開始前に所要時間を調整">' + formatCustomDurLabel(c.mins) + '</button> ') +
-            getIconSvg('chevron', 14) +
-          '</span>';
+  pageItems.forEach(function(c) {
+    if (c.__isGenerateMore) {
+      var isGen = Boolean(state.isRefreshingDeck);
+      var genIcon = isGen
+        ? '<span class="spinning" style="display:inline-flex;">' + getIconSvg('refresh', 18) + '</span>'
+        : getIconSvg('sparkles', 18);
+      var genTitle = isGen ? '新しい候補を生成しています…' : '別の候補を生成する';
+      var genRight = isGen ? '' : '<span class="card-right">' + getIconSvg('plus', 15) + '</span>';
       parts.push(
-        '<div class="swipe-wrap" data-card-id="' + escapeHtml(c.id) + '">' +
-          '<div class="swipe-behind">' +
-            '<button type="button" onclick="dismissCardToday(\'' + escapeJsAttr(c.id) + '\')" class="swipe-dismiss-btn">' +
-              getIconSvg('eyeOff', 16) +
-              '<span>今日は提案しない</span>' +
-            '</button>' +
+        '<button type="button" class="action-card generate-more-card' + (isGen ? ' is-loading' : '') + '" onclick="generateMoreDeckCards()"' + (isGen ? ' disabled' : '') + '>' +
+          '<div class="card-icon-badge">' + genIcon + '</div>' +
+          '<div class="card-body">' +
+            '<div class="card-row1"><span class="card-title">' + genTitle + '</span>' + genRight + '</div>' +
           '</div>' +
-          '<div class="' + cls + '" role="button" tabindex="0">' +
-            '<div class="card-icon-badge">' + getIconSvg(c.icon || 'compass', 18) + '</div>' +
-            '<div class="card-body">' +
-              '<div class="card-row1"><span class="card-title">' + escapeHtml(c.title) + '</span>' + rightHtml + '</div>' +
-              '<div class="card-row2">' + escapeHtml(c.sub || '') + '</div>' +
-            '</div>' +
-          '</div>' +
-        '</div>'
+        '</button>'
       );
-    });
-  }
+      return;
+    }
+    var cls = c.isTriage ? 'action-card triage' : 'action-card';
+    var rightHtml = c.isTriage
+      ? '<span class="card-right triage-badge">' + escapeHtml(c.rightLabel || '引き算') + ' ' + getIconSvg('chevron', 14) + '</span>'
+      : '<span class="card-right">' +
+          (c.isSleepCard ? '' : '<button type="button" onclick="event.stopPropagation();openCardDurAdjust(\'' + escapeJsAttr(c.id) + '\')" style="background:rgba(139,92,246,0.12);border:none;border-radius:999px;color:inherit;font:inherit;font-weight:600;padding:6px 10px;margin:-4px 2px -4px 0;cursor:pointer;" title="開始前に所要時間を調整">' + formatCustomDurLabel(c.mins) + '</button> ') +
+          getIconSvg('chevron', 14) +
+        '</span>';
+    parts.push(
+      '<div class="swipe-wrap" data-card-id="' + escapeHtml(c.id) + '">' +
+        '<div class="swipe-behind">' +
+          '<button type="button" onclick="dismissCardToday(\'' + escapeJsAttr(c.id) + '\')" class="swipe-dismiss-btn">' +
+            getIconSvg('eyeOff', 16) +
+            '<span>今日は提案しない</span>' +
+          '</button>' +
+        '</div>' +
+        '<div class="' + cls + '" role="button" tabindex="0">' +
+          '<div class="card-icon-badge">' + getIconSvg(c.icon || 'compass', 18) + '</div>' +
+          '<div class="card-body">' +
+            '<div class="card-row1"><span class="card-title">' + escapeHtml(c.title) + '</span>' + rightHtml + '</div>' +
+            '<div class="card-row2">' + escapeHtml(c.sub || '') + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>'
+    );
+  });
   parts.push('</div>');
+
+  if (deckPageState.totalPages > 1) {
+    var dotsHtml = '';
+    for (var pi = 0; pi < deckPageState.totalPages; pi++) {
+      dotsHtml += '<button type="button" class="deck-page-dot' + (pi === deckPageState.page ? ' active' : '') + '" onclick="setDeckPage(' + pi + ')" aria-label="' + (pi + 1) + 'ページ目へ"></button>';
+    }
+    parts.push(
+      '<div class="deck-pager">' +
+        '<button type="button" class="deck-page-btn" onclick="stepDeckPage(-1)" aria-label="前の候補"' + (deckPageState.page <= 0 ? ' disabled' : '') + '>' + getIconSvg('chevronLeft', 15) + '</button>' +
+        '<div class="deck-page-center">' +
+          '<div class="deck-page-dots">' + dotsHtml + '</div>' +
+          '<span class="deck-page-label">' + (deckPageState.page + 1) + ' / ' + deckPageState.totalPages + '</span>' +
+        '</div>' +
+        '<button type="button" class="deck-page-btn" onclick="stepDeckPage(1)" aria-label="次の候補"' + (deckPageState.page >= deckPageState.totalPages - 1 ? ' disabled' : '') + '>' + getIconSvg('chevron', 15) + '</button>' +
+      '</div>'
+    );
+  }
 
   parts.push(
     '<div class="subtle-actions">' +
       '<button onclick="toggleCustomForm()" class="text-link primary-link">' + getIconSvg('plus', 13) + ' 自分で始める</button>' +
-      '<button onclick="rotateDeck()" class="text-link">' + getIconSvg('shuffle', 13) + ' 別の候補</button>' +
       '<button onclick="toggleLowMode()" class="text-link">' + getIconSvg('cloud', 13) + ' ' + (state.fastState.isLowMode ? '通常に戻す' : '少しだるい') + '</button>' +
     '</div>'
   );
@@ -348,45 +374,52 @@ function dismissBriefing() {
   }
 }
 
-function rotateDeck() {
-  if (state.isRefreshingDeck) return;
-  var completed = state.fastState.completedToday || {};
-  var dismissed = state.fastState.dismissedToday || {};
-  var activeTaskIds = getActiveTaskIdSet();
-  var rawCards = state.fastState.isLowMode ? (state.composedDeck.lowCards || []) : (state.composedDeck.cards || []);
-  var pool = rawCards.filter(function(c) {
-    return isDeckCardAvailable(c, completed, dismissed, activeTaskIds);
-  });
-  var nextOffset = state.deckOffset + 3;
-  if (nextOffset < pool.length) {
-    state.deckOffset = nextOffset;
-    state.openSwipeId = null;
-    renderHome();
-    return;
-  }
-  state.deckOffset = 0;
-  state.isRefreshingDeck = true;
+function setDeckPage(page) {
+  var totalPages = getDeckPaginationState().totalPages;
+  var nextPage = Math.max(0, Math.min(totalPages - 1, Number(page) || 0));
+  if (nextPage === state.deckPage) return;
+  state.deckPage = nextPage;
+  state.openSwipeId = null;
   renderHome();
-  var excludeIds = pool.map(function(c) { return c.id; });
-  runMutationApi('apiRefreshDeck', state.authKey, excludeIds)
+}
+
+function stepDeckPage(delta) {
+  setDeckPage((Number(state.deckPage) || 0) + (Number(delta) || 0));
+}
+
+function generateMoreDeckCards() {
+  if (state.isRefreshingDeck) return;
+  var isLow = Boolean(state.fastState.isLowMode);
+  var beforeCount = getAvailableDeckCards().length;
+  var rawCards = isLow ? (state.composedDeck.lowCards || []) : (state.composedDeck.cards || []);
+  var excludeIds = rawCards.map(function(c) { return c.id; });
+  state.isRefreshingDeck = true;
+  state.openSwipeId = null;
+  renderHome();
+  runMutationApi('apiRefreshDeck', state.authKey, excludeIds, { mode: 'append', isLowMode: isLow })
     .then(function(res) {
       state.isRefreshingDeck = false;
       if (res && res.authorized && !res._stale) {
-        state.fastState.aiDeck = res.aiDeck;
-        state.composedDeck = res.deck;
+        if (res.aiDeck) state.fastState.aiDeck = res.aiDeck;
+        if (res.deck) state.composedDeck = res.deck;
         saveLocalSnapshot();
+        var afterCount = getAvailableDeckCards().length;
+        if (afterCount <= beforeCount) {
+          showToast('これ以上新しい候補が見つかりませんでした');
+        }
       }
       renderHome();
     })
     .catch(function() {
       state.isRefreshingDeck = false;
-      showToast('候補の更新に失敗しました');
+      showToast('候補の生成に失敗しました');
       renderHome();
     });
 }
 
 function toggleLowMode() {
   state.openSwipeId = null;
+  state.deckPage = 0;
   state.fastState.isLowMode = !state.fastState.isLowMode;
   saveLocalSnapshot();
   renderHome();

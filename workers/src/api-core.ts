@@ -1020,12 +1020,15 @@ export async function apiRefreshDeck(
   env: Env,
   ctx: ExecutionContext,
   authKey: string,
-  excludeIds?: string[]
+  excludeIds?: string[],
+  options?: { mode?: 'replace' | 'append'; isLowMode?: boolean }
 ) {
   if (!verifyDashboardAccess(env, authKey)) {
     return unauthorizedPayload();
   }
 
+  const isAppend = Boolean(options && options.mode === 'append');
+  const isLowMode = Boolean(options && options.isLowMode);
   const now = new Date();
   const [fastState, memory, workBoundary, todayLogs] = await Promise.all([
     loadFastState(env, now),
@@ -1036,10 +1039,9 @@ export async function apiRefreshDeck(
 
   const lists = await buildListsSnapshot(env, memory, now);
 
-  const existingTitles =
-    fastState.aiDeck && Array.isArray(fastState.aiDeck.cards)
-      ? fastState.aiDeck.cards.map((c) => c.title)
-      : [];
+  const prevCards = (fastState.aiDeck && Array.isArray(fastState.aiDeck.cards)) ? fastState.aiDeck.cards : [];
+  const prevLowCards = (fastState.aiDeck && Array.isArray(fastState.aiDeck.lowCards)) ? fastState.aiDeck.lowCards : [];
+  const existingTitles = (isAppend && isLowMode ? prevLowCards : prevCards).map((c) => c.title);
   const excludes = (Array.isArray(excludeIds) ? excludeIds : []).concat(existingTitles);
 
   const freshDeck = await generateAiDeck(env, {
@@ -1057,31 +1059,58 @@ export async function apiRefreshDeck(
     useFlashModel: false
   });
 
-  const excludeSet: Record<string, boolean> = {};
-  (Array.isArray(excludeIds) ? excludeIds : []).forEach((id) => {
-    excludeSet[String(id)] = true;
-  });
+  if (isAppend) {
+    const appendUnique = <T extends { id?: string; title?: string }>(base: T[], additions: T[]): T[] => {
+      const seenId: Record<string, boolean> = {};
+      const seenTitle: Record<string, boolean> = {};
+      const out: T[] = [];
+      for (const c of base) {
+        if (!c || !c.id || seenId[c.id]) continue;
+        seenId[c.id] = true;
+        if (c.title) seenTitle[String(c.title).trim()] = true;
+        out.push(c);
+      }
+      for (const c of additions) {
+        if (!c || !c.id || seenId[c.id]) continue;
+        const t = c.title ? String(c.title).trim() : '';
+        if (t && seenTitle[t]) continue;
+        seenId[c.id] = true;
+        if (t) seenTitle[t] = true;
+        out.push(c);
+      }
+      return out;
+    };
 
-  const oldKept = ((fastState.aiDeck && fastState.aiDeck.cards) || []).filter(
-    (c) => c && !excludeSet[c.id]
-  );
-  const seen: Record<string, boolean> = {};
-  const mergedCards = [];
-  for (const c of freshDeck.cards.concat(oldKept)) {
-    if (c && c.id && !seen[c.id]) {
-      seen[c.id] = true;
-      mergedCards.push(c);
+    fastState.aiDeck = {
+      generatedAt: freshDeck.generatedAt,
+      cards: isLowMode ? prevCards : appendUnique(prevCards, freshDeck.cards || []),
+      lowCards: isLowMode ? appendUnique(prevLowCards, freshDeck.lowCards || []) : prevLowCards
+    };
+  } else {
+    const excludeSet: Record<string, boolean> = {};
+    (Array.isArray(excludeIds) ? excludeIds : []).forEach((id) => {
+      excludeSet[String(id)] = true;
+    });
+
+    const oldKept = prevCards.filter((c) => c && !excludeSet[c.id]);
+    const seen: Record<string, boolean> = {};
+    const mergedCards = [];
+    for (const c of freshDeck.cards.concat(oldKept)) {
+      if (c && c.id && !seen[c.id]) {
+        seen[c.id] = true;
+        mergedCards.push(c);
+      }
     }
-  }
 
-  fastState.aiDeck = {
-    generatedAt: freshDeck.generatedAt,
-    cards: mergedCards,
-    lowCards:
-      freshDeck.lowCards && freshDeck.lowCards.length > 0
-        ? freshDeck.lowCards
-        : (fastState.aiDeck && fastState.aiDeck.lowCards) || []
-  };
+    fastState.aiDeck = {
+      generatedAt: freshDeck.generatedAt,
+      cards: mergedCards,
+      lowCards:
+        freshDeck.lowCards && freshDeck.lowCards.length > 0
+          ? freshDeck.lowCards
+          : prevLowCards
+    };
+  }
 
   await saveFastState(env, fastState);
   ctx.waitUntil(mirrorToSheets(env, [{ type: 'sync_snapshot' }]));
